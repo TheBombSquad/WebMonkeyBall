@@ -230,6 +230,11 @@ function hasBallDropStarted(game: any): boolean {
   return introTimerFrames <= dropFrames;
 }
 
+function hasPlayerControlStarted(game: any): boolean {
+  const introTimerFrames = Number.isFinite(game?.introTimerFrames) ? game.introTimerFrames : 0;
+  return introTimerFrames <= 0;
+}
+
 function cloneVec3(source: Vec3): Vec3 {
   return {
     x: Number.isFinite(source?.x) ? source.x : 0,
@@ -862,9 +867,11 @@ function applyChainNodeCollision(
   node.pos.x = phys.pos.x;
   node.pos.y = phys.pos.y;
   node.pos.z = phys.pos.z;
-  node.prevPos.x = phys.prevPos.x;
-  node.prevPos.y = phys.prevPos.y;
-  node.prevPos.z = phys.prevPos.z;
+  // Convert resolved collision velocity back into Verlet state so friction
+  // and restitution from collideBallWithStage are preserved for chain nodes.
+  node.prevPos.x = phys.pos.x - phys.vel.x;
+  node.prevPos.y = phys.pos.y - phys.vel.y;
+  node.prevPos.z = phys.pos.z - phys.vel.z;
   node.animGroupId = phys.animGroupId ?? 0;
 }
 
@@ -1485,6 +1492,7 @@ function simulateChainedTogether(
   if (!isChainedTogetherMode(game) || !game.stage || !game.stageRuntime) {
     return;
   }
+  const allowBallInfluence = hasPlayerControlStarted(game);
   syncChainTopology(game, state, players);
   const teleportByPlayer = buildTeleportTransformByPlayer(wormholeTeleports);
   applyFollowerTeleportToLinks(state.links, teleportByPlayer);
@@ -1691,9 +1699,36 @@ function simulateChainedTogether(
       if (!playerA || !playerB) {
         continue;
       }
-      if (CHAIN_LEASH_CORRECTION > 0) {
+      if (allowBallInfluence && CHAIN_LEASH_CORRECTION > 0) {
         applyChainLeashCorrection(playerA.ball, playerB.ball, chainLinkLength);
       }
+    }
+
+    for (const link of state.links) {
+      const playerA = playerMap.get(link.playerAId);
+      const playerB = playerMap.get(link.playerBId);
+      if (!playerA || !playerB) {
+        continue;
+      }
+      const portalConstraint = portalConstraintByLink.get(link) ?? null;
+      const reverseEndpoints = (substep & 1) === 1;
+      if (!allowBallInfluence) {
+        anchorLinkEndpoints(
+          link,
+          playerA,
+          playerB,
+          segmentRestLen,
+          CHAIN_ENDPOINT_SNAP,
+          false,
+          reverseEndpoints,
+          portalConstraint,
+          link.portalFollowerId,
+        );
+      }
+    }
+
+    if (!allowBallInfluence) {
+      continue;
     }
 
     const pendingBallTransfers = new Map<number, ChainBallTransferState>();
@@ -2130,7 +2165,9 @@ function buildChainHooks(): ModHooks {
       if (hasBallDropStarted(game)) {
         syncChainTopology(game, state, sortedPlayers);
         simulateChainedTogether(game, state, sortedPlayers, teleportEvents);
-        processPostChainBallWormholes(game, state, sortedPlayers);
+        if (hasPlayerControlStarted(game)) {
+          processPostChainBallWormholes(game, state, sortedPlayers);
+        }
       } else {
         state.links = [];
         state.topologyKey = '';
