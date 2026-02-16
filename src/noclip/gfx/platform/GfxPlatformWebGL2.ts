@@ -2318,11 +2318,22 @@ class GfxImplP_GL implements GfxSwapChain, GfxDevice {
             const gl = this.gl;
             const prog = program.gl_program!;
             const deviceProgram = program.descriptor;
-            const samplers = findall(deviceProgram.preprocessedVert, /^uniform .*sampler\S+ (\w+);\s* \/\/ BINDING=(\d+)$/gm);
-            for (let i = 0; i < samplers.length; i++) {
-                const [m, name, location] = samplers[i];
+            const samplerPattern = /^uniform .*sampler\S+ (\w+);\s* \/\/ BINDING=(\d+)$/gm;
+            const samplerBindings = new Map<string, number>();
+            const collectSamplers = (shaderSource: string): void => {
+                const samplers = findall(shaderSource, samplerPattern);
+                for (let i = 0; i < samplers.length; i++) {
+                    const [, name, location] = samplers[i];
+                    samplerBindings.set(name, parseInt(location));
+                }
+            };
+            collectSamplers(deviceProgram.preprocessedVert);
+            collectSamplers(deviceProgram.preprocessedFrag);
+
+            for (const [name, location] of samplerBindings.entries()) {
                 const samplerUniformLocation = gl.getUniformLocation(prog, name);
-                gl.uniform1i(samplerUniformLocation, parseInt(location));
+                if (samplerUniformLocation !== null)
+                    gl.uniform1i(samplerUniformLocation, location);
             }
 
             program.compileState = GfxProgramCompileStateP_GL.ReadyToUse;

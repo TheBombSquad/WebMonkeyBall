@@ -545,28 +545,31 @@ in vec4 v_Color;
 
 out vec4 o_Color;
 
-float IndMask(float n, int mask) { return float(int(n) & mask); }
-
 vec2 Project(vec4 clipPos) {
     vec2 uv = clipPos.xy / clipPos.w;
     return uv * 0.5 + vec2(0.5);
 }
 
-void main() {
-    vec2 mirrorUV = clamp(Project(v_MirrorClip), 0.0, 1.0);
-    vec2 distortUV = clamp(Project(v_DistortClip), 0.0, 1.0);
+float EfbCopyIntensity(vec3 rgb) {
+    // GX IA8 EFB copies use BT.601-style luma in a limited range.
+    return clamp(16.0 + (219.0 * dot(rgb, vec3(0.299, 0.587, 0.114))), 0.0, 255.0);
+}
 
-    vec3 indCoord = 255.0 * texture(u_DistortTexture, distortUV).abg;
-    indCoord = vec3(
-        IndMask(indCoord.x, 0xF8),
-        IndMask(indCoord.y, 0xF8),
-        IndMask(indCoord.z, 0xF8)
-    );
+void main() {
+    vec2 mirrorUV = Project(v_MirrorClip);
+    vec2 distortUV = Project(v_DistortClip);
+    // SMB1's wavy-mirror distort texcoord matrix applies a horizontal flip.
+    distortUV.x = 1.0 - distortUV.x;
+
+    vec4 distort = texture(u_DistortTexture, distortUV);
+    float indI = EfbCopyIntensity(distort.rgb);
+    vec3 indCoord = vec3(255.0 * distort.a, indI, indI);
     indCoord += vec3(-128.0);
+    vec2 mirrorTexSize = vec2(textureSize(u_MirrorTexture, 0));
     vec2 indOffset = vec2(
         dot(u_IndTexMtx0.xyz, indCoord),
         dot(u_IndTexMtx1.xyz, indCoord)
-    ) * (1.0 / 256.0);
+    ) / mirrorTexSize;
 
     mirrorUV = clamp(mirrorUV + indOffset, 0.0, 1.0);
     vec4 tex = texture(u_MirrorTexture, mirrorUV);
@@ -986,7 +989,7 @@ export class World {
         })
     );
     private mirrorDistortMegaState = makeMegaState(
-        setAttachmentStateSimple({ depthWrite: true, cullMode: GfxCullMode.None }, {
+        setAttachmentStateSimple({ depthWrite: true, cullMode: GfxCullMode.Back }, {
             blendMode: GfxBlendMode.Add,
             blendSrcFactor: GfxBlendFactor.One,
             blendDstFactor: GfxBlendFactor.Zero,
