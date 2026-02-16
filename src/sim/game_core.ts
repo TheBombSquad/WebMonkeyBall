@@ -23,6 +23,7 @@ import { GameplayCamera } from '../camera.js';
 import { dequantizeStick, quantizeInput, quantizeStick, type QuantizedInput, type QuantizedStick } from '../determinism.js';
 import { createReplayData, type ReplayData } from '../replay.js';
 import { RollbackSession } from '../rollback.js';
+import { spawnBonusShotStar } from '../effects.js';
 import {
   checkBallEnteredGoal,
   createBallState,
@@ -100,6 +101,7 @@ const COUNTDOWN_START_FRAMES = 10 * 60;
 const DEFAULT_LIVES = 3;
 const SPEED_MPH_SCALE = 134.21985;
 const SPEED_BAR_MAX_MPH = 70;
+const BONUS_SHOTTAIL_RENDER_SCALE = 52.68;
 const fallOutStack = new MatrixStack();
 const fallOutLocal = { x: 0, y: 0, z: 0 };
 
@@ -2529,7 +2531,7 @@ export class GameCore {
           id: effect.id,
           pos,
           prevPos: { x: effect.prevPos.x, y: effect.prevPos.y, z: effect.prevPos.z },
-          scale: effect.scale * 0.6,
+          scale: effect.kind === 'bonusshot' ? effect.scale * 0.45 : effect.scale * 0.6,
           alpha: effect.alpha,
           lifeRatio: effect.life / Math.max(1, effect.life + effect.age),
           colorR: effect.colorR,
@@ -2552,6 +2554,44 @@ export class GameCore {
           colorR: effect.colorR,
           colorG: effect.colorG,
           colorB: effect.colorB,
+        };
+      } else if (effect.kind === 'bonusshot') {
+        const rotX = lerpS16(effect.prevRotX, effect.rotX, alpha);
+        const rotY = lerpS16(effect.prevRotY, effect.rotY, alpha);
+        const rotZ = lerpS16(effect.prevRotZ, effect.rotZ, alpha);
+        this.renderEffects[outIdx++] = {
+          kind: 'star',
+          id: effect.id,
+          pos,
+          rotX,
+          rotY,
+          rotZ,
+          scale: 1,
+          alpha: effect.alpha,
+          colorR: effect.colorR,
+          colorG: effect.colorG,
+          colorB: effect.colorB,
+          ignoreStageTilt: true,
+          modelVariant: 'bonusshot',
+        };
+      } else if (effect.kind === 'bonusshot_tail') {
+        const rotX = lerpS16(effect.prevRotX, effect.rotX, alpha);
+        const rotY = lerpS16(effect.prevRotY, effect.rotY, alpha);
+        const rotZ = lerpS16(effect.prevRotZ, effect.rotZ, alpha);
+        this.renderEffects[outIdx++] = {
+          kind: 'star',
+          id: effect.id,
+          pos,
+          rotX,
+          rotY,
+          rotZ,
+          scale: effect.scale * effect.alpha * BONUS_SHOTTAIL_RENDER_SCALE,
+          alpha: 1,
+          colorR: effect.colorR,
+          colorG: effect.colorG,
+          colorB: effect.colorB,
+          ignoreStageTilt: true,
+          modelVariant: 'bonusshot_tail',
         };
       } else if (effect.kind === 'coliflash') {
         this.renderEffects[outIdx++] = {
@@ -3377,6 +3417,7 @@ export class GameCore {
       return false;
     }
     const animGroups = this.stageRuntime.animGroups;
+    const spawnBonusShotStars = this.isBonusStageActive() && !this.suppressVisualEffects;
     const physBall = this.tmpPhysBall;
     let collectedAny = false;
     for (const banana of this.stageRuntime.bananas) {
@@ -3439,6 +3480,9 @@ export class GameCore {
         this.score += bananaPointValueForType(banana.type);
         if (!this.suppressAudioEffects) {
           void this.audio?.playBananaCollect(isBananaBunch(banana.type));
+        }
+        if (spawnBonusShotStars) {
+          spawnBonusShotStar(this.stageRuntime.effects, player.camera, this.stageRuntime.visualRng);
         }
         collectedAny = true;
         break;

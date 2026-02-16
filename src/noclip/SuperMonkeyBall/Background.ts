@@ -2,7 +2,7 @@ import { RenderContext } from "./Render.js";
 import { BgObjectInst } from "./BgObject.js";
 import { ModelInst, RenderParams, RenderSort } from "./Model.js";
 import { mat4, vec3 } from "gl-matrix";
-import { Vec3Zero } from "../MathHelpers.js";
+import { Vec3Zero, transformVec3Mat4w1 } from "../MathHelpers.js";
 import { getMat4RotY, S16_TO_RADIANS } from "./Utils.js";
 import { Lighting } from "./Lighting.js";
 import { BgNightModelID, BgStormModelID } from "./ModelInfo.js";
@@ -22,6 +22,17 @@ export interface BackgroundConstructor {
 
 const scratchMat4a = mat4.create();
 const scratchRenderParams = new RenderParams();
+const scratchBonusMat4a = mat4.create();
+const scratchBonusVec3a = vec3.create();
+const scratchBonusVec3b = vec3.create();
+const BONUS_MAX_STARPOINTS = 64;
+const BONUS_MAIN_OBJECT = "BNS_MAIN";
+const BONUS_STARPOINT_PREFIX = "STARPOINT";
+const BONUS_STARLIGHT_PREFIX = "STARLIGHT_";
+const BONUS_STAR_MIN_Z = -30.0;
+const BONUS_STAR_PROJ_OFFSET = 26.0;
+const BONUS_STAR_PULSE_SCALE = 0.75;
+const BONUS_STAR_PHASE_STEP = (2 * Math.PI) / 180;
 
 export class BgDummy implements Background {
     private bgObjects: BgObjectInst[] = [];
@@ -511,20 +522,109 @@ export class BgStorm implements Background {
 
 export class BgBonus implements Background {
     private bgObjects: BgObjectInst[] = [];
+    private mainObject: BgObjectInst | null = null;
+    private starlightModel: ModelInst | null = null;
+    private starpoints: {
+        pos: vec3;
+        phase: number;
+        phaseSpeed: number;
+        red: number;
+        green: number;
+        blue: number;
+    }[] = [];
 
     constructor(state: WorldState, bgObjects: BgObjectInst[]) {
         this.bgObjects = bgObjects;
+        this.mainObject = bgObjects.find((bgObject) => bgObject.bgObjectData.modelName === BONUS_MAIN_OBJECT)
+            ?? bgObjects[0]
+            ?? null;
+
+        const bgModelNames = state.modelCache.getModelNames(GmaSrc.Bg);
+        const starlightName = bgModelNames.find((name) => name.startsWith(BONUS_STARLIGHT_PREFIX));
+        if (starlightName) {
+            this.starlightModel = state.modelCache.getModel(starlightName, GmaSrc.Bg);
+        }
+        const starpointNames = bgModelNames
+            .filter((name) => name.startsWith(BONUS_STARPOINT_PREFIX))
+            .slice(0, BONUS_MAX_STARPOINTS);
+        for (const name of starpointNames) {
+            const model = state.modelCache.getModel(name, GmaSrc.Bg);
+            if (!model) {
+                continue;
+            }
+            this.starpoints.push({
+                pos: vec3.clone(model.modelData.boundSphereCenter),
+                phase: Math.random() * Math.PI * 2,
+                phaseSpeed: (1.0 + Math.random() * 0.5) * BONUS_STAR_PHASE_STEP,
+                red: 1,
+                green: 1,
+                blue: 1,
+            });
+        }
     }
 
     public update(state: WorldState): void {
         for (let i = 0; i < this.bgObjects.length; i++) {
             this.bgObjects[i].update(state);
         }
+
+        const deltaFrames = Math.max(0, state.time.getDeltaTimeFrames());
+        for (const star of this.starpoints) {
+            star.phase += star.phaseSpeed * deltaFrames;
+            const intensity = (Math.sin(star.phase) + 1) * 0.25 + 0.5;
+            star.red = Math.min(1, intensity * 1.1);
+            star.green = Math.min(1, intensity * 1.05);
+            star.blue = intensity;
+        }
     }
 
     public prepareToRender(state: WorldState, ctx: RenderContext): void {
         for (let i = 0; i < this.bgObjects.length; i++) {
             this.bgObjects[i].prepareToRender(state, ctx);
+        }
+
+        if (!this.mainObject || !this.starlightModel || this.starpoints.length === 0) {
+            return;
+        }
+
+        const worldFromMain = scratchBonusMat4a;
+        this.mainObject.copyWorldFromModel(worldFromMain);
+
+        const rp = scratchRenderParams;
+        for (const star of this.starpoints) {
+            const worldPos = scratchBonusVec3a;
+            transformVec3Mat4w1(worldPos, worldFromMain, star.pos);
+            const viewPos = scratchBonusVec3b;
+            transformVec3Mat4w1(viewPos, ctx.viewerInput.camera.viewMatrix, worldPos);
+            if (viewPos[2] >= BONUS_STAR_MIN_Z) {
+                continue;
+            }
+            const f3 = (BONUS_STAR_PROJ_OFFSET + viewPos[2]) / viewPos[2];
+            if (!(f3 > 0)) {
+                continue;
+            }
+            const pulse = (star.red + star.green + star.blue) * BONUS_STAR_PULSE_SCALE;
+            const drawScale = pulse * f3;
+            if (!(drawScale > 0)) {
+                continue;
+            }
+
+            const drawX = viewPos[0] * f3;
+            const drawY = viewPos[1] * f3;
+            const drawZ = viewPos[2] * f3;
+
+            rp.reset();
+            rp.alpha = 1;
+            rp.sort = RenderSort.Translucent;
+            rp.colorMul.r = star.red;
+            rp.colorMul.g = star.green;
+            rp.colorMul.b = star.blue;
+            rp.colorMul.a = 1;
+            rp.lighting = state.lighting;
+            rp.megaStateFlags = { depthWrite: false };
+            mat4.fromTranslation(rp.viewFromModel, [drawX, drawY, drawZ]);
+            mat4.scale(rp.viewFromModel, rp.viewFromModel, [drawScale, drawScale, drawScale]);
+            this.starlightModel.prepareToRender(ctx, rp);
         }
     }
 }

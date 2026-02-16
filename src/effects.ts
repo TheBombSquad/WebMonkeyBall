@@ -1,5 +1,5 @@
 import { raycastStageDown } from './collision.js';
-import { atan2S16, sqrt, sumSq2, toS16, vecDot } from './math.js';
+import { MatrixStack, atan2S16, sqrt, sumSq2, toS16, vecDot } from './math.js';
 import type { Vec3 } from './shared/types.js';
 
 const SPARK_GRAVITY_SCALE = 0.008;
@@ -27,11 +27,36 @@ const LEVITATE_OFFSET_RADIUS = 0.7;
 const LEVITATE_DRIFT = 0.0012;
 const LEVITATE_DAMP = 0.98;
 const STAR_SCALE_TARGET = 0.015;
+const BONUS_SHOTSTAR_DEPTH_BASE = 120;
+const BONUS_SHOTSTAR_DEPTH_RANGE = 225;
+const BONUS_SHOTSTAR_FOV_TAN = Math.tan(Math.PI / 6);
+const BONUS_SHOTSTAR_X_SCALE = 8.0 / 3.0;
+const BONUS_SHOTSTAR_Y_SCALE = 1.1;
+const BONUS_SHOTSTAR_VEL_SCALE = 1.0 / 300.0;
+const BONUS_SHOTSTAR_LIFE_SCALE = 60;
+const BONUS_SHOTSTAR_FADE_FRAMES = 15;
+const BONUS_SHOTSTAR_GRAVITY = 0.016;
+const BONUS_SHOTSTAR_SCALE_MIN = 0.3;
+const BONUS_SHOTSTAR_SCALE_MAX = 0.9;
+const BONUS_SHOTSTAR_SCALE_MUL = 0.8;
+const BONUS_SHOTTAIL_DAMP = 0.99;
+const BONUS_SHOTTAIL_FADE_FRAMES = 15;
+const BONUS_SHOTTAIL_LIFE_SCALE = 60;
+
+const bonusShotStack = new MatrixStack();
+const bonusShotLocalPos = { x: 0, y: 0, z: 0 };
+const bonusShotWorldPos = { x: 0, y: 0, z: 0 };
 
 const randFloat = (rng) => rng.nextFloat();
 const randS16 = (rng) => rng.nextS16();
 
-export type BallEffectKind = 'coli' | 'colistar' | 'coliflash' | 'levitate';
+export type BallEffectKind =
+  | 'coli'
+  | 'colistar'
+  | 'coliflash'
+  | 'levitate'
+  | 'bonusshot'
+  | 'bonusshot_tail';
 
 export type BallEffect = {
   id: number;
@@ -305,6 +330,49 @@ export function updateBallEffects(effects: BallEffect[], gravity: Vec3, stageRun
       updateEffectGlow(effect, stageRuntime, STAR_GROUND_CHECK, 0.0625);
       continue;
     }
+    if (effect.kind === 'bonusshot') {
+      effect.vel.y -= BONUS_SHOTSTAR_GRAVITY;
+      effect.pos.x += effect.vel.x;
+      effect.pos.y += effect.vel.y;
+      effect.pos.z += effect.vel.z;
+      effect.rotZ = toS16(effect.rotZ + 0x400);
+      if (effect.alpha > 0.5 && (effect.life & 1) === 0) {
+        const tail = createEffect(
+          'bonusshot_tail',
+          effect.pos,
+          {
+            x: effect.vel.x * 0.25 + (randFloat(rng) - 0.5) * 2.0,
+            y: effect.vel.y * 0.25 + (randFloat(rng) - 0.5) * 2.0,
+            z: effect.vel.z * 0.25 + (randFloat(rng) - 0.5) * 2.0,
+          },
+          Math.trunc((randFloat(rng) * 0.25 + 0.5) * BONUS_SHOTTAIL_LIFE_SCALE),
+        );
+        tail.scale = effect.alpha * (randFloat(rng) * 0.25 + 0.25);
+        tail.scaleTarget = tail.scale;
+        tail.alpha = 1;
+        effects.push(tail);
+      }
+      if (effect.life < BONUS_SHOTSTAR_FADE_FRAMES) {
+        effect.alpha = Math.max(0, effect.life / BONUS_SHOTSTAR_FADE_FRAMES);
+      } else {
+        effect.alpha = 1;
+      }
+      continue;
+    }
+    if (effect.kind === 'bonusshot_tail') {
+      effect.vel.x *= BONUS_SHOTTAIL_DAMP;
+      effect.vel.y *= BONUS_SHOTTAIL_DAMP;
+      effect.vel.z *= BONUS_SHOTTAIL_DAMP;
+      effect.pos.x += effect.vel.x;
+      effect.pos.y += effect.vel.y;
+      effect.pos.z += effect.vel.z;
+      if (effect.life < BONUS_SHOTTAIL_FADE_FRAMES) {
+        effect.alpha = Math.max(0, effect.life / BONUS_SHOTTAIL_FADE_FRAMES);
+      } else {
+        effect.alpha = 1;
+      }
+      continue;
+    }
 
     const gravityScale = effect.kind === 'colistar' ? STAR_GRAVITY_SCALE : SPARK_GRAVITY_SCALE;
     const damp = effect.kind === 'colistar' ? STAR_DAMP : SPARK_DAMP;
@@ -525,4 +593,54 @@ export function spawnPostGoalSparkle(effects: BallEffect[], ball: any, rng: any)
   sparkle.rotY = randS16(rng);
   sparkle.rotZ = randS16(rng);
   effects.push(sparkle);
+}
+
+export function spawnBonusShotStar(effects: BallEffect[], camera: any, rng: any): void {
+  if (!camera?.eye) {
+    return;
+  }
+
+  const eye = camera.eye;
+  const rotX = Number.isFinite(camera?.rotX) ? camera.rotX : 0;
+  const rotY = Number.isFinite(camera?.rotY) ? camera.rotY : 0;
+  const rotZ = Number.isFinite(camera?.rotZ) ? camera.rotZ : 0;
+  const fovTan = Number.isFinite(camera?.fovTan) ? camera.fovTan : BONUS_SHOTSTAR_FOV_TAN;
+  const localZ = -(BONUS_SHOTSTAR_DEPTH_BASE + randFloat(rng) * BONUS_SHOTSTAR_DEPTH_RANGE);
+  const localX = localZ * -BONUS_SHOTSTAR_X_SCALE * fovTan * (randFloat(rng) - 0.5);
+  const localY = localZ * -BONUS_SHOTSTAR_Y_SCALE * fovTan;
+  bonusShotLocalPos.x = localX;
+  bonusShotLocalPos.y = localY;
+  bonusShotLocalPos.z = localZ;
+  bonusShotStack.fromTranslate(eye);
+  bonusShotStack.rotateY(rotY);
+  bonusShotStack.rotateX(rotX);
+  bonusShotStack.rotateZ(rotZ);
+  bonusShotStack.tfPoint(bonusShotLocalPos, bonusShotWorldPos);
+
+  const speedScale = -localZ * BONUS_SHOTSTAR_VEL_SCALE;
+  const localVelX = (1.0 + randFloat(rng)) * speedScale;
+  const localVelY = (-3.0 - randFloat(rng)) * speedScale;
+  const localVelZ = (1.0 + randFloat(rng)) * speedScale;
+
+  const star = createEffect(
+    'bonusshot',
+    bonusShotWorldPos,
+    { x: localVelX, y: localVelY, z: localVelZ },
+    Math.trunc((randFloat(rng) * 0.5 + 0.75) * BONUS_SHOTSTAR_LIFE_SCALE),
+  );
+  star.scale = Math.max(
+    BONUS_SHOTSTAR_SCALE_MIN,
+    Math.min(BONUS_SHOTSTAR_SCALE_MAX, speedScale * BONUS_SHOTSTAR_SCALE_MUL),
+  );
+  star.scaleTarget = star.scale;
+  star.rotX = atan2S16(star.pos.y - eye.y, sqrt(sumSq2(star.pos.x - eye.x, star.pos.z - eye.z)));
+  star.rotY = toS16(atan2S16(star.pos.x - eye.x, star.pos.z - eye.z) - 0x8000);
+  star.rotZ = randS16(rng) & 0x7fff;
+  star.rotVelX = 0;
+  star.rotVelY = 0;
+  star.rotVelZ = 0;
+  star.colorR = 1;
+  star.colorG = 1;
+  star.colorB = 1;
+  effects.push(star);
 }

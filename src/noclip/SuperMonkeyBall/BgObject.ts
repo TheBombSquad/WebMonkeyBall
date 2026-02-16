@@ -97,6 +97,10 @@ export class BgObjectInst {
         this.buildWorldFromModelMtx(pos, rotRadians, scale);
     }
 
+    public copyWorldFromModel(out: mat4): void {
+        mat4.copy(out, this.worldFromModel);
+    }
+
     public prepareToRender(state: WorldState, ctx: RenderContext, texMtx?: mat4) {
         this.prepareToRenderWithViewMatrix(state, ctx, ctx.viewerInput.camera.viewMatrix, texMtx);
     }

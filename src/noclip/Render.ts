@@ -135,6 +135,8 @@ export type EffectRenderState = {
   colorG?: number;
   colorB?: number;
   textureName?: string;
+  ignoreStageTilt?: boolean;
+  modelVariant?: 'bonusshot' | 'bonusshot_tail';
 };
 
 export type ModRenderPrimitiveState = ModRenderPrimitive;

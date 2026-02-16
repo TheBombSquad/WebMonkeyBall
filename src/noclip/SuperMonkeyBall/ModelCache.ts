@@ -168,6 +168,36 @@ export class ModelCache {
         }
     }
 
+    private getEntriesForSrc(src: GmaSrc): CacheEntry[] {
+        switch (src) {
+            case GmaSrc.Stage:
+                return [this.stageEntry];
+            case GmaSrc.Bg:
+                return [this.bgEntry];
+            case GmaSrc.Common:
+                return [this.commonEntry];
+            case GmaSrc.StageAndBg:
+                return [this.stageEntry, this.bgEntry];
+            default:
+                return [];
+        }
+    }
+
+    public getModelNames(src: GmaSrc): string[] {
+        const names: string[] = [];
+        const seen = new Set<string>();
+        for (const entry of this.getEntriesForSrc(src)) {
+            for (const name of entry.gma.nameMap.keys()) {
+                if (seen.has(name)) {
+                    continue;
+                }
+                seen.add(name);
+                names.push(name);
+            }
+        }
+        return names;
+    }
+
     // Screw it, don't make fancy generic prefix whatever lookup just for goals, just do it here
 
     public getBlueGoalModel(): ModelInst | null {

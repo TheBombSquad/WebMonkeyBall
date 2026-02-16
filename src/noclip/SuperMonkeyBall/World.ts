@@ -882,6 +882,10 @@ export class World {
     private flashModel: ModelInst | null = null;
     private streakModel: ModelInst | null = null;
     private glowModel: ModelInst | null = null;
+    private bonusShotModel: ModelInst | null = null;
+    private bonusShotGlowModel: ModelInst | null = null;
+    private bonusShotTailModel: ModelInst | null = null;
+    private bonusShotTailNlModel: Nl.ModelInst | null = null;
     private sparkleTextureMapping: GXTextureMapping | null = null;
     private sparkleTextureReady = false;
     private goalTapeModel: Nl.DynamicModelInst | null = null;
@@ -1215,6 +1219,34 @@ export class World {
             this.glowModel = usesSmb2Models
                 ? this.worldState.modelCache.getModel("circle_white", GmaSrc.Common)
                 : this.worldState.modelCache.getModel(CommonModelID.circle_white, GmaSrc.Common);
+        }
+        this.bonusShotModel = this.worldState.modelCache.getModel("BNS_SHOTSTAR", GmaSrc.Bg);
+        const bonusStarlightName = this.worldState.modelCache
+            .getModelNames(GmaSrc.Bg)
+            .find((name) => name.startsWith("STARLIGHT_"));
+        if (bonusStarlightName) {
+            this.bonusShotGlowModel = this.worldState.modelCache.getModel(bonusStarlightName, GmaSrc.Bg);
+        }
+        // SMB1 uses the common NL model CROSS_LIGHT for the shooting-star tail.
+        // SMB2/MB2WS uses common.gma model index 0x26.
+        if (usesSmb2Models) {
+            this.bonusShotTailModel =
+                this.worldState.modelCache.getModel(0x26, GmaSrc.Common) ??
+                this.worldState.modelCache.getModel("CROSS_LIGHT", GmaSrc.Common) ??
+                this.worldState.modelCache.getModel("CRASH_STAR", GmaSrc.Common);
+        } else if (this.nlTextureCache && stageData.nlObj.size > 0) {
+            this.bonusShotTailNlModel = getNlModelInst(
+                device,
+                renderCache,
+                stageData.nlObj,
+                this.nlTextureCache,
+                CommonNlModelID.CROSS_LIGHT,
+            );
+            this.bonusShotTailModel =
+                this.worldState.modelCache.getModel("CRASH_STAR", GmaSrc.Common);
+        } else {
+            this.bonusShotTailModel =
+                this.worldState.modelCache.getModel("CRASH_STAR", GmaSrc.Common);
         }
         this.initSparkleTexture(device);
 
@@ -1675,7 +1707,7 @@ export class World {
         this.drawConfetti(stageCtx, viewFromWorldTilted);
         this.drawModPrimitives(stageCtx, viewFromWorldTilted);
         if (!ctx.mirrorCapture && !ctx.wormholeCapture) {
-            this.drawEffects(stageCtx, viewFromWorldTilted, viewFromWorldPrev);
+            this.drawEffects(stageCtx, viewFromWorldTilted, viewFromWorldPrev, viewFromWorld);
         }
         for (let i = 0; i < this.fgObjects.length; i++) {
             this.fgObjects[i].prepareToRenderWithViewMatrix(this.worldState, stageCtx, viewFromWorldTilted);
@@ -2684,7 +2716,12 @@ export class World {
         }
     }
 
-    private drawEffects(ctx: RenderContext, viewFromWorld: mat4, viewFromWorldPrev: mat4): void {
+    private drawEffects(
+        ctx: RenderContext,
+        viewFromWorld: mat4,
+        viewFromWorldPrev: mat4,
+        viewFromWorldNoTilt: mat4,
+    ): void {
         if (!this.effects || this.effects.length === 0) {
             return;
         }
@@ -2739,6 +2776,7 @@ export class World {
             if (!glowModel || !effect.glowPos || effect.glowDist === undefined) {
                 return;
             }
+            const effectViewFromWorld = effect.ignoreStageTilt ? viewFromWorldNoTilt : viewFromWorld;
             const dist = effect.glowDist;
             if (dist <= 0 || dist >= 0.5) {
                 return;
@@ -2756,7 +2794,7 @@ export class World {
             rp.megaStateFlags = this.glowMegaState;
             const glowPos = scratchVec3h;
             applyEffectDepthBias(effect.glowPos, effect.normal, effect.scale, glowPos);
-            mat4.translate(rp.viewFromModel, viewFromWorld, glowPos);
+            mat4.translate(rp.viewFromModel, effectViewFromWorld, glowPos);
             if (effect.glowRotY !== undefined) {
                 mat4.rotateY(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * effect.glowRotY);
             }
@@ -2772,6 +2810,7 @@ export class World {
             rp.colorMul.a = 1;
         };
         const drawFlash = (effect: EffectRenderState): void => {
+            const effectViewFromWorld = effect.ignoreStageTilt ? viewFromWorldNoTilt : viewFromWorld;
             const flashPos = effect.glowPos ?? effect.pos;
             const flashRotX = effect.glowRotX ?? effect.rotX;
             const flashRotY = effect.glowRotY ?? effect.rotY;
@@ -2792,7 +2831,7 @@ export class World {
             rp.megaStateFlags = this.flashMegaState;
             const biasedFlashPos = scratchVec3h;
             applyEffectDepthBias(flashPos, effect.normal, effect.scale, biasedFlashPos);
-            mat4.translate(rp.viewFromModel, viewFromWorld, biasedFlashPos);
+            mat4.translate(rp.viewFromModel, effectViewFromWorld, biasedFlashPos);
             mat4.rotateY(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * flashRotY);
             mat4.rotateX(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * flashRotX);
             mat4.scale(rp.viewFromModel, rp.viewFromModel, [scale, scale, scale]);
@@ -2808,6 +2847,7 @@ export class World {
             if (!this.sparkleTextureReady || !this.sparkleTextureMapping) {
                 return;
             }
+            const effectViewFromWorld = effect.ignoreStageTilt ? viewFromWorldNoTilt : viewFromWorld;
             const mapping = this.sparkleTextureMapping;
             if (!mapping.gfxTexture || !mapping.gfxSampler) {
                 return;
@@ -2816,7 +2856,7 @@ export class World {
             scratchVec3d[0] = effect.pos.x;
             scratchVec3d[1] = effect.pos.y;
             scratchVec3d[2] = effect.pos.z;
-            transformVec3Mat4w1(posView, viewFromWorld, scratchVec3d);
+            transformVec3Mat4w1(posView, effectViewFromWorld, scratchVec3d);
             const size = effect.scale;
             if (!(size > 0)) {
                 return;
@@ -2887,13 +2927,14 @@ export class World {
         for (const effect of this.effects) {
             rp.alpha = effect.alpha;
             if (effect.kind === "streak") {
+                const effectViewFromWorld = effect.ignoreStageTilt ? viewFromWorldNoTilt : viewFromWorld;
                 streakSeen.add(effect.id);
                 const start = scratchVec3a;
                 const end = scratchVec3b;
                 scratchVec3d[0] = effect.pos.x;
                 scratchVec3d[1] = effect.pos.y;
                 scratchVec3d[2] = effect.pos.z;
-                transformVec3Mat4w1(end, viewFromWorld, scratchVec3d);
+                transformVec3Mat4w1(end, effectViewFromWorld, scratchVec3d);
                 const nowMs = ctx.viewerInput.time;
                 const persistenceMs = 33.4;
                 const history = this.streakHistory.get(effect.id);
@@ -3075,13 +3116,32 @@ export class World {
                 drawFlash(effect);
                 continue;
             }
-            const model = this.sparkModel;
+            let model: ModelInterface | null = this.sparkModel;
+            if (effect.modelVariant === "bonusshot") {
+                model = this.bonusShotModel ?? model;
+            } else if (effect.modelVariant === "bonusshot_tail") {
+                model = this.bonusShotTailNlModel ?? this.bonusShotTailModel ?? model;
+            }
             if (!model) {
                 continue;
             }
+            const effectViewFromWorld = effect.ignoreStageTilt ? viewFromWorldNoTilt : viewFromWorld;
             const starPos = scratchVec3h;
             applyEffectDepthBias(effect.pos, effect.normal, effect.scale, starPos);
-            mat4.translate(rp.viewFromModel, viewFromWorld, starPos);
+            if (effect.modelVariant === "bonusshot_tail") {
+                // Match SMB bonus tail display: camera-facing sprite with a view-space Z spin.
+                const viewPos = scratchVec3a;
+                transformVec3Mat4w1(viewPos, effectViewFromWorld, starPos);
+                mat4.fromTranslation(rp.viewFromModel, viewPos);
+                if (effect.scale !== 1) {
+                    mat4.scale(rp.viewFromModel, rp.viewFromModel, [effect.scale, effect.scale, effect.scale]);
+                }
+                const tailRotZ = (viewPos[0] * 325.0 + viewPos[1] * 655.0) | 0;
+                mat4.rotateZ(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * tailRotZ);
+                model.prepareToRender(ctx, rp);
+                continue;
+            }
+            mat4.translate(rp.viewFromModel, effectViewFromWorld, starPos);
             if (effect.rotY !== undefined) {
                 mat4.rotateY(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * effect.rotY);
             }
@@ -3091,11 +3151,44 @@ export class World {
             if (effect.rotZ !== undefined) {
                 mat4.rotateZ(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * effect.rotZ);
             }
-            if (effect.scale !== 1) {
+            if (effect.modelVariant !== "bonusshot" && effect.scale !== 1) {
                 mat4.scale(rp.viewFromModel, rp.viewFromModel, [effect.scale, effect.scale, effect.scale]);
             }
             model.prepareToRender(ctx, rp);
-            if (effect.kind === "star") {
+            if (effect.modelVariant === "bonusshot" && this.bonusShotGlowModel) {
+                const viewPos = scratchVec3a;
+                const worldPos = scratchVec3b;
+                worldPos[0] = effect.pos.x;
+                worldPos[1] = effect.pos.y;
+                worldPos[2] = effect.pos.z;
+                transformVec3Mat4w1(viewPos, effectViewFromWorld, worldPos);
+                if (viewPos[2] < -30.0) {
+                    const f3 = (viewPos[2] + 26.0) / viewPos[2];
+                    if (f3 > 0) {
+                        worldPos[0] = viewPos[0] * f3;
+                        worldPos[1] = viewPos[1] * f3;
+                        worldPos[2] = viewPos[2] * f3;
+                        const glowScale = effect.alpha * 0.5 + 0.5;
+                        const glowColor = effect.alpha * 0.75;
+                        rp.alpha = 1;
+                        rp.colorMul.r = glowColor;
+                        rp.colorMul.g = glowColor;
+                        rp.colorMul.b = glowColor;
+                        rp.colorMul.a = 1;
+                        rp.megaStateFlags = { depthWrite: false };
+                        mat4.fromTranslation(rp.viewFromModel, worldPos);
+                        mat4.scale(rp.viewFromModel, rp.viewFromModel, [glowScale, glowScale, glowScale]);
+                        this.bonusShotGlowModel.prepareToRender(ctx, rp);
+                        rp.megaStateFlags = undefined;
+                        rp.colorMul.r = 1;
+                        rp.colorMul.g = 1;
+                        rp.colorMul.b = 1;
+                        rp.colorMul.a = 1;
+                        rp.alpha = effect.alpha;
+                    }
+                }
+            }
+            if (effect.kind === "star" && effect.modelVariant !== "bonusshot") {
                 drawGlow(effect);
             }
         }
@@ -3117,6 +3210,7 @@ export class World {
             this.nlStageModelCache.clear();
         }
         this.goalTapeModel?.destroy(device);
+        this.bonusShotTailNlModel?.destroy(device);
         this.shadowTextureCache.destroy(device);
         this.nlTextureCache?.destroy(device);
         for (const [name, mapping] of this.streakTextureMappings.entries()) {
