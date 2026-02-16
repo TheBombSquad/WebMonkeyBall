@@ -68,13 +68,30 @@ const NL_TO_GX_COMPARE = [
 ];
 
 const NL_TO_GX_CULL_MODE = [GX.CullMode.ALL, GX.CullMode.NONE, GX.CullMode.BACK, GX.CullMode.FRONT];
+const NL_TO_GX_BLEND_FACTOR = [
+    GX.BlendFactor.ZERO,
+    GX.BlendFactor.ONE,
+    GX.BlendFactor.SRCCLR,
+    GX.BlendFactor.INVSRCCLR,
+    GX.BlendFactor.SRCALPHA,
+    GX.BlendFactor.INVSRCALPHA,
+    GX.BlendFactor.DSTALPHA,
+    GX.BlendFactor.INVDSTALPHA,
+];
+
+const NL_MESH_BLEND_MODE_SHIFT = 24;
+const NL_MESH_BLEND_MODE_MASK = 0x7;
+const NL_TEX_BLEND_SRC_SHIFT = 29;
+const NL_TEX_BLEND_DST_SHIFT = 26;
+const NL_TEX_BLEND_MASK = 0x7;
+const NL_Z_COMPARE_SHIFT = 29;
 
 // prettier-ignore
 const FLIP_T_TEX_MTX = mat4.fromValues(
     1, 0, 0, 0, 
     0, -1, 0, 0, 
     0, 0, 1, 0, 
-    0, 0, 0, 1
+    0, 1, 0, 1
 );
 
 enum TexFlags {
@@ -117,12 +134,13 @@ enum MeshType {
     UnlitVertMatColor = -3,
 }
 
-enum MeshFlags {
-    DisableDepthWrite = 1 << 24,
+enum MeshZFlags {
+    DisableDepthWrite = 1 << 26,
 }
 
 type Mesh<T> = {
     flags: number;
+    zFlags: number;
     texFlags: TexFlags;
     tex: TextureInputGX | null;
     meshType: MeshType;
@@ -142,9 +160,9 @@ type MeshWithType =
       };
 
 enum ModelFlags {
-    VtxTypeA, // All meshes in model have vertices of type A (type B if unset)
-    Translucent, // Model has at least 1 translucent mesh
-    Opaque, // Model has at least 1 opaque mesh
+    VtxTypeA = 1 << 1, // All meshes in model have vertices of type A (type B if unset)
+    Translucent = 1 << 8, // Model has at least 1 translucent mesh
+    Opaque = 1 << 9, // Model has at least 1 opaque mesh
 }
 
 type Model = {
@@ -241,6 +259,7 @@ function parseMeshList<T>(view: DataView, meshOffs: number, parseVtxFunc: ParseV
         const flags = readU32(view, meshOffs + 0x0);
         if (flags === 0) return meshes;
 
+        const zFlags = readU32(view, meshOffs + 0x4);
         const texFlags = readU32(view, meshOffs + 0x8) as TexFlags;
         const tplTexIdx = readS32(view, meshOffs + 0x20);
         const tex = tplTexIdx < 0 ? null : assertExists(tpl.get(tplTexIdx));
@@ -258,6 +277,7 @@ function parseMeshList<T>(view: DataView, meshOffs: number, parseVtxFunc: ParseV
 
         meshes.push({
             flags,
+            zFlags,
             texFlags,
             tex,
             meshType,
@@ -380,7 +400,8 @@ class MaterialInst {
             wrapT = GfxWrapMode.Repeat;
         }
 
-        const texFilter = (meshData.texFlags & 3) === 0 ? GfxTexFilterMode.Point : GfxTexFilterMode.Bilinear;
+        const texFilter =
+            (meshData.texFlags & TexFlags.ScaleFilterNear) !== 0 ? GfxTexFilterMode.Point : GfxTexFilterMode.Bilinear;
 
         this.gfxSampler = renderCache.createSampler({
             wrapS,
@@ -404,7 +425,19 @@ class MaterialInst {
         mb.setTevDirect(0);
         mb.setTexCoordGen(GX.TexCoordID.TEXCOORD0, GX.TexGenType.MTX2x4, GX.TexGenSrc.TEX0, GX.TexGenMatrix.TEXMTX0);
 
-        mb.setBlendMode(GX.BlendMode.NONE, GX.BlendFactor.ONE, GX.BlendFactor.ZERO, GX.LogicOp.CLEAR);
+        const blendMode = (meshData.flags >>> NL_MESH_BLEND_MODE_SHIFT) & NL_MESH_BLEND_MODE_MASK;
+        if (blendMode === 0) {
+            mb.setBlendMode(GX.BlendMode.NONE, GX.BlendFactor.ONE, GX.BlendFactor.ZERO, GX.LogicOp.CLEAR);
+        } else {
+            const srcBlend = (meshData.texFlags >>> NL_TEX_BLEND_SRC_SHIFT) & NL_TEX_BLEND_MASK;
+            const dstBlend = (meshData.texFlags >>> NL_TEX_BLEND_DST_SHIFT) & NL_TEX_BLEND_MASK;
+            mb.setBlendMode(
+                GX.BlendMode.BLEND,
+                NL_TO_GX_BLEND_FACTOR[srcBlend],
+                NL_TO_GX_BLEND_FACTOR[dstBlend],
+                GX.LogicOp.CLEAR
+            );
+        }
         mb.setFog(GX.FogType.NONE, false);
 
         if (this.loadedTex === null) {
@@ -488,8 +521,8 @@ class MaterialInst {
 
         mb.setAlphaCompare(GX.CompareType.GREATER, 0, GX.AlphaOp.AND, GX.CompareType.GREATER, 0);
 
-        const zCompare = NL_TO_GX_COMPARE[meshData.flags >> 29];
-        const depthWrite = !(meshData.flags & MeshFlags.DisableDepthWrite);
+        const zCompare = NL_TO_GX_COMPARE[(meshData.zFlags >>> NL_Z_COMPARE_SHIFT) & 0x7];
+        const depthWrite = !(meshData.zFlags & MeshZFlags.DisableDepthWrite);
         mb.setZMode(true, zCompare, depthWrite);
 
         this.materialHelper = new GXMaterialHelperGfx(mb.finish());
@@ -567,9 +600,11 @@ const scratchDrawParams = new DrawParams();
 class MeshInst {
     private ddraw: TSDraw;
     private material: MaterialInst;
+    private translucent: boolean;
 
     constructor(device: GfxDevice, renderCache: GfxRenderCache, meshData: MeshWithType, textureCache: TextureCache) {
         this.material = new MaterialInst(device, renderCache, meshData.mesh, textureCache);
+        this.translucent = ((meshData.mesh.flags >>> NL_MESH_BLEND_MODE_SHIFT) & NL_MESH_BLEND_MODE_MASK) !== 0;
         this.ddraw = new TSDraw();
 
         if (meshData.kind === "A") {
@@ -626,6 +661,9 @@ class MeshInst {
         const inst = ctx.renderInstManager.newRenderInst();
         this.material.setOnRenderInst(ctx.device, ctx.renderInstManager.gfxRenderCache, inst, drawParams, renderParams);
         this.ddraw.setOnRenderInst(inst);
+        if (renderParams.megaStateFlags) {
+            inst.setMegaStateFlags(renderParams.megaStateFlags);
+        }
         if (forceCullMode !== null) {
             inst.getMegaStateFlags().cullMode = forceCullMode;
         }
@@ -634,7 +672,14 @@ class MeshInst {
                 channelWriteMask: GfxChannelWriteMask.RGBA,
             });
         }
-        ctx.opaqueInstList.submitRenderInst(inst); // TODO(complexplane): Translucent depth sort stuff
+        if (this.translucent) {
+            inst.sortKey =
+                -(Math.hypot(renderParams.viewFromModel[12], renderParams.viewFromModel[13], renderParams.viewFromModel[14]) +
+                    renderParams.depthOffset);
+            ctx.translucentInstList.submitRenderInst(inst);
+        } else {
+            ctx.opaqueInstList.submitRenderInst(inst);
+        }
     }
 
     public prepareToRenderCustom(
@@ -646,6 +691,9 @@ class MeshInst {
         const inst = ctx.renderInstManager.newRenderInst();
         configureRenderInst(inst, renderParams);
         this.ddraw.setOnRenderInst(inst);
+        if (renderParams.megaStateFlags) {
+            inst.setMegaStateFlags(renderParams.megaStateFlags);
+        }
         if (forceCullMode !== null) {
             inst.getMegaStateFlags().cullMode = forceCullMode;
         }
@@ -654,7 +702,14 @@ class MeshInst {
                 channelWriteMask: GfxChannelWriteMask.RGBA,
             });
         }
-        ctx.opaqueInstList.submitRenderInst(inst);
+        if (this.translucent) {
+            inst.sortKey =
+                -(Math.hypot(renderParams.viewFromModel[12], renderParams.viewFromModel[13], renderParams.viewFromModel[14]) +
+                    renderParams.depthOffset);
+            ctx.translucentInstList.submitRenderInst(inst);
+        } else {
+            ctx.opaqueInstList.submitRenderInst(inst);
+        }
     }
 
     public destroy(device: GfxDevice): void {
@@ -763,6 +818,7 @@ type DynamicVertexKind = "A" | "B";
 export class DynamicModelInst {
     private ddraws: TDDraw[] = [];
     private material: MaterialInst;
+    private translucent = false;
     private kind: DynamicVertexKind;
     private baseName: string;
 
@@ -777,11 +833,13 @@ export class DynamicModelInst {
         if (modelData.meshList.meshes.length === 0) {
             throw new Error("DynamicModelInst requires at least one mesh");
         }
+        const firstMesh = modelData.meshList.meshes[0];
+        this.translucent = ((firstMesh.flags >>> NL_MESH_BLEND_MODE_SHIFT) & NL_MESH_BLEND_MODE_MASK) !== 0;
         if (modelData.meshList.kind === "A") {
-            this.material = new MaterialInst(device, renderCache, modelData.meshList.meshes[0], textureCache);
+            this.material = new MaterialInst(device, renderCache, firstMesh, textureCache);
             this.kind = "A";
         } else {
-            this.material = new MaterialInst(device, renderCache, modelData.meshList.meshes[0], textureCache);
+            this.material = new MaterialInst(device, renderCache, firstMesh, textureCache);
             this.kind = "B";
         }
     }
@@ -830,7 +888,17 @@ export class DynamicModelInst {
         const inst = ctx.renderInstManager.newRenderInst();
         this.material.setOnRenderInst(ctx.device, ctx.renderInstManager.gfxRenderCache, inst, drawParams, renderParams);
         ddraw.setOnRenderInst(inst);
-        ctx.opaqueInstList.submitRenderInst(inst);
+        if (renderParams.megaStateFlags) {
+            inst.setMegaStateFlags(renderParams.megaStateFlags);
+        }
+        if (this.translucent) {
+            inst.sortKey =
+                -(Math.hypot(renderParams.viewFromModel[12], renderParams.viewFromModel[13], renderParams.viewFromModel[14]) +
+                    renderParams.depthOffset);
+            ctx.translucentInstList.submitRenderInst(inst);
+        } else {
+            ctx.opaqueInstList.submitRenderInst(inst);
+        }
     }
 
     public destroy(device: GfxDevice): void {
