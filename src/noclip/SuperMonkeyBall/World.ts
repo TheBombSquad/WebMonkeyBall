@@ -477,11 +477,14 @@ void main() {
 function createMirrorWavyProgram(renderCache: GfxRenderCache): GfxProgram {
     const vert = `
 ${GfxShaderLibrary.MatrixLibrary}
+${BONUS_WAVE_VERTEX_GLOBAL}
 
 layout(std140) uniform ub_SceneParams {
     Mat4x4 u_Projection;
     vec4 u_Misc0;
 };
+
+#define u_SceneTimeFrames u_Misc0[1]
 
 layout(std140) uniform ub_MirrorParams {
     Mat4x4 u_ViewFromModel;
@@ -500,11 +503,21 @@ out vec4 v_DistortClip;
 out vec4 v_Color;
 
 void main() {
+    vec3 t_Position = a_Position.xyz;
+    float t_WaveDist = length(t_Position.xz);
+    float t_WaveAmp = 0.5 + (-0.030833333333333333 * t_WaveDist);
+    float t_WaveAngle = -1092.0 * (u_SceneTimeFrames - 30.0) + 16384.0 * t_WaveDist;
+    if (t_WaveAngle <= 0.0) {
+        float t_WaveRad = t_WaveAngle * BONUS_WAVE_ANGLE_TO_RAD;
+        float t_WaveSin = sin(t_WaveRad);
+        t_Position.y += t_WaveSin * t_WaveAmp;
+    }
+
     mat4 viewFromModel = UnpackMatrix(u_ViewFromModel);
-    vec4 posView = viewFromModel * vec4(a_Position.xyz, 1.0);
+    vec4 posView = viewFromModel * vec4(t_Position, 1.0);
     gl_Position = UnpackMatrix(u_Projection) * posView;
-    v_MirrorClip = UnpackMatrix(u_MirrorClipFromModel) * vec4(a_Position.xyz, 1.0);
-    v_DistortClip = UnpackMatrix(u_DistortClipFromModel) * vec4(a_Position.xyz, 1.0);
+    v_MirrorClip = UnpackMatrix(u_MirrorClipFromModel) * vec4(t_Position, 1.0);
+    v_DistortClip = UnpackMatrix(u_DistortClipFromModel) * vec4(t_Position, 1.0);
     v_Color = a_Color;
 }
 `;
@@ -1616,6 +1629,17 @@ export class World {
                 }
             }
         }
+        let skipModelNames: Set<string> | undefined = ctx.skipMirrorModels ? this.mirrorModelNames : undefined;
+        if (ctx.mirrorCapture && this.stageData.stageInfo.id === StageId.St092_Bonus_Wave) {
+            if (skipModelNames) {
+                if (!skipModelNames.has(BONUS_WAVE_MODEL_NAME)) {
+                    skipModelNames = new Set(skipModelNames);
+                    skipModelNames.add(BONUS_WAVE_MODEL_NAME);
+                }
+            } else {
+                skipModelNames = new Set<string>([BONUS_WAVE_MODEL_NAME]);
+            }
+        }
         for (let i = 0; i < this.animGroups.length; i++) {
             this.animGroups[i].prepareToRender(
                 this.worldState,
@@ -1628,10 +1652,10 @@ export class World {
                 viewFromWorldTilted,
                 viewFromWorld,
                 tiltParams,
-                ctx.skipMirrorModels ? this.mirrorModelNames : undefined
+                skipModelNames
             );
         }
-        if (this.bonusWaveModel) {
+        if (this.bonusWaveModel && !ctx.mirrorCapture) {
             const rp = scratchRenderParams;
             rp.reset();
             rp.lighting = this.worldState.lighting;
