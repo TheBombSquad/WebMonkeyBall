@@ -637,8 +637,18 @@ void main() {
     vec4 posView = viewFromModel * vec4(t_Position, 1.0);
     gl_Position = UnpackMatrix(u_Projection) * posView;
 
-    vec3 normalView = normalize((viewFromModel * vec4(t_Normal, 0.0)).xyz);
-    v_TexCoord = normalView.xz * 0.5 + vec2(0.5);
+    // Match SMB1's distortion texgen setup:
+    // GXSetTexCoordGen2(TG_NRM, texMtx=0x40) with
+    // texMtx = Translate(0.5, 0.5, 1.0) * (view rot, no translation), then scale Y column to 0.
+    // This removes normal-Y contribution before the view rotation and performs the generated q divide.
+    mat3 viewRot = mat3(viewFromModel);
+    vec3 nrm = normalize(t_Normal);
+    vec3 texGen = viewRot * vec3(nrm.x, 0.0, nrm.z) + vec3(0.5, 0.5, 1.0);
+    if (abs(texGen.z) > 1e-5) {
+        v_TexCoord = texGen.xy / texGen.z;
+    } else {
+        v_TexCoord = texGen.xy;
+    }
 }
 `;
 
