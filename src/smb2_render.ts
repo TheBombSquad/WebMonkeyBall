@@ -542,7 +542,77 @@ const SMB2_BG_INFO_BY_NAME = {
   'bg_ending': BgInfos.Ending,
 } as const;
 
-function applyPackBgInfo(stageId: number, gameSource: GameSource, baseInfo: BgInfos[keyof typeof BgInfos], fileName: string) {
+type ThemeLightInfo = {
+  ambient: [number, number, number];
+  infLight: [number, number, number];
+  rotX: number;
+  rotY: number;
+};
+
+// Extracted from SMB2 NTSC `theme_lights` in mkb2.main_loop.rel.
+const SMB2_THEME_LIGHTS: Record<number, ThemeLightInfo> = {
+  0: { ambient: [0.8, 0.8, 0.8], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  1: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  2: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  3: { ambient: [0.28, 0.48, 0.63], infLight: [0.6, 0.85, 1.0], rotX: 8192, rotY: 24576 },
+  4: { ambient: [0.4, 0.4, 0.7], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  5: { ambient: [0.4, 0.4, 0.7], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  6: { ambient: [0.5, 0.45, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 29184, rotY: 17664 },
+  7: { ambient: [0.45, 0.4, 0.25], infLight: [1.0, 1.0, 1.0], rotX: 24576, rotY: 24576 },
+  8: { ambient: [0.55, 0.6, 0.85], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  9: { ambient: [0.3, 0.3, 0.45], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  10: { ambient: [0.6, 0.7, 0.8], infLight: [0.8, 0.8, 0.8], rotX: -11776, rotY: 21888 },
+  11: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  12: { ambient: [0.4, 0.4, 0.55], infLight: [0.0, 0.0, 0.0], rotX: 8192, rotY: 24576 },
+  13: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  14: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 4096, rotY: 24576 },
+  15: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  16: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  17: { ambient: [0.25, 0.25, 0.35], infLight: [0.55, 0.4, 0.4], rotX: 12288, rotY: 21760 },
+  18: { ambient: [0.3, 0.4, 0.6], infLight: [0.48, 0.6, 1.0], rotX: 8576, rotY: 29952 },
+  19: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  20: { ambient: [0.5, 0.5, 0.5], infLight: [1.0, 0.9, 0.8], rotX: 8576, rotY: 9216 },
+  21: { ambient: [0.4, 0.4, 0.4], infLight: [0.8, 0.8, 0.8], rotX: 20096, rotY: 28416 },
+  22: { ambient: [0.4, 0.4, 0.45], infLight: [0.6, 0.55, 0.7], rotX: 28672, rotY: 21760 },
+  23: { ambient: [0.3, 0.6, 0.55], infLight: [0.75, 1.0, 0.9], rotX: 8192, rotY: 24576 },
+  24: { ambient: [0.55, 0.5, 0.7], infLight: [1.0, 0.7, 0.0], rotX: 2304, rotY: 28928 },
+  25: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: -22016 },
+  26: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  27: { ambient: [0.4, 0.4, 0.4], infLight: [0.88, 0.88, 0.84], rotX: 9856, rotY: -21888 },
+  28: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 4096, rotY: 24576 },
+  29: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  30: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 27008, rotY: 6400 },
+  31: { ambient: [0.56, 0.54, 0.6], infLight: [1.0, 1.0, 0.96], rotX: 10240, rotY: 30720 },
+  32: { ambient: [0.25, 0.3, 0.4], infLight: [0.55, 0.7, 0.8], rotX: 22016, rotY: 31872 },
+  33: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 5120, rotY: 26368 },
+  34: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 20096, rotY: 28416 },
+  35: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+  36: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: -22016 },
+  37: { ambient: [0.5, 0.5, 0.5], infLight: [1.0, 0.9, 0.8], rotX: 8576, rotY: 9216 },
+  38: { ambient: [0.55, 0.5, 0.7], infLight: [1.0, 0.7, 0.0], rotX: 2304, rotY: 28928 },
+  39: { ambient: [0.3, 0.4, 0.6], infLight: [0.48, 0.6, 1.0], rotX: 8576, rotY: 29952 },
+  40: { ambient: [0.6, 0.6, 0.6], infLight: [1.0, 1.0, 1.0], rotX: 8192, rotY: 24576 },
+};
+
+function getDefaultSmb2BgInfo(themeId: number, fileName: string): StageInfo['bgInfo'] {
+  const mapped =
+    (fileName ? SMB2_BG_INFO_BY_NAME[fileName as keyof typeof SMB2_BG_INFO_BY_NAME] : null) ??
+    BgInfos.Jungle;
+  const light = SMB2_THEME_LIGHTS[themeId];
+  if (!light) {
+    return { ...mapped, fileName };
+  }
+  return {
+    ...mapped,
+    fileName,
+    ambientColor: colorNewFromRGBA(light.ambient[0], light.ambient[1], light.ambient[2], 1),
+    infLightColor: colorNewFromRGBA(light.infLight[0], light.infLight[1], light.infLight[2], 1),
+    infLightRotX: light.rotX,
+    infLightRotY: light.rotY,
+  };
+}
+
+function applyPackBgInfo(stageId: number, gameSource: GameSource, baseInfo: StageInfo['bgInfo'], fileName: string) {
   if (!hasPackForGameSource(gameSource)) {
     return { ...baseInfo, fileName };
   }
@@ -676,9 +746,7 @@ function convertStageModelInstances(list: any[]): StageModelInstance[] {
 export function getSmb2StageInfo(stageId: number): StageInfo {
   const themeId = SMB2_STAGE_THEME_IDS[stageId] ?? 0;
   const fileName = SMB2_THEME_BG_NAMES[themeId] ?? '';
-  const baseInfo =
-    (fileName ? SMB2_BG_INFO_BY_NAME[fileName as keyof typeof SMB2_BG_INFO_BY_NAME] : null) ??
-    BgInfos.Jungle;
+  const baseInfo = getDefaultSmb2BgInfo(themeId, fileName);
   return {
     id: stageId as any,
     bgInfo: applyPackBgInfo(stageId, GAME_SOURCES.SMB2, baseInfo, fileName),
@@ -688,9 +756,7 @@ export function getSmb2StageInfo(stageId: number): StageInfo {
 export function getMb2wsStageInfo(stageId: number): StageInfo {
   const themeId = MB2WS_STAGE_THEME_IDS[stageId] ?? 0;
   const fileName = SMB2_THEME_BG_NAMES[themeId] ?? '';
-  const baseInfo =
-    (fileName ? SMB2_BG_INFO_BY_NAME[fileName as keyof typeof SMB2_BG_INFO_BY_NAME] : null) ??
-    BgInfos.Jungle;
+  const baseInfo = getDefaultSmb2BgInfo(themeId, fileName);
   return {
     id: stageId as any,
     bgInfo: applyPackBgInfo(stageId, GAME_SOURCES.MB2WS, baseInfo, fileName),
