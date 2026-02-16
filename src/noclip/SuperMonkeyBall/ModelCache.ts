@@ -57,6 +57,7 @@ export class ModelCache {
     private allEntries: CacheEntry[];
 
     private textureCache: TextureCache;
+    private goalTimerEntry: CacheEntry | null = null;
 
     private blueGoalModel: ModelInst | null = null;
     private greenGoalModel: ModelInst | null = null;
@@ -70,6 +71,7 @@ export class ModelCache {
         this.stageEntry = new CacheEntry(stageData.stageGma);
         this.bgEntry = new CacheEntry(stageData.bgGma);
         this.commonEntry = new CacheEntry(stageData.commonGma);
+        this.goalTimerEntry = stageData.goalTimerGma ? new CacheEntry(stageData.goalTimerGma) : null;
         this.allEntries = [this.stageEntry, this.bgEntry, this.commonEntry];
         this.textureCache = new TextureCache();
 
@@ -89,7 +91,7 @@ export class ModelCache {
         }
         this.bumperModel = this.findBgSpecificModel("BUMPER_L1");
         this.jamabarModel =
-            this.getModel(CommonModelID.mb_jamabar, GmaSrc.Common) ?? this.findModelBySubstring(["JAMABAR"]);
+            this.findModelBySubstring(["JAMABAR"]) ?? this.getModel(CommonModelID.mb_jamabar, GmaSrc.Common);
         if (usesSmb2Models) {
             this.wormholeModel = this.findModelBySubstring(["WORMHOLE"]);
             this.wormholeSurfaceModel = this.findModelBySubstring(["WORM_SURFACE"]);
@@ -188,6 +190,23 @@ export class ModelCache {
         return this.jamabarModel;
     }
 
+    public getGoalTimerDigitModel(size: "small" | "large", digit: number): ModelInst | null {
+        const clampedDigit = Math.max(0, Math.min(9, digit | 0));
+        const name = size === "small" ? `S_LCD_${clampedDigit}` : `L_LCD_${clampedDigit}`;
+        const smb2IdBase = size === "small" ? 0x4e : 0x32;
+        const id = smb2IdBase + clampedDigit;
+        const goalTimerEntry = this.goalTimerEntry;
+        if (goalTimerEntry) {
+            return (
+                this.getModelFromEntry(name, goalTimerEntry) ??
+                this.getModelFromEntry(id, goalTimerEntry) ??
+                this.getModel(name, GmaSrc.Common) ??
+                this.getModel(id, GmaSrc.Common)
+            );
+        }
+        return this.getModel(name, GmaSrc.Common) ?? this.getModel(id, GmaSrc.Common);
+    }
+
     public getWormholeModel(): ModelInst | null {
         return this.wormholeModel;
     }
@@ -208,6 +227,7 @@ export class ModelCache {
         for (let i = 0; i < this.allEntries.length; i++) {
             this.allEntries[i].modelCache.forEach((model) => model.destroy(device));
         }
+        this.goalTimerEntry?.modelCache.forEach((model) => model.destroy(device));
         this.textureCache.destroy(device);
     }
 }

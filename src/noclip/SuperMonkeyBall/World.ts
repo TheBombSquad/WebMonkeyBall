@@ -70,6 +70,7 @@ export type StageData = {
     stageGma: Gma.Gma;
     bgGma: Gma.Gma;
     commonGma: Gma.Gma;
+    goalTimerGma?: Gma.Gma | null;
     nlObj: Nl.Obj; // Extra Naomi model archive from filedrop
     stageNlObj?: Nl.Obj | null;
     stageNlObjNameMap?: Map<string, number> | null;
@@ -1071,32 +1072,56 @@ export class World {
             lightingGroups: new LightingGroups(lighting),
         };
         let goalTimerDigits: GoalTimerDigits | null = null;
+        const smallDigits: (ModelInterface | null)[] = [];
+        const largeDigits: (ModelInterface | null)[] = [];
+        let hasGoalTimerDigit = false;
+        for (let i = 0; i < 10; i++) {
+            const small = this.worldState.modelCache.getGoalTimerDigitModel("small", i);
+            const large = this.worldState.modelCache.getGoalTimerDigitModel("large", i);
+            smallDigits.push(small);
+            largeDigits.push(large);
+            hasGoalTimerDigit ||= small !== null || large !== null;
+        }
+        if (hasGoalTimerDigit) {
+            goalTimerDigits = { small: smallDigits, large: largeDigits };
+        }
+
         const hasStageNlObj = (stageData.stageNlObj?.size ?? 0) > 0;
         if (stageData.nlObj.size > 0 || hasStageNlObj) {
             this.nlTextureCache = new TextureCache();
-            const smallDigits: (ModelInterface | null)[] = [];
-            const largeDigits: (ModelInterface | null)[] = [];
+            const nlSmallDigits: (ModelInterface | null)[] = [];
+            const nlLargeDigits: (ModelInterface | null)[] = [];
+            let hasNlGoalTimerDigit = false;
             for (let i = 0; i < 10; i++) {
-                smallDigits.push(
-                    getNlModelInst(
-                        device,
-                        renderCache,
-                        stageData.nlObj,
-                        this.nlTextureCache,
-                        CommonNlModelID.S_LCD_0 + i
-                    )
+                const small = getNlModelInst(
+                    device,
+                    renderCache,
+                    stageData.nlObj,
+                    this.nlTextureCache,
+                    CommonNlModelID.S_LCD_0 + i
                 );
-                largeDigits.push(
-                    getNlModelInst(
-                        device,
-                        renderCache,
-                        stageData.nlObj,
-                        this.nlTextureCache,
-                        CommonNlModelID.L_LCD_0 + i
-                    )
+                const large = getNlModelInst(
+                    device,
+                    renderCache,
+                    stageData.nlObj,
+                    this.nlTextureCache,
+                    CommonNlModelID.L_LCD_0 + i
                 );
+                nlSmallDigits.push(small);
+                nlLargeDigits.push(large);
+                hasNlGoalTimerDigit ||= small !== null || large !== null;
             }
-            goalTimerDigits = { small: smallDigits, large: largeDigits };
+            if (hasNlGoalTimerDigit) {
+                if (!goalTimerDigits) {
+                    goalTimerDigits = { small: nlSmallDigits, large: nlLargeDigits };
+                } else {
+                    for (let i = 0; i < 10; i++) {
+                        goalTimerDigits.small[i] ??= nlSmallDigits[i];
+                        goalTimerDigits.large[i] ??= nlLargeDigits[i];
+                    }
+                }
+            }
+
             const tapeModelData = getGoalTapeModelData(stageData);
             if (tapeModelData) {
                 this.goalTapeModel = new Nl.DynamicModelInst(

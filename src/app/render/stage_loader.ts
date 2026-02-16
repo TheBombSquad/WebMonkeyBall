@@ -49,6 +49,22 @@ export class StageLoader {
     const isNaomi = this.isNaomiStage(stageId);
     const stageNlObjPath = isNaomi ? `${stageBasePath}/st${stageIdStr}/st${stageIdStr}_p.lz` : null;
     const stageNlTplPath = isNaomi ? `${stageBasePath}/st${stageIdStr}/st${stageIdStr}.lz` : null;
+    const smb2BasePath = this.getStageBasePath(GAME_SOURCES.SMB2);
+    const goalTimerGmaPromise: Promise<Gma.Gma | null> =
+      (async () => {
+        if (!smb2BasePath) {
+          return null;
+        }
+        try {
+          const [timerGmaBuf, timerTplBuf] = await Promise.all([
+            this.fetchSlice(`${smb2BasePath}/init/common.gma`),
+            this.fetchSlice(`${smb2BasePath}/init/common.tpl`),
+          ]);
+          return Gma.parseGma(timerGmaBuf, parseAVTpl(timerTplBuf, 'smb2-common-timer'));
+        } catch {
+          return null;
+        }
+      })();
 
     const [
       stagedefBuf,
@@ -62,6 +78,7 @@ export class StageLoader {
       bgTplBuf,
       stageNlObjBuf,
       stageNlTplBuf,
+      goalTimerGma,
     ] =
       await Promise.all([
         this.fetchSlice(stagedefPath),
@@ -75,6 +92,7 @@ export class StageLoader {
         this.fetchSlice(bgTplPath),
         stageNlObjPath ? this.fetchSlice(stageNlObjPath) : Promise.resolve(null),
         stageNlTplPath ? this.fetchSlice(stageNlTplPath) : Promise.resolve(null),
+        goalTimerGmaPromise,
       ]);
 
     const stagedef = parseStagedefLz(stagedefBuf);
@@ -103,6 +121,7 @@ export class StageLoader {
       stageGma,
       bgGma,
       commonGma,
+      goalTimerGma,
       nlObj,
       stageNlObj,
       stageNlObjNameMap,
