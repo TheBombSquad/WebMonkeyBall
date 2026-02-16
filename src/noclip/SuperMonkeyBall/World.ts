@@ -550,11 +550,6 @@ vec2 Project(vec4 clipPos) {
     return uv * 0.5 + vec2(0.5);
 }
 
-float EfbCopyIntensity(vec3 rgb) {
-    // GX IA8 EFB copies use BT.601-style luma in a limited range.
-    return clamp(16.0 + (219.0 * dot(rgb, vec3(0.299, 0.587, 0.114))), 0.0, 255.0);
-}
-
 void main() {
     vec2 mirrorUV = Project(v_MirrorClip);
     vec2 distortUV = Project(v_DistortClip);
@@ -562,8 +557,11 @@ void main() {
     distortUV.x = 1.0 - distortUV.x;
 
     vec4 distort = texture(u_DistortTexture, distortUV);
-    float indI = EfbCopyIntensity(distort.rgb);
-    vec3 indCoord = vec3(255.0 * distort.a, indI, indI);
+    // SMB1 uses GXSetTexCopyDst(..., GX_CTF_GB8, ...) then samples as IA8.
+    // That maps copied channels to IA8 as I=G and A=B, so .abg becomes (B, G, G).
+    float indI = 255.0 * distort.g;
+    float indA = 255.0 * distort.b;
+    vec3 indCoord = vec3(indA, indI, indI);
     indCoord += vec3(-128.0);
     vec2 mirrorTexSize = vec2(textureSize(u_MirrorTexture, 0));
     vec2 indOffset = vec2(
