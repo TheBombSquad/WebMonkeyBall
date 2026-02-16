@@ -43,6 +43,9 @@ const CHAIN_ENDPOINT_TRANSFER = 0.12;
 const CHAIN_ENDPOINT_TRANSFER_MAX_STEP = 0.2;
 const CHAIN_ENDPOINT_SEGMENT_TRANSFER = 1.0;
 const CHAIN_ENDPOINT_SEGMENT_MAX_STEP = 0.35;
+const CHAIN_ENDPOINT_TENSION_STRAIN_SOFTNESS = 0.06;
+const CHAIN_ENDPOINT_TENSION_RATE_SOFTNESS = 0.015;
+const CHAIN_ENDPOINT_STATIC_TENSION_SHARE = 0.3;
 const CHAIN_ENDPOINT_POS_BLEND = 0.0;
 const CHAIN_ENDPOINT_PREV_BLEND = 0.9;
 const CHAIN_ENDPOINT_VEL_BLEND = 0.45;
@@ -705,18 +708,37 @@ function anchorChainEndpointToBallSurface(
     segDz = portalConstraintVecA[2] - endpoint.pos.z;
   }
   const segDist = sqrt((segDx * segDx) + (segDy * segDy) + (segDz * segDz));
+  let segPrevDx = neighbor.prevPos.x - endpoint.prevPos.x;
+  let segPrevDy = neighbor.prevPos.y - endpoint.prevPos.y;
+  let segPrevDz = neighbor.prevPos.z - endpoint.prevPos.z;
+  if (neighborToEndpoint) {
+    vec3.set(portalConstraintVecA, neighbor.prevPos.x, neighbor.prevPos.y, neighbor.prevPos.z);
+    vec3.transformMat4(portalConstraintVecA, portalConstraintVecA, neighborToEndpoint);
+    segPrevDx = portalConstraintVecA[0] - endpoint.prevPos.x;
+    segPrevDy = portalConstraintVecA[1] - endpoint.prevPos.y;
+    segPrevDz = portalConstraintVecA[2] - endpoint.prevPos.z;
+  }
+  const segPrevDist = sqrt((segPrevDx * segPrevDx) + (segPrevDy * segPrevDy) + (segPrevDz * segPrevDz));
   const segStretch = Math.max(0, segDist - segmentRestLen);
-  const segTautRatio = segmentRestLen > 1e-6
-    ? Math.min(1, Math.max(0, ((segDist / segmentRestLen) - 0.85) / 0.15))
+  const segStretchRate = Math.max(0, segDist - segPrevDist);
+  const segStrainRatio = segmentRestLen > 1e-6
+    ? Math.min(1, segStretch / Math.max(1e-6, segmentRestLen * CHAIN_ENDPOINT_TENSION_STRAIN_SOFTNESS))
     : 0;
+  const segStretchRateRatio = segmentRestLen > 1e-6
+    ? Math.min(1, segStretchRate / Math.max(1e-6, segmentRestLen * CHAIN_ENDPOINT_TENSION_RATE_SOFTNESS))
+    : 0;
+  const segTensionRatio = Math.min(
+    1,
+    Math.max(segStrainRatio * CHAIN_ENDPOINT_STATIC_TENSION_SHARE, segStretchRateRatio),
+  );
   let transferX = 0;
   let transferY = 0;
   let transferZ = 0;
 
-  if (preStretch > 1e-6 && segTautRatio > 1e-6) {
+  if (preStretch > 1e-6 && segTensionRatio > 1e-6) {
     // Only feed endpoint correction back into the ball when the adjacent
-    // segment is taut; otherwise this behaves like artificial drag.
-    const stretchRatio = Math.min(1, preStretch / radius) * segTautRatio;
+    // segment has real tension; otherwise this behaves like artificial drag.
+    const stretchRatio = Math.min(1, preStretch / radius) * segTensionRatio;
     let radialX = -corrX * CHAIN_ENDPOINT_TRANSFER * stretchRatio;
     let radialY = -corrY * CHAIN_ENDPOINT_TRANSFER * stretchRatio;
     let radialZ = -corrZ * CHAIN_ENDPOINT_TRANSFER * stretchRatio;
@@ -732,9 +754,11 @@ function anchorChainEndpointToBallSurface(
     transferZ += radialZ;
   }
 
-  const segNearTautStretch = Math.max(0, segDist - (segmentRestLen * 0.98));
-  if (segNearTautStretch > 1e-6 && segDist > 1e-6) {
-    const segPull = Math.min(CHAIN_ENDPOINT_SEGMENT_MAX_STEP, segNearTautStretch * CHAIN_ENDPOINT_SEGMENT_TRANSFER);
+  if (segStretch > 1e-6 && segDist > 1e-6 && segTensionRatio > 1e-6) {
+    const segPull = Math.min(
+      CHAIN_ENDPOINT_SEGMENT_MAX_STEP,
+      segStretch * CHAIN_ENDPOINT_SEGMENT_TRANSFER * segTensionRatio,
+    );
     const invSegDist = 1 / segDist;
     transferX += segDx * invSegDist * segPull;
     transferY += segDy * invSegDist * segPull;

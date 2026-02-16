@@ -100,6 +100,11 @@ export class StageRuntime {
     this.wormholes = [];
     this.seesaws = [];
     this.animGroupIdMap = new Map();
+    this.allAnimGroupIndices = [];
+    this.animGroupTickIndices = [];
+    this.animGroupStateIndices = [];
+    this.bumperGroupIndices = [];
+    this.jamabarGroupIndices = [];
     this.boundSphere = {
       pos: { x: 0, y: 0, z: 0 },
       radius: 50,
@@ -217,7 +222,46 @@ export class StageRuntime {
     }
     ensureDefaultElementRegistry();
     getStageElementRegistry().init(this);
+    this.refreshOptimizationCaches();
     this.syncObjectTransforms();
+  }
+
+  refreshOptimizationCaches() {
+    const count = this.stage.animGroupCount;
+    this.allAnimGroupIndices = new Array(count);
+    this.animGroupTickIndices = [];
+    this.animGroupStateIndices = [];
+    this.bumperGroupIndices = [];
+    this.jamabarGroupIndices = [];
+    for (let i = 0; i < count; i += 1) {
+      this.allAnimGroupIndices[i] = i;
+      if ((this.bumpers[i]?.length ?? 0) > 0) {
+        this.bumperGroupIndices.push(i);
+      }
+      if ((this.jamabars[i]?.length ?? 0) > 0) {
+        this.jamabarGroupIndices.push(i);
+      }
+    }
+    const switchTargets = new Uint8Array(count);
+    for (const stageSwitch of this.switches) {
+      const targets = this.getSwitchTargetAnimGroupIndices(stageSwitch.animGroupId);
+      for (const target of targets) {
+        if (target >= 0 && target < count) {
+          switchTargets[target] = 1;
+        }
+      }
+    }
+    for (let i = 0; i < count; i += 1) {
+      const stageAg = this.stage.animGroups[i];
+      const hasDynamicAnim = hasDynamicAnimTracks(stageAg?.anim);
+      const hasSeesaw = !!stageAg?.hasSeesaw;
+      if (hasDynamicAnim || hasSeesaw) {
+        this.animGroupTickIndices.push(i);
+      }
+      if (hasDynamicAnim || hasSeesaw || switchTargets[i]) {
+        this.animGroupStateIndices.push(i);
+      }
+    }
   }
 
   applySwitchModelBounds(boundsByType) {
@@ -365,7 +409,15 @@ export class StageRuntime {
       }
       return out;
     };
-    const animGroups = this.animGroups.map((group) => {
+    const animGroupIndices = includeVisual ? this.allAnimGroupIndices : this.animGroupStateIndices;
+    const animGroups = new Array(animGroupIndices.length);
+    for (let listIndex = 0; listIndex < animGroupIndices.length; listIndex += 1) {
+      const groupIndex = animGroupIndices[listIndex];
+      const group = this.animGroups[groupIndex];
+      if (!group) {
+        animGroups[listIndex] = null;
+        continue;
+      }
       const out: any = {
         pos: cloneVec3(group.pos),
         prevPos: cloneVec3(group.prevPos),
@@ -390,45 +442,62 @@ export class StageRuntime {
           angleVel: num(group.seesawState.angleVel),
         };
       }
-      return out;
-    });
-    const bumpers = this.bumpers.map((group) => group.map((bumper) => ({
-      pos: cloneVec3(bumper.pos),
-      prevPos: cloneVec3(bumper.prevPos),
-      state: num(bumper.state) | 0,
-      spin: num(bumper.spin) | 0,
-      spinVel: num(bumper.spinVel) | 0,
-      pulseX: num(bumper.pulseX, 1),
-      pulseZ: num(bumper.pulseZ, 1),
-      counter: num(bumper.counter) | 0,
-    })));
-    const jamabars = this.jamabars.map((group) => group.map((jamabar) => ({
-      pos: cloneVec3(jamabar.pos),
-      prevPos: cloneVec3(jamabar.prevPos),
-      localPos: cloneVec3(jamabar.localPos),
-      localVel: cloneVec3(jamabar.localVel),
-    })));
+      animGroups[listIndex] = out;
+    }
+    const bumpers = includeVisual
+      ? this.bumpers.map((group) => group.map((bumper) => ({
+        pos: cloneVec3(bumper.pos),
+        prevPos: cloneVec3(bumper.prevPos),
+        state: num(bumper.state) | 0,
+        spin: num(bumper.spin) | 0,
+        spinVel: num(bumper.spinVel) | 0,
+        pulseX: num(bumper.pulseX, 1),
+        pulseZ: num(bumper.pulseZ, 1),
+        counter: num(bumper.counter) | 0,
+      })))
+      : undefined;
+    const jamabarGroupIndices = includeVisual ? this.allAnimGroupIndices : this.jamabarGroupIndices;
+    const jamabars = new Array(jamabarGroupIndices.length);
+    for (let listIndex = 0; listIndex < jamabarGroupIndices.length; listIndex += 1) {
+      const groupIndex = jamabarGroupIndices[listIndex];
+      const group = this.jamabars[groupIndex] ?? [];
+      jamabars[listIndex] = group.map((jamabar) => {
+        const out: any = {
+          pos: cloneVec3(jamabar.pos),
+          localPos: cloneVec3(jamabar.localPos),
+          localVel: cloneVec3(jamabar.localVel),
+        };
+        if (includeVisual) {
+          out.prevPos = cloneVec3(jamabar.prevPos);
+        }
+        return out;
+      });
+    }
     const goalBags = this.goalBags.map((bag) => ({
       state: num(bag.state) | 0,
       counter: num(bag.counter) | 0,
       flags: num(bag.flags) | 0,
       openness: num(bag.openness),
-      prevOpenness: num(bag.prevOpenness),
       unk8: num(bag.unk8),
       openFrame: num(bag.openFrame) | 0,
       rotX: num(bag.rotX) | 0,
       rotY: num(bag.rotY) | 0,
       rotZ: num(bag.rotZ) | 0,
-      prevRotX: num(bag.prevRotX) | 0,
-      prevRotY: num(bag.prevRotY) | 0,
-      prevRotZ: num(bag.prevRotZ) | 0,
       uSomePos: cloneVec3(bag.uSomePos),
       localPos: cloneVec3(bag.localPos),
       localVel: cloneVec3(bag.localVel),
       modelOrigin: cloneVec3(bag.modelOrigin),
       boundSphereRadius: num(bag.boundSphereRadius),
       position: cloneVec3(bag.position),
-      prevPos: cloneVec3(bag.prevPos),
+      ...(includeVisual
+        ? {
+          prevOpenness: num(bag.prevOpenness),
+          prevRotX: num(bag.prevRotX) | 0,
+          prevRotY: num(bag.prevRotY) | 0,
+          prevRotZ: num(bag.prevRotZ) | 0,
+          prevPos: cloneVec3(bag.prevPos),
+        }
+        : {}),
     }));
     const goalTapes = this.goalTapes.map((tape) => ({
       flags: num(tape.flags) | 0,
@@ -438,18 +507,20 @@ export class StageRuntime {
       targetY: num(tape.targetY),
       points: Array.isArray(tape.points) ? tape.points.map((point) => ({
         pos: cloneVec3(point.pos),
-        prevPos: cloneVec3(point.prevPos),
         normal: cloneVec3(point.normal),
-        prevNormal: cloneVec3(point.prevNormal),
         vel: cloneVec3(point.vel),
         flags: num(point.flags) | 0,
         len: num(point.len),
+        ...(includeVisual
+          ? {
+            prevPos: cloneVec3(point.prevPos),
+            prevNormal: cloneVec3(point.prevNormal),
+          }
+          : {}),
       })) : [],
     }));
     const bananas = this.bananas.map((banana) => ({
       localPos: cloneVec3(banana.localPos),
-      prevLocalPos: cloneVec3(banana.prevLocalPos),
-      pos: cloneVec3(banana.pos),
       flags: num(banana.flags) | 0,
       cooldown: num(banana.cooldown) | 0,
       collected: !!banana.collected,
@@ -465,21 +536,26 @@ export class StageRuntime {
       flyStartScale: num(banana.flyStartScale),
       tiltTimer: num(banana.tiltTimer) | 0,
       scale: num(banana.scale, 1),
-      prevScale: num(banana.prevScale, 1),
       vel: cloneVec3(banana.vel),
       rotX: num(banana.rotX) | 0,
       rotY: num(banana.rotY) | 0,
       rotZ: num(banana.rotZ) | 0,
-      prevRotX: num(banana.prevRotX) | 0,
-      prevRotY: num(banana.prevRotY) | 0,
-      prevRotZ: num(banana.prevRotZ) | 0,
       rotVelX: num(banana.rotVelX) | 0,
       rotVelY: num(banana.rotVelY) | 0,
       rotVelZ: num(banana.rotVelZ) | 0,
+      ...(includeVisual
+        ? {
+          prevLocalPos: cloneVec3(banana.prevLocalPos),
+          pos: cloneVec3(banana.pos),
+          prevScale: num(banana.prevScale, 1),
+          prevRotX: num(banana.prevRotX) | 0,
+          prevRotY: num(banana.prevRotY) | 0,
+          prevRotZ: num(banana.prevRotZ) | 0,
+        }
+        : {}),
     }));
     const switches = this.switches.map((stageSwitch) => ({
       pos: cloneVec3(stageSwitch.pos),
-      prevPos: cloneVec3(stageSwitch.prevPos),
       localPos: cloneVec3(stageSwitch.localPos),
       localVel: cloneVec3(stageSwitch.localVel),
       state: num(stageSwitch.state) | 0,
@@ -487,6 +563,11 @@ export class StageRuntime {
       triggered: !!stageSwitch.triggered,
       counter: num(stageSwitch.counter) | 0,
       cooldown: num(stageSwitch.cooldown) | 0,
+      ...(includeVisual
+        ? {
+          prevPos: cloneVec3(stageSwitch.prevPos),
+        }
+        : {}),
     }));
     const visualState = includeVisual
       ? {
@@ -495,11 +576,10 @@ export class StageRuntime {
         visualRngState: this.visualRng?.state ?? 0,
       }
       : {};
-    return {
+    const state: any = {
       rulesetId: this.rulesetId,
       timerFrames: this.timerFrames,
       animGroups,
-      bumpers,
       jamabars,
       goalBags,
       goalTapes,
@@ -511,6 +591,13 @@ export class StageRuntime {
       simRngState: this.simRng?.state ?? 0,
       ...visualState,
     };
+    if (includeVisual) {
+      state.bumpers = bumpers;
+    } else {
+      state.animGroupIndices = animGroupIndices.slice();
+      state.jamabarGroupIndices = jamabarGroupIndices.slice();
+    }
+    return state;
   }
 
   setState(state) {
@@ -558,13 +645,9 @@ export class StageRuntime {
     }
     this.timerFrames = num(state.timerFrames, this.timerFrames ?? 0);
 
-    const srcAnimGroups = Array.isArray(state.animGroups) ? state.animGroups : [];
-    const animCount = Math.min(this.animGroups.length, srcAnimGroups.length);
-    for (let i = 0; i < animCount; i += 1) {
-      const target = this.animGroups[i];
-      const source = srcAnimGroups[i];
+    const applyAnimGroupState = (target, source) => {
       if (!target || !source) {
-        continue;
+        return;
       }
       copyVec3(target.pos, source.pos);
       copyVec3(target.prevPos, source.prevPos);
@@ -604,6 +687,24 @@ export class StageRuntime {
           );
         }
       }
+    };
+
+    const srcAnimGroups = Array.isArray(state.animGroups) ? state.animGroups : [];
+    const srcAnimGroupIndices = Array.isArray(state.animGroupIndices) ? state.animGroupIndices : null;
+    if (srcAnimGroupIndices) {
+      const count = Math.min(srcAnimGroupIndices.length, srcAnimGroups.length);
+      for (let i = 0; i < count; i += 1) {
+        const targetIndex = num(srcAnimGroupIndices[i], -1) | 0;
+        if (targetIndex < 0 || targetIndex >= this.animGroups.length) {
+          continue;
+        }
+        applyAnimGroupState(this.animGroups[targetIndex], srcAnimGroups[i]);
+      }
+    } else {
+      const animCount = Math.min(this.animGroups.length, srcAnimGroups.length);
+      for (let i = 0; i < animCount; i += 1) {
+        applyAnimGroupState(this.animGroups[i], srcAnimGroups[i]);
+      }
     }
 
     const srcBumpers = Array.isArray(state.bumpers) ? state.bumpers : [];
@@ -630,21 +731,46 @@ export class StageRuntime {
     }
 
     const srcJamabars = Array.isArray(state.jamabars) ? state.jamabars : [];
-    const jamabarGroupCount = Math.min(this.jamabars.length, srcJamabars.length);
-    for (let groupIndex = 0; groupIndex < jamabarGroupCount; groupIndex += 1) {
-      const targetGroup = this.jamabars[groupIndex] ?? [];
-      const sourceGroup = Array.isArray(srcJamabars[groupIndex]) ? srcJamabars[groupIndex] : [];
-      const jamabarCount = Math.min(targetGroup.length, sourceGroup.length);
-      for (let i = 0; i < jamabarCount; i += 1) {
-        const target = targetGroup[i];
-        const source = sourceGroup[i];
-        if (!target || !source) {
+    const srcJamabarGroupIndices = Array.isArray(state.jamabarGroupIndices) ? state.jamabarGroupIndices : null;
+    if (srcJamabarGroupIndices) {
+      const groupCount = Math.min(srcJamabarGroupIndices.length, srcJamabars.length);
+      for (let listIndex = 0; listIndex < groupCount; listIndex += 1) {
+        const groupIndex = num(srcJamabarGroupIndices[listIndex], -1) | 0;
+        if (groupIndex < 0 || groupIndex >= this.jamabars.length) {
           continue;
         }
-        copyVec3(target.pos, source.pos);
-        copyVec3(target.prevPos, source.prevPos);
-        copyVec3(target.localPos, source.localPos);
-        copyVec3(target.localVel, source.localVel);
+        const targetGroup = this.jamabars[groupIndex] ?? [];
+        const sourceGroup = Array.isArray(srcJamabars[listIndex]) ? srcJamabars[listIndex] : [];
+        const jamabarCount = Math.min(targetGroup.length, sourceGroup.length);
+        for (let i = 0; i < jamabarCount; i += 1) {
+          const target = targetGroup[i];
+          const source = sourceGroup[i];
+          if (!target || !source) {
+            continue;
+          }
+          copyVec3(target.pos, source.pos);
+          copyVec3(target.prevPos, source.prevPos);
+          copyVec3(target.localPos, source.localPos);
+          copyVec3(target.localVel, source.localVel);
+        }
+      }
+    } else {
+      const jamabarGroupCount = Math.min(this.jamabars.length, srcJamabars.length);
+      for (let groupIndex = 0; groupIndex < jamabarGroupCount; groupIndex += 1) {
+        const targetGroup = this.jamabars[groupIndex] ?? [];
+        const sourceGroup = Array.isArray(srcJamabars[groupIndex]) ? srcJamabars[groupIndex] : [];
+        const jamabarCount = Math.min(targetGroup.length, sourceGroup.length);
+        for (let i = 0; i < jamabarCount; i += 1) {
+          const target = targetGroup[i];
+          const source = sourceGroup[i];
+          if (!target || !source) {
+            continue;
+          }
+          copyVec3(target.pos, source.pos);
+          copyVec3(target.prevPos, source.prevPos);
+          copyVec3(target.localPos, source.localPos);
+          copyVec3(target.localVel, source.localVel);
+        }
       }
     }
 
@@ -898,7 +1024,9 @@ export class StageRuntime {
       animTime += stage.loopStartSeconds;
     }
 
-    for (let i = 0; i < stage.animGroupCount; i += 1) {
+    const groupIndices = frameDelta === 0 ? this.allAnimGroupIndices : this.animGroupTickIndices;
+    for (let listIndex = 0; listIndex < groupIndices.length; listIndex += 1) {
+      const i = groupIndices[listIndex];
       const stageAg = stage.animGroups[i];
       const info = this.animGroups[i];
       const anim = stageAg.anim;
@@ -953,7 +1081,9 @@ export class StageRuntime {
   updateAnimGroupsSmb2(frameDelta, smb2LoadInFrames = null) {
     const stage = this.stage;
     const stack = this.matrixStack;
-    for (let i = 0; i < stage.animGroupCount; i += 1) {
+    const groupIndices = frameDelta === 0 ? this.allAnimGroupIndices : this.animGroupTickIndices;
+    for (let listIndex = 0; listIndex < groupIndices.length; listIndex += 1) {
+      const i = groupIndices[listIndex];
       const stageAg = stage.animGroups[i];
       const info = this.animGroups[i];
       const anim = stageAg.anim;
@@ -1146,37 +1276,41 @@ export class StageRuntime {
       updateConfetti(this, gravity);
       updateBallEffects(this.effects, gravity, this, this.visualRng);
     }
-    for (let i = 0; i < animGroups.length; i += 1) {
-      const bumperStates = this.bumpers[i];
-      for (const bumper of bumperStates) {
-        bumper.prevPos.x = bumper.pos.x;
-        bumper.prevPos.y = bumper.pos.y;
-        bumper.prevPos.z = bumper.pos.z;
-        if (bumper.state === 0) {
-          bumper.spinVel += (0x100 - bumper.spinVel) >> 6;
-          if (bumper.pulseX > 1) {
-            bumper.pulseX -= 0.06666666666666667;
-            if (bumper.pulseX < 1) {
-              bumper.pulseX = 1;
+    if (includeVisuals) {
+      for (const groupIndex of this.bumperGroupIndices) {
+        const bumperStates = this.bumpers[groupIndex] ?? [];
+        for (const bumper of bumperStates) {
+          bumper.prevPos.x = bumper.pos.x;
+          bumper.prevPos.y = bumper.pos.y;
+          bumper.prevPos.z = bumper.pos.z;
+          if (bumper.state === 0) {
+            bumper.spinVel += (0x100 - bumper.spinVel) >> 6;
+            if (bumper.pulseX > 1) {
+              bumper.pulseX -= 0.06666666666666667;
+              if (bumper.pulseX < 1) {
+                bumper.pulseX = 1;
+              }
             }
+            bumper.pulseZ = bumper.pulseX;
+          } else if (bumper.state === 1) {
+            bumper.state = 2;
+            bumper.counter = 7;
           }
-          bumper.pulseZ = bumper.pulseX;
-        } else if (bumper.state === 1) {
-          bumper.state = 2;
-          bumper.counter = 7;
-        }
-        if (bumper.state === 2) {
-          bumper.counter -= 1;
-          if (bumper.counter < 0) {
-            bumper.state = 0;
+          if (bumper.state === 2) {
+            bumper.counter -= 1;
+            if (bumper.counter < 0) {
+              bumper.state = 0;
+            }
+            bumper.spinVel += 0x100;
+            bumper.pulseX += 0.5 * (2.0 - bumper.pulseX);
+            bumper.pulseZ = bumper.pulseX;
           }
-          bumper.spinVel += 0x100;
-          bumper.pulseX += 0.5 * (2.0 - bumper.pulseX);
-          bumper.pulseZ = bumper.pulseX;
+          bumper.spin = toS16(bumper.spin + bumper.spinVel);
         }
-        bumper.spin = toS16(bumper.spin + bumper.spinVel);
       }
-      const jamabarStates = this.jamabars[i];
+    }
+    for (const groupIndex of this.jamabarGroupIndices) {
+      const jamabarStates = this.jamabars[groupIndex] ?? [];
       for (const jamabar of jamabarStates) {
         jamabar.prevPos.x = jamabar.pos.x;
         jamabar.prevPos.y = jamabar.pos.y;
@@ -1187,8 +1321,8 @@ export class StageRuntime {
         stack.rotateY(jamabar.rot.y);
         stack.rotateX(jamabar.rot.x);
         stack.push();
-        if (animGroups[i]) {
-          stack.multLeft(animGroups[i].transform);
+        if (animGroups[groupIndex]) {
+          stack.multLeft(animGroups[groupIndex].transform);
         }
         const gravityLocal = { x: gravity.x, y: gravity.y, z: gravity.z };
         stack.rigidInvTfVec(gravityLocal, gravityLocal);
@@ -1767,6 +1901,20 @@ function initStageElements(runtime: StageRuntime) {
       }
     }
   }
+}
+
+function hasDynamicAnimTracks(anim) {
+  if (!anim) {
+    return false;
+  }
+  return !!(
+    anim.rotXKeyframeCount > 0
+    || anim.rotYKeyframeCount > 0
+    || anim.rotZKeyframeCount > 0
+    || anim.posXKeyframeCount > 0
+    || anim.posYKeyframeCount > 0
+    || anim.posZKeyframeCount > 0
+  );
 }
 
 function createSeesawState(stageAg, stack) {
