@@ -104,6 +104,7 @@ export class AnimGroup {
     private blurBridgeAccordionModel: ModelInst | null = null;
     private worldFromAg: mat4;
     private originFromAg: mat4;
+    private agFromOrigin: mat4;
     private useExternalTransform = false;
     private agData: SD.AnimGroup;
     private bananas: Banana[];
@@ -181,6 +182,7 @@ export class AnimGroup {
 
         this.worldFromAg = mat4.create();
         this.originFromAg = mat4.create();
+        this.agFromOrigin = mat4.create();
 
         if (animGroupIdx > 0) {
             // Not in world space, animate
@@ -194,6 +196,9 @@ export class AnimGroup {
             // In world space
             mat4.identity(this.originFromAg);
             mat4.identity(this.worldFromAg);
+        }
+        if (!mat4.invert(this.agFromOrigin, this.originFromAg)) {
+            mat4.identity(this.agFromOrigin);
         }
 
         this.bananas = this.agData.bananas.map((ban) => new Banana(modelCache, stageData, ban));
@@ -435,6 +440,11 @@ export class AnimGroup {
 
     public getWorldFromAg(): mat4 {
         return this.worldFromAg;
+    }
+
+    public getWorldFromAgNoOrigin(out: mat4): mat4 {
+        mat4.mul(out, this.worldFromAg, this.agFromOrigin);
+        return out;
     }
 
     public prepareToRenderShadow(

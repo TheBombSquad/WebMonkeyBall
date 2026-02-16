@@ -1921,7 +1921,7 @@ export class World {
         }
         if (stageId === StageId.St103_Av_Logo) {
             if (this.animGroups.length > 1) {
-                mat4.copy(out, this.animGroups[1].getWorldFromAg());
+                this.animGroups[1].getWorldFromAgNoOrigin(out);
                 return true;
             }
             return false;
