@@ -540,6 +540,8 @@ const SMB2_BG_INFO_BY_NAME = {
   'bg_bow2': BgInfos.Bowling,
   'bg_mst': BgInfos.Master,
   'bg_ending': BgInfos.Ending,
+  'bg_lav2': BgInfos.Lava2,
+  'bg_pot2': BgInfos.Pot2,
 } as const;
 
 type ThemeLightInfo = {

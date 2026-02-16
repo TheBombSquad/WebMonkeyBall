@@ -5,8 +5,10 @@ import {
     BgBonus,
     BgIce,
     BgJungle,
+    BgLava2,
     BgMaster,
     BgNight,
+    BgPot2,
     BgSand,
     BgSpace,
     BgStorm,
@@ -308,6 +310,24 @@ export namespace BgInfos {
         infLightColor: colorNewFromRGBA(0.8, 0.8, 0.8),
         infLightRotX: -11776,
         infLightRotY: 21888,
+    };
+    export const Lava2: BgInfo = {
+        fileName: "bg_lav2",
+        clearColor: colorNewFromRGBA8(0x000000ff),
+        bgConstructor: BgLava2,
+        ambientColor: colorNewFromRGBA(0.25, 0.25, 0.35),
+        infLightColor: colorNewFromRGBA(0.55, 0.4, 0.4),
+        infLightRotX: 12288,
+        infLightRotY: 21760,
+    };
+    export const Pot2: BgInfo = {
+        fileName: "bg_pot2",
+        clearColor: colorNewFromRGBA8(0x000000ff),
+        bgConstructor: BgPot2,
+        ambientColor: colorNewFromRGBA(0.4, 0.4, 0.4),
+        infLightColor: colorNewFromRGBA(0.8, 0.8, 0.8),
+        infLightRotX: 20096,
+        infLightRotY: 28416,
     };
     export const Target: BgInfo = {
         fileName: "bg_pil",
