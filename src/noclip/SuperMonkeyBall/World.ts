@@ -553,8 +553,6 @@ vec2 Project(vec4 clipPos) {
 void main() {
     vec2 mirrorUV = Project(v_MirrorClip);
     vec2 distortUV = Project(v_DistortClip);
-    // SMB1's wavy-mirror distort texcoord matrix applies a horizontal flip.
-    distortUV.x = 1.0 - distortUV.x;
 
     vec4 distort = texture(u_DistortTexture, distortUV);
     // SMB1 uses GXSetTexCopyDst(..., GX_CTF_GB8, ...) then samples as IA8.
