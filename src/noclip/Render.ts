@@ -393,6 +393,19 @@ export class Renderer {
         const ind1 = scratchMirrorPlanePoint;
         vec3.set(ind0, 0.0, 1.6, 0.0);
         vec3.set(ind1, 1.2, 0.0, 0.0);
+        const abs0 = Math.abs(ind0[1]);
+        const abs1 = Math.abs(ind1[0]);
+        if (abs0 > abs1) {
+          while (Math.abs(ind0[1]) >= 1.0) {
+            vec3.scale(ind0, ind0, 0.5);
+            vec3.scale(ind1, ind1, 0.5);
+          }
+        } else {
+          while (Math.abs(ind1[0]) >= 1.0) {
+            vec3.scale(ind0, ind0, 0.5);
+            vec3.scale(ind1, ind1, 0.5);
+          }
+        }
         indTexMtx0 = ind0;
         indTexMtx1 = ind1;
       }
