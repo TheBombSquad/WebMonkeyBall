@@ -51,6 +51,7 @@ const BONUS_STAR_PULSE_SCALE = 0.75;
 const BONUS_STAR_PHASE_STEP = (2 * Math.PI) / 180;
 const OVERLAY_VIEW_Z = 100.0;
 const OVERLAY_MODEL_HALF_SIZE = 5.0;
+const POT_PROXIMITY_OBJECT_NAMES = new Set(["POD_POD_A", "POD_KAMADO_A"]);
 
 const LAVA_OVERLAY_MEGASTATE = makeMegaState(
     setAttachmentStateSimple(
@@ -543,6 +544,7 @@ export class BgLava2 implements Background {
     private overlayState: LavaOverlayState;
     private overlayProgram: GfxProgram | null = null;
     private overlayTextureMapping = new GXTextureMapping();
+    private lastOverlayTickFrame = -1;
 
     constructor(state: WorldState, bgObjects: BgObjectInst[]) {
         this.bgObjects = bgObjects;
@@ -556,19 +558,12 @@ export class BgLava2 implements Background {
         }
     }
 
-    public prepareToRender(state: WorldState, ctx: RenderContext): void {
-        for (let i = 0; i < this.bgObjects.length; i++) {
-            this.bgObjects[i].prepareToRender(state, ctx);
-        }
-
-        if (!this.overlayModel || ctx.mirrorCapture || ctx.wormholeCapture) {
-            return;
-        }
-
-        const camera = ctx.viewerInput.camera;
-        const viewFromWorldTilted = (ctx.viewFromWorld as mat4 | undefined) ?? (camera?.viewMatrix as mat4 | undefined);
-        const viewFromWorldNoTilt =
-            (ctx.viewFromWorldNoTilt as mat4 | undefined) ?? (camera?.viewMatrix as mat4 | undefined);
+    private updateOverlayState(
+        state: WorldState,
+        camera: any,
+        viewFromWorldTilted: mat4 | undefined,
+        viewFromWorldNoTilt: mat4 | undefined,
+    ): void {
         const overlayState = this.overlayState;
         if (!getCameraPositionFromView(scratchOverlayCameraPos, viewFromWorldTilted)) {
             getCameraPosition(scratchOverlayCameraPos, camera);
@@ -613,6 +608,33 @@ export class BgLava2 implements Background {
         overlayState.texPhase += overlayState.texVel;
         overlayState.wavePhase += overlayState.waveStep;
         overlayState.texScale = Math.sin(overlayState.wavePhase) * 0.1 + 1.0;
+    }
+
+    public prepareToRender(state: WorldState, ctx: RenderContext): void {
+        for (let i = 0; i < this.bgObjects.length; i++) {
+            this.bgObjects[i].prepareToRender(state, ctx);
+        }
+
+        if (!this.overlayModel || ctx.mirrorCapture || ctx.wormholeCapture) {
+            return;
+        }
+
+        const camera = ctx.viewerInput.camera;
+        const viewFromWorldTilted = (ctx.viewFromWorld as mat4 | undefined) ?? (camera?.viewMatrix as mat4 | undefined);
+        const viewFromWorldNoTilt =
+            (ctx.viewFromWorldNoTilt as mat4 | undefined) ?? (camera?.viewMatrix as mat4 | undefined);
+        const tickFrame = Math.floor(state.time.getAnimTimeFrames());
+        if (tickFrame !== this.lastOverlayTickFrame) {
+            let steps = 1;
+            if (this.lastOverlayTickFrame >= 0 && tickFrame > this.lastOverlayTickFrame) {
+                steps = Math.min(8, tickFrame - this.lastOverlayTickFrame);
+            }
+            for (let i = 0; i < steps; i++) {
+                this.updateOverlayState(state, camera, viewFromWorldTilted, viewFromWorldNoTilt);
+            }
+            this.lastOverlayTickFrame = tickFrame;
+        }
+        const overlayState = this.overlayState;
 
         const overlayQuad = getOverlayFrustumQuad(camera, OVERLAY_VIEW_Z);
 
@@ -671,6 +693,8 @@ export class BgLava2 implements Background {
 export class BgPot2 implements Background {
     private bgObjects: BgObjectInst[] = [];
     private overlayModel: ModelInst | null;
+    private proximityModel: ModelInst | null;
+    private proximityObjects: BgObjectInst[] = [];
     private overlayState: PotOverlayState;
     private windState: PotWindState;
     private overlayProgram: GfxProgram | null = null;
@@ -681,6 +705,13 @@ export class BgPot2 implements Background {
     constructor(state: WorldState, bgObjects: BgObjectInst[]) {
         this.bgObjects = bgObjects;
         this.overlayModel = state.modelCache.getModel("POD_YUGE_A", GmaSrc.Bg);
+        this.proximityModel = state.modelCache.getModel("POD_RENZ_FREA_A", GmaSrc.Bg) ?? this.overlayModel;
+        this.proximityObjects = this.bgObjects.filter((bgObject) =>
+            POT_PROXIMITY_OBJECT_NAMES.has(bgObject.bgObjectData.modelName),
+        );
+        if (this.proximityObjects.length === 0) {
+            this.proximityObjects = this.bgObjects;
+        }
         this.overlayState = createPotOverlayState();
         this.windState = createPotWindState();
     }
@@ -741,11 +772,12 @@ export class BgPot2 implements Background {
 
         let proximity = 0.0;
         let nearestNormDist = -1.0;
-        const overlayBoundCenter = this.overlayModel.modelData.boundSphereCenter;
-        const overlayBoundRadius = Math.max(1e-4, this.overlayModel.modelData.boundSphereRadius);
-        for (let i = 0; i < this.bgObjects.length; i++) {
-            this.bgObjects[i].copyWorldFromModel(scratchOverlayObjMat4);
-            transformVec3Mat4w1(scratchOverlayObjCenter, scratchOverlayObjMat4, overlayBoundCenter);
+        const proximityBoundModel = this.proximityModel ?? this.overlayModel;
+        const proximityBoundCenter = proximityBoundModel.modelData.boundSphereCenter;
+        const proximityBoundRadius = Math.max(1e-4, proximityBoundModel.modelData.boundSphereRadius);
+        for (let i = 0; i < this.proximityObjects.length; i++) {
+            this.proximityObjects[i].copyWorldFromModel(scratchOverlayObjMat4);
+            transformVec3Mat4w1(scratchOverlayObjCenter, scratchOverlayObjMat4, proximityBoundCenter);
             const dx = scratchOverlayObjCenter[0] - scratchOverlayCameraPos[0];
             const dz = scratchOverlayObjCenter[2] - scratchOverlayCameraPos[2];
             const dist = Math.hypot(dx, dz);
@@ -754,7 +786,7 @@ export class BgPot2 implements Background {
                 scratchOverlayObjMat4[1],
                 scratchOverlayObjMat4[2],
             );
-            const normDist = dist / Math.max(1e-4, overlayBoundRadius * scaleX);
+            const normDist = dist / Math.max(1e-4, proximityBoundRadius * scaleX);
             if (nearestNormDist < 0.0 || normDist < nearestNormDist) {
                 nearestNormDist = normDist;
             }
