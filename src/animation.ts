@@ -13,10 +13,19 @@ export function interpolateKeyframes(count, frames, timeSeconds) {
     return frames[count - 1].value;
   }
 
-  let nextIndex = 1;
-  while (nextIndex < count - 1 && frames[nextIndex].timeSeconds <= timeSeconds) {
-    nextIndex += 1;
+  // Find the first keyframe whose timestamp is strictly greater than timeSeconds.
+  // This preserves prior behavior for duplicate timestamps while avoiding linear scans.
+  let low = 1;
+  let high = count - 1;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (frames[mid].timeSeconds <= timeSeconds) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
   }
+  const nextIndex = low;
   const curr = frames[nextIndex - 1];
   const next = frames[nextIndex];
 

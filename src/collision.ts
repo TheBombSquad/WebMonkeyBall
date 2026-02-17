@@ -201,6 +201,10 @@ export const STAGE_COLLISION_TRI_PHASE_FACE = TRI_PHASE_FACE;
 export const STAGE_COLLISION_TRI_PHASE_EDGE = TRI_PHASE_EDGE;
 export const STAGE_COLLISION_TRI_PHASE_FULL = TRI_PHASE_FULL;
 
+function collisionNowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
 function resetSwitchProbeBall(ball) {
   switchProbeBall.flags = 0;
   switchProbeBall.pos.x = ball.pos.x;
@@ -1871,10 +1875,19 @@ export function applySeesawCollision(ball, seesaw) {
   seesaw.angleVel += seesaw.sensitivity * (dist * velLen);
 }
 
-export function collideBallWithStageObjects(ball, stageRuntime) {
+export function collideBallWithStageObjects(ball, stageRuntime, simPerf = null) {
+  const perfEnabled = !!simPerf?.enabled;
+  const startMs = perfEnabled ? collisionNowMs() : 0;
+  let animGroupsVisited = 0;
+  let bumperTests = 0;
+  let jamabarTests = 0;
+  let goalBagTests = 0;
+  let goalTapeTests = 0;
+  let switchTests = 0;
   const animGroups = stageRuntime.animGroups;
   const switchesEnabled = stageRuntime.switchesEnabled !== false;
   for (let animGroupId = 0; animGroupId < animGroups.length; animGroupId += 1) {
+    animGroupsVisited += 1;
     const bumpers = stageRuntime.bumpers[animGroupId];
     const jamabars = stageRuntime.jamabars[animGroupId];
     const goalBags = stageRuntime.goalBagsByGroup?.[animGroupId] ?? [];
@@ -1885,27 +1898,32 @@ export function collideBallWithStageObjects(ball, stageRuntime) {
     if (animGroupId !== ball.animGroupId) {
       tfPhysballToAnimGroupSpace(ball, animGroupId, animGroups);
     }
+    bumperTests += bumpers.length;
     for (const bumper of bumpers) {
       if (intersectsMovingSpheres(ball.prevPos, ball.pos, bumper.prevPos, bumper.pos, ball.radius, bumper.radius)) {
         collideBallWithBumper(ball, bumper);
       }
     }
+    jamabarTests += jamabars.length;
     for (const jamabar of jamabars) {
       if (intersectsMovingSpheres(ball.prevPos, ball.pos, jamabar.prevPos, jamabar.pos, ball.radius, jamabar.radius)) {
         collideBallWithJamabar(ball, jamabar);
       }
     }
+    goalBagTests += goalBags.length;
     for (const bag of goalBags) {
       if (intersectsMovingSpheres(ball.prevPos, ball.pos, bag.prevPos, bag.position, ball.radius, bag.boundSphereRadius)) {
         collideBallWithGoalBag(ball, bag);
       }
     }
+    goalTapeTests += goalTapes.length;
     for (const tape of goalTapes) {
       collideBallWithGoalTape(ball, tape);
     }
     if (!switchesEnabled) {
       continue;
     }
+    switchTests += switches.length;
     for (const stageSwitch of switches) {
       const modelBounds = stageSwitch.modelBoundCenter && stageSwitch.modelBoundRadius
         ? { center: stageSwitch.modelBoundCenter, radius: stageSwitch.modelBoundRadius }
@@ -1950,6 +1968,15 @@ export function collideBallWithStageObjects(ball, stageRuntime) {
   if (ball.animGroupId !== 0) {
     tfPhysballToAnimGroupSpace(ball, 0, animGroups);
   }
+  if (perfEnabled) {
+    const dt = collisionNowMs() - startMs;
+    simPerf.objectAnimGroupsVisited += animGroupsVisited;
+    simPerf.objectBumperTests += bumperTests;
+    simPerf.objectJamabarTests += jamabarTests;
+    simPerf.objectGoalBagTests += goalBagTests;
+    simPerf.objectGoalTapeTests += goalTapeTests;
+    simPerf.objectSwitchTests += switchTests;
+  }
 }
 
 export function collideBallWithBonusWave(ball, stageRuntime) {
@@ -1967,12 +1994,23 @@ export function collideBallWithBonusWave(ball, stageRuntime) {
   collideBallWithPlane(ball, surface);
 }
 
-export function collideBallWithStage(ball, stage, animGroups, options = null) {
+export function collideBallWithStage(ball, stage, animGroups, options = null, perf = null) {
+  const perfSink = perf ?? options?.perf ?? null;
+  const perfEnabled = !!perfSink?.enabled;
+  const startMs = perfEnabled ? collisionNowMs() : 0;
+  let animGroupsVisited = 0;
+  let animGroupsBroadphaseHits = 0;
+  let triCandidates = 0;
+  let triFaceTests = 0;
+  let triEdgeTests = 0;
+  let triVertTests = 0;
+  let primitiveTests = 0;
   const triPhaseMask = options?.trianglePhaseMask ?? TRI_PHASE_FULL;
   const includePrimitives = options?.includePrimitives !== false;
   const precomputedCellTrisByAnimGroup = options?.precomputedCellTrisByAnimGroup ?? null;
   const stageGroupBounds = getStageAnimGroupBounds(stage);
   for (let animGroupId = 0; animGroupId < stage.animGroupCount; animGroupId += 1) {
+    animGroupsVisited += 1;
     const stageAg = stage.animGroups[animGroupId];
     if (!stageAg) {
       continue;
@@ -1992,22 +2030,28 @@ export function collideBallWithStage(ball, stage, animGroups, options = null) {
     if (!groupBounds || !broadphaseHitsAnimGroup(ball, groupBounds)) {
       continue;
     }
+    animGroupsBroadphaseHits += 1;
 
     const cellTris = precomputedCellTrisByAnimGroup
       ? (precomputedCellTrisByAnimGroup[animGroupId] ?? null)
       : coligridLookup(stageAg, ball.pos.x, ball.pos.z);
     if (cellTris) {
+      const triCount = cellTris.length;
+      triCandidates += triCount;
       if (triPhaseMask & TRI_PHASE_FACE) {
+        triFaceTests += triCount;
         for (const triIndex of cellTris) {
           collideBallWithTriFace(ball, stageAg.triangles[triIndex]);
         }
       }
       if (triPhaseMask & TRI_PHASE_EDGE) {
+        triEdgeTests += triCount;
         for (const triIndex of cellTris) {
           collideBallWithTriEdges(ball, stageAg.triangles[triIndex]);
         }
       }
       if (triPhaseMask & TRI_PHASE_VERT) {
+        triVertTests += triCount;
         for (const triIndex of cellTris) {
           collideBallWithTriVerts(ball, stageAg.triangles[triIndex]);
         }
@@ -2017,6 +2061,7 @@ export function collideBallWithStage(ball, stage, animGroups, options = null) {
     if (!includePrimitives) {
       continue;
     }
+    primitiveTests += stageAg.coliCones.length + stageAg.coliSpheres.length + stageAg.coliCylinders.length + stageAg.goals.length;
     for (const cone of stageAg.coliCones) {
       collideBallWithCone(ball, cone);
     }
@@ -2032,5 +2077,15 @@ export function collideBallWithStage(ball, stage, animGroups, options = null) {
   }
   if (ball.animGroupId !== 0) {
     tfPhysballToAnimGroupSpace(ball, 0, animGroups);
+  }
+  if (perfEnabled) {
+    const dt = collisionNowMs() - startMs;
+    perfSink.stageAnimGroupsVisited += animGroupsVisited;
+    perfSink.stageAnimGroupsBroadphaseHits += animGroupsBroadphaseHits;
+    perfSink.stageTriCandidates += triCandidates;
+    perfSink.stageTriFaceTests += triFaceTests;
+    perfSink.stageTriEdgeTests += triEdgeTests;
+    perfSink.stageTriVertTests += triVertTests;
+    perfSink.stagePrimitiveTests += primitiveTests;
   }
 }

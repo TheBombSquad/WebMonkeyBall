@@ -115,6 +115,10 @@ const seesawBall = {
   animGroupId: 0,
 };
 
+function physicsNowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
 export function createBallState() {
   return {
     playerId: 0,
@@ -851,7 +855,9 @@ function handleBallRotationalKinematics(ball, physBall, animGroups, stageRuntime
   }
 }
 
-export function stepBall(ball, stageRuntime, world, allowEffects = true) {
+export function stepBall(ball, stageRuntime, world, allowEffects = true, simPerf = null) {
+  const perfEnabled = !!simPerf?.enabled;
+  const ballStepStartMs = perfEnabled ? physicsNowMs() : 0;
   const stage = stageRuntime.stage;
   const animGroups = stageRuntime.animGroups;
   ball.flags &= ~BALL_FLAGS.FLAG_00;
@@ -899,9 +905,10 @@ export function stepBall(ball, stageRuntime, world, allowEffects = true) {
   ball.pos.y += ball.vel.y;
   ball.pos.z += ball.vel.z;
 
+  const stageCollisionStartMs = perfEnabled ? physicsNowMs() : 0;
   const physBall = ball.physBall;
   initPhysBallFromBall(ball, physBall, stage.format);
-  collideBallWithStage(physBall, stage, animGroups);
+  collideBallWithStage(physBall, stage, animGroups, null, simPerf);
   const stageColiFlags = physBall.flags;
   const stageColiSpeed = physBall.hardestColiSpeed;
   if (stage.format === 'smb2' && (physBall.flags & COLI_FLAGS.OCCURRED)) {
@@ -930,6 +937,15 @@ export function stepBall(ball, stageRuntime, world, allowEffects = true) {
   }
   collideBallWithBonusWave(physBall, stageRuntime);
   syncBallFromPhysBall(ball, physBall);
+  if (perfEnabled) {
+    const stageCollisionMs = physicsNowMs() - stageCollisionStartMs;
+    simPerf.stageCollisionCalls += 1;
+    simPerf.stageCollisionMsTotal += stageCollisionMs;
+    simPerf.stageCollisionMsLast = stageCollisionMs;
+    if (stageCollisionMs > simPerf.stageCollisionMsMax) {
+      simPerf.stageCollisionMsMax = stageCollisionMs;
+    }
+  }
 
   if (physBall.flags & COLI_FLAGS.OCCURRED) {
     if (physBall.hardestColiAnimGroupId === 0) {
@@ -965,9 +981,19 @@ export function stepBall(ball, stageRuntime, world, allowEffects = true) {
   updateApeOrientation(ball, physBall, stageRuntime);
   updateBallCameraSteerYaw(ball, stage.format);
 
+  const objectCollisionStartMs = perfEnabled ? physicsNowMs() : 0;
   initPhysBallFromBall(ball, physBall, stage.format);
-  collideBallWithStageObjects(physBall, stageRuntime);
+  collideBallWithStageObjects(physBall, stageRuntime, simPerf);
   syncBallFromPhysBall(ball, physBall);
+  if (perfEnabled) {
+    const objectCollisionMs = physicsNowMs() - objectCollisionStartMs;
+    simPerf.stageObjectCollisionCalls += 1;
+    simPerf.stageObjectCollisionMsTotal += objectCollisionMs;
+    simPerf.stageObjectCollisionMsLast = objectCollisionMs;
+    if (objectCollisionMs > simPerf.stageObjectCollisionMsMax) {
+      simPerf.stageObjectCollisionMsMax = objectCollisionMs;
+    }
+  }
   if (ball.audio) {
     ball.audio.lastColiFlags = stageColiFlags | physBall.flags;
     ball.audio.lastColiSpeed = Math.min(stageColiSpeed, physBall.hardestColiSpeed);
@@ -976,6 +1002,15 @@ export function stepBall(ball, stageRuntime, world, allowEffects = true) {
   processBallWormholeTeleport(ball, stageRuntime);
 
   ball.unk80 += 1;
+  if (perfEnabled) {
+    const ballStepMs = physicsNowMs() - ballStepStartMs;
+    simPerf.ballStepCount += 1;
+    simPerf.ballStepMsTotal += ballStepMs;
+    simPerf.ballStepMsLast = ballStepMs;
+    if (ballStepMs > simPerf.ballStepMsMax) {
+      simPerf.ballStepMsMax = ballStepMs;
+    }
+  }
 }
 
 export function processBallWormholeTeleport(ball, stageRuntime) {

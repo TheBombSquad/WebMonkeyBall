@@ -43,7 +43,7 @@ import { createMainControllerGraph } from './app/composition/main_controller_gra
 import { ChatUiController } from './app/netplay/chat_ui.js';
 import type { NetplayConnectionStateController } from './app/netplay/connection_state.js';
 import { createNetplayDebugState } from './app/netplay/debug_state.js';
-import { createNetplayDebugOverlay } from './app/netplay/debug_overlay.js';
+import { createNetplayDebugOverlay, createSimPerfDebugOverlay } from './app/netplay/debug_overlay.js';
 import { GamemodeOptionsController } from './app/netplay/gamemode_options.js';
 import type { LobbyHeartbeatController } from './app/netplay/heartbeat.js';
 import type { LobbyBrowserController } from './app/netplay/lobby_browser.js';
@@ -255,6 +255,7 @@ export function runMainApp() {
   
   const packSelection = new PackSelectionController({ gameSourceSelect, packStatus });
   const netplayDebugOverlay = createNetplayDebugOverlay(document.body);
+  const simPerfDebugOverlay = createSimPerfDebugOverlay(document.body);
   const registeredGamemodes = modRegistry.listGamemodes();
   if (lobbyGameModeSelect) {
     const currentValue = lobbyGameModeSelect.value;
@@ -846,6 +847,7 @@ export function runMainApp() {
       getAvatarValidationCached: (dataUrl: string) => profileUi.getAvatarValidationCached(dataUrl),
       isNetplayDebugEnabled,
       netplayDebugOverlay,
+      simPerfDebugOverlay,
       ensureGfxReady: () => {
         if (!swapChain || !gfxDevice) {
           initGfx();

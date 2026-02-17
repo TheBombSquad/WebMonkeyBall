@@ -75,6 +75,10 @@ import {
   randS16,
 } from '../../stage/stage_constants.js';
 
+function perfNowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
 export class StageRuntime {
   constructor(stage, seed = stage.stageId ?? 0, rulesetId: string | null = null) {
     this.stage = stage;
@@ -120,11 +124,45 @@ export class StageRuntime {
       logEvery: 120,
       tickCount: 0,
       animMs: 0,
+      animPlaybackMs: 0,
+      animKeyframesMs: 0,
+      animMatrixMs: 0,
+      animSeesawMs: 0,
+      animFinalizeMs: 0,
+      animGroupsProcessed: 0,
+      animGroupsWithAnim: 0,
+      animGroupsWithSeesaw: 0,
+      animKeyframeEvals: 0,
       switchesMs: 0,
       objectsMs: 0,
+      goalTapesMs: 0,
+      goalBagsMs: 0,
+      visualsMs: 0,
+      bumpersMs: 0,
+      jamabarsMs: 0,
+      bananasMs: 0,
+      objectsSwitchesMs: 0,
+      syncTransformsMs: 0,
       lastAnimMs: 0,
+      lastAnimPlaybackMs: 0,
+      lastAnimKeyframesMs: 0,
+      lastAnimMatrixMs: 0,
+      lastAnimSeesawMs: 0,
+      lastAnimFinalizeMs: 0,
+      lastAnimGroupsProcessed: 0,
+      lastAnimGroupsWithAnim: 0,
+      lastAnimGroupsWithSeesaw: 0,
+      lastAnimKeyframeEvals: 0,
       lastSwitchesMs: 0,
       lastObjectsMs: 0,
+      lastGoalTapesMs: 0,
+      lastGoalBagsMs: 0,
+      lastVisualsMs: 0,
+      lastBumpersMs: 0,
+      lastJamabarsMs: 0,
+      lastBananasMs: 0,
+      lastObjectsSwitchesMs: 0,
+      lastSyncTransformsMs: 0,
     };
     this.simRng = new DeterministicRng(seed);
     this.visualRng = new DeterministicRng((seed ^ 0x9e3779b9) >>> 0);
@@ -345,21 +383,21 @@ export class StageRuntime {
     } else {
       this.timerFrames += frameDelta;
     }
-    let t = perfEnabled ? performance.now() : 0;
+    let t = perfEnabled ? perfNowMs() : 0;
     this.updateAnimGroups(this.timerFrames / 60, frameDelta, smb2LoadInFrames);
     if (perfEnabled) {
-      const dt = performance.now() - t;
+      const dt = perfNowMs() - t;
       perf.lastAnimMs = dt;
       perf.animMs += dt;
-      t = performance.now();
+      t = perfNowMs();
     }
     if (this.format === 'smb2') {
       this.updateSwitchesSmb2();
       if (perfEnabled) {
-        const dt = performance.now() - t;
+        const dt = perfNowMs() - t;
         perf.lastSwitchesMs = dt;
         perf.switchesMs += dt;
-        t = performance.now();
+        t = perfNowMs();
       }
     } else if (perfEnabled) {
       perf.lastSwitchesMs = 0;
@@ -367,7 +405,7 @@ export class StageRuntime {
     if (world) {
       this.updateObjects(world, ball, camera, includeVisuals);
       if (perfEnabled) {
-        const dt = performance.now() - t;
+        const dt = perfNowMs() - t;
         perf.lastObjectsMs = dt;
         perf.objectsMs += dt;
       }
@@ -1472,10 +1510,17 @@ export class StageRuntime {
 
   updateAnimGroups(timeSeconds, frameDelta = 1, smb2LoadInFrames = null) {
     const stage = this.stage;
+    const perf = this.advancePerf;
+    const perfEnabled = !!perf?.enabled;
     if (this.format === 'smb2') {
       this.updateAnimGroupsSmb2(frameDelta, smb2LoadInFrames);
       return;
     }
+    let keyframesMs = 0;
+    let matrixMs = 0;
+    let groupsProcessed = 0;
+    let groupsWithAnim = 0;
+    let keyframeEvals = 0;
     const loopSpan = stage.loopEndSeconds - stage.loopStartSeconds;
     let animTime = timeSeconds + stage.loopStartSeconds;
     if (loopSpan > 0) {
@@ -1489,32 +1534,45 @@ export class StageRuntime {
       const stageAg = stage.animGroups[i];
       const info = this.animGroups[i];
       const anim = stageAg.anim;
+      groupsProcessed += 1;
+      let t = perfEnabled ? perfNowMs() : 0;
 
       if (anim) {
+        groupsWithAnim += 1;
         if (anim.rotXKeyframes) {
+          keyframeEvals += 1;
           info.prevRot.x = info.rot.x;
           info.rot.x = degToS16(interpolateKeyframes(anim.rotXKeyframeCount, anim.rotXKeyframes, animTime));
         }
         if (anim.rotYKeyframes) {
+          keyframeEvals += 1;
           info.prevRot.y = info.rot.y;
           info.rot.y = degToS16(interpolateKeyframes(anim.rotYKeyframeCount, anim.rotYKeyframes, animTime));
         }
         if (anim.rotZKeyframes) {
+          keyframeEvals += 1;
           info.prevRot.z = info.rot.z;
           info.rot.z = degToS16(interpolateKeyframes(anim.rotZKeyframeCount, anim.rotZKeyframes, animTime));
         }
         if (anim.posXKeyframes) {
+          keyframeEvals += 1;
           info.prevPos.x = info.pos.x - stageAg.unkB8.x;
           info.pos.x = interpolateKeyframes(anim.posXKeyframeCount, anim.posXKeyframes, animTime);
         }
         if (anim.posYKeyframes) {
+          keyframeEvals += 1;
           info.prevPos.y = info.pos.y - stageAg.unkB8.y;
           info.pos.y = interpolateKeyframes(anim.posYKeyframeCount, anim.posYKeyframes, animTime);
         }
         if (anim.posZKeyframes) {
+          keyframeEvals += 1;
           info.prevPos.z = info.pos.z - stageAg.unkB8.z;
           info.pos.z = interpolateKeyframes(anim.posZKeyframeCount, anim.posZKeyframes, animTime);
         }
+      }
+      if (perfEnabled) {
+        keyframesMs += perfNowMs() - t;
+        t = perfNowMs();
       }
 
       this.matrixStack.fromTranslate(info.pos);
@@ -1534,10 +1592,41 @@ export class StageRuntime {
       this.matrixStack.rotateZ(-stageAg.initRot.z);
       this.matrixStack.translateNeg(stageAg.initPos);
       this.matrixStack.toMtx(info.prevTransform);
+      if (perfEnabled) {
+        matrixMs += perfNowMs() - t;
+      }
+    }
+    if (perfEnabled) {
+      perf.lastAnimPlaybackMs = 0;
+      perf.lastAnimKeyframesMs = keyframesMs;
+      perf.lastAnimMatrixMs = matrixMs;
+      perf.lastAnimSeesawMs = 0;
+      perf.lastAnimFinalizeMs = 0;
+      perf.lastAnimGroupsProcessed = groupsProcessed;
+      perf.lastAnimGroupsWithAnim = groupsWithAnim;
+      perf.lastAnimGroupsWithSeesaw = 0;
+      perf.lastAnimKeyframeEvals = keyframeEvals;
+
+      perf.animKeyframesMs += keyframesMs;
+      perf.animMatrixMs += matrixMs;
+      perf.animGroupsProcessed += groupsProcessed;
+      perf.animGroupsWithAnim += groupsWithAnim;
+      perf.animKeyframeEvals += keyframeEvals;
     }
   }
 
   updateAnimGroupsSmb2(frameDelta, smb2LoadInFrames = null) {
+    const perf = this.advancePerf;
+    const perfEnabled = !!perf?.enabled;
+    let playbackMs = 0;
+    let keyframesMs = 0;
+    let matrixMs = 0;
+    let seesawMs = 0;
+    let finalizeMs = 0;
+    let groupsProcessed = 0;
+    let groupsWithAnim = 0;
+    let groupsWithSeesaw = 0;
+    let keyframeEvals = 0;
     const stage = this.stage;
     const stack = this.matrixStack;
     const groupIndices = frameDelta === 0 ? this.allAnimGroupIndices : this.animGroupTickIndices;
@@ -1548,6 +1637,8 @@ export class StageRuntime {
       const anim = stageAg.anim;
       const playbackState = info.playbackState & 7;
       let animTime = null;
+      groupsProcessed += 1;
+      let t = perfEnabled ? perfNowMs() : 0;
 
       if (smb2LoadInFrames !== null && smb2LoadInFrames >= 0 && smb2LoadInFrames <= SMB2_STAGE_LOADIN_FRAMES) {
         if (playbackState === 1) {
@@ -1599,6 +1690,10 @@ export class StageRuntime {
           animTime += stageAg.loopStartSeconds;
         }
       }
+      if (perfEnabled) {
+        playbackMs += perfNowMs() - t;
+        t = perfNowMs();
+      }
 
       const renderPrevPosX = info.pos.x;
       const renderPrevPosY = info.pos.y;
@@ -1608,27 +1703,38 @@ export class StageRuntime {
       info.prevPos.z = info.pos.z - stageAg.conveyorSpeed.z;
 
       if (anim) {
+        groupsWithAnim += 1;
         if (anim.rotXKeyframes) {
+          keyframeEvals += 1;
           info.prevRot.x = info.rot.x;
           info.rot.x = degToS16(interpolateKeyframes(anim.rotXKeyframeCount, anim.rotXKeyframes, animTime));
         }
         if (anim.rotYKeyframes) {
+          keyframeEvals += 1;
           info.prevRot.y = info.rot.y;
           info.rot.y = degToS16(interpolateKeyframes(anim.rotYKeyframeCount, anim.rotYKeyframes, animTime));
         }
         if (anim.rotZKeyframes) {
+          keyframeEvals += 1;
           info.prevRot.z = info.rot.z;
           info.rot.z = degToS16(interpolateKeyframes(anim.rotZKeyframeCount, anim.rotZKeyframes, animTime));
         }
         if (anim.posXKeyframes) {
+          keyframeEvals += 1;
           info.pos.x = interpolateKeyframes(anim.posXKeyframeCount, anim.posXKeyframes, animTime);
         }
         if (anim.posYKeyframes) {
+          keyframeEvals += 1;
           info.pos.y = interpolateKeyframes(anim.posYKeyframeCount, anim.posYKeyframes, animTime);
         }
         if (anim.posZKeyframes) {
+          keyframeEvals += 1;
           info.pos.z = interpolateKeyframes(anim.posZKeyframeCount, anim.posZKeyframes, animTime);
         }
+      }
+      if (perfEnabled) {
+        keyframesMs += perfNowMs() - t;
+        t = perfNowMs();
       }
 
       const baseTransform = this.animBaseTransform;
@@ -1661,8 +1767,13 @@ export class StageRuntime {
       stack.rotateZ(-stageAg.initRot.z);
       stack.translateNeg(stageAg.origin);
       stack.toMtx(baseRenderPrevTransform);
+      if (perfEnabled) {
+        matrixMs += perfNowMs() - t;
+        t = perfNowMs();
+      }
 
       if (info.seesawState) {
+        groupsWithSeesaw += 1;
         tickSeesawState(info.seesawState);
         stack.fromMtx(baseTransform);
         stack.multRight(info.seesawState.transform);
@@ -1682,15 +1793,45 @@ export class StageRuntime {
           stack.multRight(info.seesawState.invTransform);
           stack.toMtx(info.renderPrevTransform);
         }
+        if (perfEnabled) {
+          seesawMs += perfNowMs() - t;
+        }
       } else {
         info.transform.set(baseTransform);
         info.prevTransform.set(basePrevTransform);
         info.renderPrevTransform?.set(baseRenderPrevTransform);
+        if (perfEnabled) {
+          finalizeMs += perfNowMs() - t;
+        }
       }
+    }
+    if (perfEnabled) {
+      perf.lastAnimPlaybackMs = playbackMs;
+      perf.lastAnimKeyframesMs = keyframesMs;
+      perf.lastAnimMatrixMs = matrixMs;
+      perf.lastAnimSeesawMs = seesawMs;
+      perf.lastAnimFinalizeMs = finalizeMs;
+      perf.lastAnimGroupsProcessed = groupsProcessed;
+      perf.lastAnimGroupsWithAnim = groupsWithAnim;
+      perf.lastAnimGroupsWithSeesaw = groupsWithSeesaw;
+      perf.lastAnimKeyframeEvals = keyframeEvals;
+
+      perf.animPlaybackMs += playbackMs;
+      perf.animKeyframesMs += keyframesMs;
+      perf.animMatrixMs += matrixMs;
+      perf.animSeesawMs += seesawMs;
+      perf.animFinalizeMs += finalizeMs;
+      perf.animGroupsProcessed += groupsProcessed;
+      perf.animGroupsWithAnim += groupsWithAnim;
+      perf.animGroupsWithSeesaw += groupsWithSeesaw;
+      perf.animKeyframeEvals += keyframeEvals;
     }
   }
 
   updateObjects(world, ball = null, camera = null, includeVisuals = true) {
+    const perf = this.advancePerf;
+    const perfEnabled = !!perf?.enabled;
+    let t = perfEnabled ? perfNowMs() : 0;
     const animGroups = this.animGroups;
     const gravity = world.gravity ?? { x: 0, y: -1, z: 0 };
     const stack = this.matrixStack;
@@ -1728,12 +1869,34 @@ export class StageRuntime {
     for (const tape of this.goalTapes) {
       updateGoalTape(tape, animGroups, gravity, stack);
     }
+    if (perfEnabled) {
+      const dt = perfNowMs() - t;
+      perf.lastGoalTapesMs = dt;
+      perf.goalTapesMs += dt;
+      t = perfNowMs();
+    }
     for (const bag of this.goalBags) {
       updateGoalBag(bag, animGroups, gravity, this.goalHoldOpen, stack, this.simRng);
+    }
+    if (perfEnabled) {
+      const dt = perfNowMs() - t;
+      perf.lastGoalBagsMs = dt;
+      perf.goalBagsMs += dt;
+      t = perfNowMs();
     }
     if (includeVisuals) {
       updateConfetti(this, gravity);
       updateBallEffects(this.effects, gravity, this, this.visualRng);
+    }
+    if (perfEnabled) {
+      if (includeVisuals) {
+        const dt = perfNowMs() - t;
+        perf.lastVisualsMs = dt;
+        perf.visualsMs += dt;
+      } else {
+        perf.lastVisualsMs = 0;
+      }
+      t = perfNowMs();
     }
     if (includeVisuals) {
       for (const groupIndex of this.bumperGroupIndices) {
@@ -1767,6 +1930,16 @@ export class StageRuntime {
           bumper.spin = toS16(bumper.spin + bumper.spinVel);
         }
       }
+    }
+    if (perfEnabled) {
+      if (includeVisuals) {
+        const dt = perfNowMs() - t;
+        perf.lastBumpersMs = dt;
+        perf.bumpersMs += dt;
+      } else {
+        perf.lastBumpersMs = 0;
+      }
+      t = perfNowMs();
     }
     for (const groupIndex of this.jamabarGroupIndices) {
       const jamabarStates = this.jamabars[groupIndex] ?? [];
@@ -1804,6 +1977,12 @@ export class StageRuntime {
         stack.tfPoint(jamabar.localPos, jamabar.pos);
       }
     }
+    if (perfEnabled) {
+      const dt = perfNowMs() - t;
+      perf.lastJamabarsMs = dt;
+      perf.jamabarsMs += dt;
+      t = perfNowMs();
+    }
     for (const banana of this.bananas) {
       banana.prevLocalPos.x = banana.localPos.x;
       banana.prevLocalPos.y = banana.localPos.y;
@@ -1829,6 +2008,12 @@ export class StageRuntime {
       }
       const allowFlyToHud = !!flyTargetLocal;
       updateBanana(banana, ballLocalPos, flyTargetLocal, allowFlyToHud);
+    }
+    if (perfEnabled) {
+      const dt = perfNowMs() - t;
+      perf.lastBananasMs = dt;
+      perf.bananasMs += dt;
+      t = perfNowMs();
     }
     for (const stageSwitch of this.switches) {
       if (stageSwitch.cooldown > 0) {
@@ -1914,7 +2099,18 @@ export class StageRuntime {
         stageSwitch.pos.z = stageSwitch.basePos.z + localPos.z;
       }
     }
+    if (perfEnabled) {
+      const dt = perfNowMs() - t;
+      perf.lastObjectsSwitchesMs = dt;
+      perf.objectsSwitchesMs += dt;
+      t = perfNowMs();
+    }
     this.syncObjectTransforms();
+    if (perfEnabled) {
+      const dt = perfNowMs() - t;
+      perf.lastSyncTransformsMs = dt;
+      perf.syncTransformsMs += dt;
+    }
   }
 
   syncObjectTransforms() {

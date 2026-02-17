@@ -105,6 +105,53 @@ const BONUS_SHOTTAIL_RENDER_SCALE = 52.68;
 const fallOutStack = new MatrixStack();
 const fallOutLocal = { x: 0, y: 0, z: 0 };
 
+function simNowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function createSimPerfStats() {
+  return {
+    enabled: false,
+    tickCount: 0,
+    tickMsTotal: 0,
+    tickMsLast: 0,
+    tickMsMax: 0,
+    stageAdvanceCount: 0,
+    stageAdvanceMsTotal: 0,
+    stageAdvanceMsLast: 0,
+    stageAdvanceMsMax: 0,
+    ballStepCount: 0,
+    ballStepMsTotal: 0,
+    ballStepMsLast: 0,
+    ballStepMsMax: 0,
+    playerCollisionCount: 0,
+    playerCollisionMsTotal: 0,
+    playerCollisionMsLast: 0,
+    playerCollisionMsMax: 0,
+    stageCollisionCalls: 0,
+    stageCollisionMsTotal: 0,
+    stageCollisionMsLast: 0,
+    stageCollisionMsMax: 0,
+    stageObjectCollisionCalls: 0,
+    stageObjectCollisionMsTotal: 0,
+    stageObjectCollisionMsLast: 0,
+    stageObjectCollisionMsMax: 0,
+    stageAnimGroupsVisited: 0,
+    stageAnimGroupsBroadphaseHits: 0,
+    stageTriCandidates: 0,
+    stageTriFaceTests: 0,
+    stageTriEdgeTests: 0,
+    stageTriVertTests: 0,
+    stagePrimitiveTests: 0,
+    objectAnimGroupsVisited: 0,
+    objectBumperTests: 0,
+    objectJamabarTests: 0,
+    objectGoalBagTests: 0,
+    objectGoalTapeTests: 0,
+    objectSwitchTests: 0,
+  };
+}
+
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -373,6 +420,7 @@ export class GameCore {
   public netplayRttMs: number | null;
   public netplayDebugLines: string[] | null;
   public netplayWarning: string | null;
+  public simPerf: any;
   public suppressVisualEffects: boolean;
   public suppressAudioEffects: boolean;
   public inputFeed: (QuantizedStick | QuantizedInput)[] | null;
@@ -511,6 +559,7 @@ export class GameCore {
     this.netplayRttMs = null;
     this.netplayDebugLines = null;
     this.netplayWarning = null;
+    this.simPerf = createSimPerfStats();
     this.suppressVisualEffects = false;
     this.suppressAudioEffects = false;
     this.inputFeed = null;
@@ -2993,6 +3042,12 @@ export class GameCore {
       this.stage = stage;
       this.stageAttempts = isRestart ? this.stageAttempts + 1 : 1;
       this.stageRuntime = new StageRuntime(stage, undefined, this.stageRulesetId ?? undefined);
+      const simPerfEnabled = !!this.simPerf?.enabled;
+      this.simPerf = createSimPerfStats();
+      this.simPerf.enabled = simPerfEnabled;
+      if (this.stageRuntime.advancePerf) {
+        this.stageRuntime.advancePerf.enabled = simPerfEnabled;
+      }
       this.simTick = 0;
       this.inputFeedIndex = 0;
       this.inputStartTick = 0;
@@ -3935,6 +3990,9 @@ export class GameCore {
         this.accumulator = 0;
       }
       while (!this.pendingAdvance && this.accumulator >= this.fixedStep) {
+        const simPerf = this.simPerf;
+        const simPerfEnabled = !!simPerf?.enabled;
+        const tickStartMs = simPerfEnabled ? simNowMs() : 0;
         try {
         const simPlayers = this.getPlayersSorted();
         const isSinglePlayer = this.session.isSinglePlayer(this);
@@ -4023,6 +4081,7 @@ export class GameCore {
         const stagePaused = this.paused || timeoverActive;
         const stageBall = isSinglePlayer ? localBall : null;
         const stageCamera = isSinglePlayer ? this.cameraController : null;
+        const stageAdvanceStartMs = simPerfEnabled ? simNowMs() : 0;
         this.stageRuntime.advance(
           1,
           stagePaused,
@@ -4033,6 +4092,15 @@ export class GameCore {
           stageCamera,
           !this.suppressVisualEffects,
         );
+        if (simPerfEnabled) {
+          const stageAdvanceMs = simNowMs() - stageAdvanceStartMs;
+          simPerf.stageAdvanceCount += 1;
+          simPerf.stageAdvanceMsTotal += stageAdvanceMs;
+          simPerf.stageAdvanceMsLast = stageAdvanceMs;
+          if (stageAdvanceMs > simPerf.stageAdvanceMsMax) {
+            simPerf.stageAdvanceMsMax = stageAdvanceMs;
+          }
+        }
         if (localPlayer.goalTimerFrames > 0) {
           const outcome = this.ruleset.updateGoalSequence({
             game: this,
@@ -4122,7 +4190,7 @@ export class GameCore {
               continue;
             }
             this.emitModHook('onBallUpdate', { game: this, playerId: player.id, ball });
-            stepBall(ball, this.stageRuntime, player.world, !this.suppressVisualEffects);
+            stepBall(ball, this.stageRuntime, player.world, !this.suppressVisualEffects, simPerf);
             if (ball.wormholeTransform) {
               const traversal = ball.wormholeTraversal;
               wormholeTeleports.push({
@@ -4185,7 +4253,17 @@ export class GameCore {
             this.accumulator = 0;
             break;
           }
+          const playerCollisionStartMs = simPerfEnabled ? simNowMs() : 0;
           this.resolvePlayerCollisions(simPlayers);
+          if (simPerfEnabled) {
+            const playerCollisionMs = simNowMs() - playerCollisionStartMs;
+            simPerf.playerCollisionCount += 1;
+            simPerf.playerCollisionMsTotal += playerCollisionMs;
+            simPerf.playerCollisionMsLast = playerCollisionMs;
+            if (playerCollisionMs > simPerf.playerCollisionMsMax) {
+              simPerf.playerCollisionMsMax = playerCollisionMs;
+            }
+          }
           const switchPresses = this.stageRuntime.switchPressCount ?? 0;
           if (switchPresses > 0) {
             this.stageRuntime.switchPressCount = 0;
@@ -4425,6 +4503,15 @@ export class GameCore {
         }
         this.accumulator -= this.fixedStep;
         } finally {
+          if (simPerfEnabled) {
+            const tickMs = simNowMs() - tickStartMs;
+            simPerf.tickCount += 1;
+            simPerf.tickMsTotal += tickMs;
+            simPerf.tickMsLast = tickMs;
+            if (tickMs > simPerf.tickMsMax) {
+              simPerf.tickMsMax = tickMs;
+            }
+          }
           this.simTick += 1;
           this.emitModHook('onAfterSimTick', { game: this, tick: this.simTick });
           if (this.replayAutoFastForward && this.replayInputStartTick !== null) {

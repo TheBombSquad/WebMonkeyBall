@@ -47,6 +47,7 @@ type RuntimeDeps = {
   getClientLeadFrames: (state: any) => number;
   isNetplayDebugEnabled: () => boolean;
   netplayDebugOverlay: { show: (warning: string | null, lines: string[]) => void; hide: () => void };
+  simPerfDebugOverlay: { show: (lines: string[]) => void; hide: () => void };
   constants: RuntimeConstants;
 };
 
@@ -352,10 +353,21 @@ export class NetplayRuntimeController {
 
   updateNetplayDebugOverlay(nowMs: number) {
     const state = this.deps.getNetplayState();
+    const debugEnabled = this.deps.isNetplayDebugEnabled();
+    const perfEnabled = this.deps.netplayEnabled() && !!state && debugEnabled;
+    const simPerf = this.deps.game.simPerf;
+    if (simPerf) {
+      simPerf.enabled = perfEnabled;
+    }
+    const stagePerf = this.deps.game.stageRuntime?.advancePerf;
+    if (stagePerf) {
+      stagePerf.enabled = perfEnabled;
+    }
     if (!this.deps.netplayEnabled() || !state) {
       this.deps.game.netplayDebugLines = null;
       this.deps.game.netplayWarning = null;
       this.deps.netplayDebugOverlay.hide();
+      this.deps.simPerfDebugOverlay.hide();
       return;
     }
     const localPlayer = this.deps.game.getLocalPlayer?.() ?? null;
@@ -377,8 +389,9 @@ export class NetplayRuntimeController {
     }
     this.deps.game.netplayWarning = warning;
 
-    if (!this.deps.isNetplayDebugEnabled()) {
+    if (!debugEnabled) {
       this.deps.game.netplayDebugLines = null;
+      this.deps.simPerfDebugOverlay.hide();
       if (!warning) {
         this.deps.netplayDebugOverlay.hide();
         return;
@@ -446,5 +459,64 @@ export class NetplayRuntimeController {
     lines.push(`intro=${this.deps.game.introTimerFrames} timeover=${this.deps.game.timeoverTimerFrames}`);
     this.deps.game.netplayDebugLines = lines;
     this.deps.netplayDebugOverlay.show(warning, lines);
+
+    const simLines: string[] = [];
+    if (simPerf) {
+      const tickAvg = simPerf.tickCount > 0 ? (simPerf.tickMsTotal / simPerf.tickCount) : 0;
+      const stageAvg = simPerf.stageAdvanceCount > 0 ? (simPerf.stageAdvanceMsTotal / simPerf.stageAdvanceCount) : 0;
+      const ballAvg = simPerf.ballStepCount > 0 ? (simPerf.ballStepMsTotal / simPerf.ballStepCount) : 0;
+      const collPairAvg = simPerf.playerCollisionCount > 0
+        ? (simPerf.playerCollisionMsTotal / simPerf.playerCollisionCount)
+        : 0;
+      const stageColAvg = simPerf.stageCollisionCalls > 0
+        ? (simPerf.stageCollisionMsTotal / simPerf.stageCollisionCalls)
+        : 0;
+      const objColAvg = simPerf.stageObjectCollisionCalls > 0
+        ? (simPerf.stageObjectCollisionMsTotal / simPerf.stageObjectCollisionCalls)
+        : 0;
+      simLines.push(`sim tick=${tickAvg.toFixed(3)}/${simPerf.tickMsMax.toFixed(2)} n=${simPerf.tickCount}`);
+      simLines.push(`sim stage=${stageAvg.toFixed(3)}/${simPerf.stageAdvanceMsMax.toFixed(2)} ball=${ballAvg.toFixed(3)}/${simPerf.ballStepMsMax.toFixed(2)}`);
+      simLines.push(`sim col pair=${collPairAvg.toFixed(3)}/${simPerf.playerCollisionMsMax.toFixed(2)} stage=${stageColAvg.toFixed(3)}/${simPerf.stageCollisionMsMax.toFixed(2)} obj=${objColAvg.toFixed(3)}/${simPerf.stageObjectCollisionMsMax.toFixed(2)}`);
+      const stageTests = simPerf.stageCollisionCalls > 0
+        ? `${simPerf.stageAnimGroupsBroadphaseHits}/${simPerf.stageAnimGroupsVisited} tri=${simPerf.stageTriCandidates} prim=${simPerf.stagePrimitiveTests}`
+        : '0/0 tri=0 prim=0';
+      const objectTests = simPerf.stageObjectCollisionCalls > 0
+        ? `ag=${simPerf.objectAnimGroupsVisited} b=${simPerf.objectBumperTests} j=${simPerf.objectJamabarTests} g=${simPerf.objectGoalBagTests} t=${simPerf.objectGoalTapeTests} s=${simPerf.objectSwitchTests}`
+        : 'ag=0 b=0 j=0 g=0 t=0 s=0';
+      simLines.push(`sim stageTests ${stageTests}`);
+      simLines.push(`sim objectTests ${objectTests}`);
+    }
+    if (stagePerf) {
+      const animAvg = stagePerf.tickCount > 0 ? (stagePerf.animMs / stagePerf.tickCount) : 0;
+      const animPlaybackAvg = stagePerf.tickCount > 0 ? (stagePerf.animPlaybackMs / stagePerf.tickCount) : 0;
+      const animKeyframesAvg = stagePerf.tickCount > 0 ? (stagePerf.animKeyframesMs / stagePerf.tickCount) : 0;
+      const animMatrixAvg = stagePerf.tickCount > 0 ? (stagePerf.animMatrixMs / stagePerf.tickCount) : 0;
+      const animSeesawAvg = stagePerf.tickCount > 0 ? (stagePerf.animSeesawMs / stagePerf.tickCount) : 0;
+      const animFinalizeAvg = stagePerf.tickCount > 0 ? (stagePerf.animFinalizeMs / stagePerf.tickCount) : 0;
+      const animGroupsAvg = stagePerf.tickCount > 0 ? (stagePerf.animGroupsProcessed / stagePerf.tickCount) : 0;
+      const animGroupsWithAnimAvg = stagePerf.tickCount > 0 ? (stagePerf.animGroupsWithAnim / stagePerf.tickCount) : 0;
+      const animGroupsWithSeesawAvg = stagePerf.tickCount > 0 ? (stagePerf.animGroupsWithSeesaw / stagePerf.tickCount) : 0;
+      const animKeyEvalAvg = stagePerf.tickCount > 0 ? (stagePerf.animKeyframeEvals / stagePerf.tickCount) : 0;
+      const switchAvg = stagePerf.tickCount > 0 ? (stagePerf.switchesMs / stagePerf.tickCount) : 0;
+      const objAvg = stagePerf.tickCount > 0 ? (stagePerf.objectsMs / stagePerf.tickCount) : 0;
+      const goalTapeAvg = stagePerf.tickCount > 0 ? (stagePerf.goalTapesMs / stagePerf.tickCount) : 0;
+      const goalBagAvg = stagePerf.tickCount > 0 ? (stagePerf.goalBagsMs / stagePerf.tickCount) : 0;
+      const visualAvg = stagePerf.tickCount > 0 ? (stagePerf.visualsMs / stagePerf.tickCount) : 0;
+      const bumperAvg = stagePerf.tickCount > 0 ? (stagePerf.bumpersMs / stagePerf.tickCount) : 0;
+      const jamabarAvg = stagePerf.tickCount > 0 ? (stagePerf.jamabarsMs / stagePerf.tickCount) : 0;
+      const bananaAvg = stagePerf.tickCount > 0 ? (stagePerf.bananasMs / stagePerf.tickCount) : 0;
+      const switchObjAvg = stagePerf.tickCount > 0 ? (stagePerf.objectsSwitchesMs / stagePerf.tickCount) : 0;
+      const syncAvg = stagePerf.tickCount > 0 ? (stagePerf.syncTransformsMs / stagePerf.tickCount) : 0;
+      simLines.push(`stage anim=${animAvg.toFixed(3)} sw=${switchAvg.toFixed(3)} obj=${objAvg.toFixed(3)}`);
+      simLines.push(`anim key=${animKeyframesAvg.toFixed(3)} mat=${animMatrixAvg.toFixed(3)} play=${animPlaybackAvg.toFixed(3)} see=${animSeesawAvg.toFixed(3)} fin=${animFinalizeAvg.toFixed(3)}`);
+      simLines.push(`anim grp=${animGroupsAvg.toFixed(1)} a=${animGroupsWithAnimAvg.toFixed(1)} s=${animGroupsWithSeesawAvg.toFixed(1)} eval=${animKeyEvalAvg.toFixed(1)}`);
+      simLines.push(`obj tape=${goalTapeAvg.toFixed(3)} bag=${goalBagAvg.toFixed(3)} vis=${visualAvg.toFixed(3)} bump=${bumperAvg.toFixed(3)} jam=${jamabarAvg.toFixed(3)}`);
+      simLines.push(`obj banana=${bananaAvg.toFixed(3)} switch=${switchObjAvg.toFixed(3)} sync=${syncAvg.toFixed(3)}`);
+    }
+    if (simLines.length > 0) {
+      this.deps.simPerfDebugOverlay.show(simLines);
+    } else {
+      this.deps.simPerfDebugOverlay.hide();
+    }
   }
 }
