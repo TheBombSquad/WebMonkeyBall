@@ -21,6 +21,25 @@ export class RollbackSession<T> {
   private statePool: T[] = [];
   private lastFrame = 0;
   public suppressVisuals = false;
+  public perf = {
+    enabled: true,
+    saveCount: 0,
+    saveMsTotal: 0,
+    saveMsLast: 0,
+    saveMsMax: 0,
+    loadCount: 0,
+    loadMsTotal: 0,
+    loadMsLast: 0,
+    loadMsMax: 0,
+    advanceCount: 0,
+    advanceMsTotal: 0,
+    advanceMsLast: 0,
+    advanceMsMax: 0,
+    rollbackCount: 0,
+    rollbackMissCount: 0,
+    rollbackDistanceTotal: 0,
+    rollbackDistanceMax: 0,
+  };
 
   constructor(callbacks: RollbackCallbacks<T>, maxRollbackFrames = 30) {
     this.callbacks = callbacks;
@@ -35,6 +54,50 @@ export class RollbackSession<T> {
 
   getFrame() {
     return this.lastFrame;
+  }
+
+  private nowMs() {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+
+  private recordPerf(kind: 'save' | 'load' | 'advance', elapsedMs: number) {
+    const ms = Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0;
+    if (kind === 'save') {
+      this.perf.saveCount += 1;
+      this.perf.saveMsTotal += ms;
+      this.perf.saveMsLast = ms;
+      if (ms > this.perf.saveMsMax) {
+        this.perf.saveMsMax = ms;
+      }
+      return;
+    }
+    if (kind === 'load') {
+      this.perf.loadCount += 1;
+      this.perf.loadMsTotal += ms;
+      this.perf.loadMsLast = ms;
+      if (ms > this.perf.loadMsMax) {
+        this.perf.loadMsMax = ms;
+      }
+      return;
+    }
+    this.perf.advanceCount += 1;
+    this.perf.advanceMsTotal += ms;
+    this.perf.advanceMsLast = ms;
+    if (ms > this.perf.advanceMsMax) {
+      this.perf.advanceMsMax = ms;
+    }
+  }
+
+  private measurePerf<R>(kind: 'save' | 'load' | 'advance', fn: () => R): R {
+    if (!this.perf.enabled) {
+      return fn();
+    }
+    const startMs = this.nowMs();
+    try {
+      return fn();
+    } finally {
+      this.recordPerf(kind, this.nowMs() - startMs);
+    }
   }
 
   private recycleState(state: T | undefined) {
@@ -92,7 +155,7 @@ export class RollbackSession<T> {
     this.resetHistory();
     this.lastFrame = target;
     const reusable = this.statePool.pop();
-    this.setStateHistory(target, this.callbacks.saveState(reusable));
+    this.setStateHistory(target, this.measurePerf('save', () => this.callbacks.saveState(reusable)));
     this.setInputHistory(target, new Map());
     this.trimHistory(target);
   }
@@ -103,19 +166,29 @@ export class RollbackSession<T> {
 
   advanceTo(frame: number, inputs: FrameInputs) {
     this.setInputHistory(frame, inputs);
-    this.callbacks.advanceFrame(inputs);
+    this.measurePerf('advance', () => this.callbacks.advanceFrame(inputs));
     this.lastFrame = frame;
     const reusable = this.getState(frame) ?? this.statePool.pop();
-    this.setStateHistory(frame, this.callbacks.saveState(reusable));
+    this.setStateHistory(frame, this.measurePerf('save', () => this.callbacks.saveState(reusable)));
     this.trimHistory(frame);
   }
 
   rollbackTo(frame: number) {
     const state = this.getState(frame);
     if (!state) {
+      this.perf.rollbackMissCount += 1;
       return false;
     }
-    this.callbacks.loadState(state);
+    const prevFrame = this.lastFrame;
+    this.perf.rollbackCount += 1;
+    if (frame < prevFrame) {
+      const distance = prevFrame - frame;
+      this.perf.rollbackDistanceTotal += distance;
+      if (distance > this.perf.rollbackDistanceMax) {
+        this.perf.rollbackDistanceMax = distance;
+      }
+    }
+    this.measurePerf('load', () => this.callbacks.loadState(state));
     this.lastFrame = frame;
     return true;
   }

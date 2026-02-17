@@ -1060,18 +1060,65 @@ export class GameCore {
         out[key] = undefined;
       }
     }
-    for (const [key, value] of Object.entries(src)) {
+    for (const key of Object.keys(src)) {
+      const value = src[key];
       if (key === 'replayEntryVel') {
         out.replayEntryVel = value && typeof value === 'object'
           ? this.cloneVec3(value, out.replayEntryVel ?? null)
           : null;
         continue;
       }
-      if (value === null || typeof value !== 'object') {
-        out[key] = value;
-        continue;
+      out[key] = this.cloneRollbackValue(value, out[key]);
+    }
+    return out;
+  }
+
+  private cloneRollbackValue(source, target = null, depth = 0) {
+    if (source === null || source === undefined) {
+      return source;
+    }
+    const sourceType = typeof source;
+    if (sourceType !== 'object') {
+      return source;
+    }
+    if (depth > 8) {
+      return source;
+    }
+    if (Array.isArray(source)) {
+      const out = Array.isArray(target) ? target : [];
+      out.length = source.length;
+      for (let i = 0; i < source.length; i += 1) {
+        out[i] = this.cloneRollbackValue(source[i], out[i], depth + 1);
       }
-      out[key] = structuredClone(value);
+      return out;
+    }
+    if (
+      ArrayBuffer.isView(source)
+      && !(source instanceof DataView)
+      && Number.isFinite((source as any).length)
+      && typeof (source as any).set === 'function'
+    ) {
+      const Ctor = (source as any).constructor;
+      const length = (source as any).length | 0;
+      const out = target instanceof Ctor && target.length === length
+        ? target
+        : new Ctor(length);
+      out.set(source as any);
+      return out;
+    }
+    const sourceProto = Object.getPrototypeOf(source);
+    if (sourceProto !== Object.prototype && sourceProto !== null) {
+      return source;
+    }
+    const out = target && typeof target === 'object' && !Array.isArray(target) ? target : {};
+    const src = source as Record<string, unknown>;
+    for (const key of Object.keys(out)) {
+      if (!(key in src)) {
+        out[key] = undefined;
+      }
+    }
+    for (const key of Object.keys(src)) {
+      out[key] = this.cloneRollbackValue(src[key], out[key], depth + 1);
     }
     return out;
   }

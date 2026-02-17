@@ -421,6 +421,28 @@ export class NetplayRuntimeController {
     if (localPlayer) {
       lines.push(`local spec=${localPlayer.isSpectator ? 1 : 0} spawn=${localPlayer.pendingSpawn ? 1 : 0} state=${localPlayer.ball?.state ?? 0}`);
     }
+    const sessionPerf = state.session?.perf;
+    if (sessionPerf) {
+      const saveAvg = sessionPerf.saveCount > 0 ? (sessionPerf.saveMsTotal / sessionPerf.saveCount) : 0;
+      const loadAvg = sessionPerf.loadCount > 0 ? (sessionPerf.loadMsTotal / sessionPerf.loadCount) : 0;
+      const advanceAvg = sessionPerf.advanceCount > 0 ? (sessionPerf.advanceMsTotal / sessionPerf.advanceCount) : 0;
+      const rollbackAvgDist = sessionPerf.rollbackCount > 0
+        ? (sessionPerf.rollbackDistanceTotal / sessionPerf.rollbackCount)
+        : 0;
+      lines.push(`rbk cnt=${sessionPerf.rollbackCount} miss=${sessionPerf.rollbackMissCount} dist=${rollbackAvgDist.toFixed(1)}/${sessionPerf.rollbackDistanceMax}`);
+      lines.push(`rbkms s=${saveAvg.toFixed(3)}/${sessionPerf.saveMsMax.toFixed(2)} l=${loadAvg.toFixed(3)}/${sessionPerf.loadMsMax.toFixed(2)} a=${advanceAvg.toFixed(3)}/${sessionPerf.advanceMsMax.toFixed(2)}`);
+    }
+    const rollbackPerf = state.rollbackPerf;
+    if (rollbackPerf) {
+      const rollbackResimAvgMs = rollbackPerf.rollbackEvents > 0
+        ? (rollbackPerf.rollbackResimMsTotal / rollbackPerf.rollbackEvents)
+        : 0;
+      const snapshotResimAvgMs = rollbackPerf.snapshotResimEvents > 0
+        ? (rollbackPerf.snapshotResimMsTotal / rollbackPerf.snapshotResimEvents)
+        : 0;
+      lines.push(`resim rbk=${rollbackPerf.rollbackEvents} fail=${rollbackPerf.rollbackFails} fr=${rollbackPerf.rollbackResimFrames} ms=${rollbackResimAvgMs.toFixed(2)}/${rollbackPerf.rollbackResimMsMax.toFixed(2)}`);
+      lines.push(`resim snap=${rollbackPerf.snapshotApplyCount}/${rollbackPerf.snapshotResimEvents} fr=${rollbackPerf.snapshotResimFrames} ms=${snapshotResimAvgMs.toFixed(2)}/${rollbackPerf.snapshotResimMsMax.toFixed(2)}`);
+    }
     lines.push(`intro=${this.deps.game.introTimerFrames} timeover=${this.deps.game.timeoverTimerFrames}`);
     this.deps.game.netplayDebugLines = lines;
     this.deps.netplayDebugOverlay.show(warning, lines);

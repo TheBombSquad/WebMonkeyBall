@@ -18,6 +18,35 @@ export class NetplaySimulationSyncController {
     this.deps = deps;
   }
 
+  private nowMs() {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+
+  private ensureRollbackPerf(state: any) {
+    if (state.rollbackPerf) {
+      return state.rollbackPerf;
+    }
+    state.rollbackPerf = {
+      rollbackEvents: 0,
+      rollbackFails: 0,
+      rollbackResimFrames: 0,
+      rollbackResimMsTotal: 0,
+      rollbackResimMsLast: 0,
+      rollbackResimMsMax: 0,
+      snapshotApplyCount: 0,
+      snapshotResimEvents: 0,
+      snapshotResimFrames: 0,
+      snapshotResimMsTotal: 0,
+      snapshotResimMsLast: 0,
+      snapshotResimMsMax: 0,
+      lastRollbackStartFrame: -1,
+      lastRollbackDistance: 0,
+      lastSnapshotFrame: -1,
+      lastSnapshotResimFrames: 0,
+    };
+    return state.rollbackPerf;
+  }
+
   recordInputForFrame(frame: number, playerId: number, input: QuantizedInput) {
     const state = this.deps.getNetplayState();
     if (!state) {
@@ -80,12 +109,19 @@ export class NetplaySimulationSyncController {
     if (!state) {
       return false;
     }
+    const perf = this.ensureRollbackPerf(state);
+    perf.rollbackEvents += 1;
+    perf.lastRollbackStartFrame = startFrame | 0;
     const session = state.session;
     const current = session.getFrame();
     const rollbackFrame = Math.max(0, startFrame - 1);
     if (!session.rollbackTo(rollbackFrame)) {
+      perf.rollbackFails += 1;
       return false;
     }
+    const resimFrames = Math.max(0, current - rollbackFrame);
+    perf.lastRollbackDistance = resimFrames;
+    const startMs = this.nowMs();
     const prevSuppress = session.suppressVisuals;
     session.suppressVisuals = true;
     try {
@@ -113,6 +149,13 @@ export class NetplaySimulationSyncController {
       }
     } finally {
       session.suppressVisuals = prevSuppress;
+      const elapsedMs = this.nowMs() - startMs;
+      perf.rollbackResimFrames += resimFrames;
+      perf.rollbackResimMsTotal += elapsedMs;
+      perf.rollbackResimMsLast = elapsedMs;
+      if (elapsedMs > perf.rollbackResimMsMax) {
+        perf.rollbackResimMsMax = elapsedMs;
+      }
     }
     return true;
   }
@@ -122,10 +165,17 @@ export class NetplaySimulationSyncController {
     if (!state) {
       return;
     }
+    const perf = this.ensureRollbackPerf(state);
+    perf.lastSnapshotFrame = snapshotFrame | 0;
     if (targetFrame <= snapshotFrame) {
+      perf.lastSnapshotResimFrames = 0;
       return;
     }
     const session = state.session;
+    const resimFrames = Math.max(0, targetFrame - snapshotFrame);
+    perf.snapshotResimEvents += 1;
+    perf.lastSnapshotResimFrames = resimFrames;
+    const startMs = this.nowMs();
     const prevSuppress = session.suppressVisuals;
     session.suppressVisuals = true;
     try {
@@ -139,6 +189,13 @@ export class NetplaySimulationSyncController {
       }
     } finally {
       session.suppressVisuals = prevSuppress;
+      const elapsedMs = this.nowMs() - startMs;
+      perf.snapshotResimFrames += resimFrames;
+      perf.snapshotResimMsTotal += elapsedMs;
+      perf.snapshotResimMsLast = elapsedMs;
+      if (elapsedMs > perf.snapshotResimMsMax) {
+        perf.snapshotResimMsMax = elapsedMs;
+      }
     }
   }
 
@@ -160,6 +217,9 @@ export class NetplaySimulationSyncController {
     this.deps.game.loadRollbackState(pendingSnapshot.state);
     this.deps.resetNetplaySession();
     if (state) {
+      const perf = this.ensureRollbackPerf(state);
+      perf.snapshotApplyCount += 1;
+      perf.lastSnapshotFrame = snapshotFrame | 0;
       state.lastReceivedHostFrame = Math.max(state.lastReceivedHostFrame, snapshotFrame);
       state.awaitingSnapshot = false;
       state.hashHistory.clear();
