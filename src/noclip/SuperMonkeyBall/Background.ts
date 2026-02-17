@@ -2,7 +2,7 @@ import { RenderContext } from "./Render.js";
 import { BgObjectInst } from "./BgObject.js";
 import { ModelInst, RenderParams, RenderSort } from "./Model.js";
 import { mat4, vec3 } from "gl-matrix";
-import { Vec3Zero, transformVec3Mat4w1 } from "../MathHelpers.js";
+import { Vec3NegZ, Vec3Zero, transformVec3Mat4w0, transformVec3Mat4w1 } from "../MathHelpers.js";
 import { getMat4RotY, S16_TO_RADIANS } from "./Utils.js";
 import { Lighting } from "./Lighting.js";
 import { BgNightModelID, BgStormModelID } from "./ModelInfo.js";
@@ -16,8 +16,16 @@ import {
     GfxChannelWriteMask,
     GfxCompareMode,
     GfxCullMode,
+    GfxMipFilterMode,
+    type GfxProgram,
+    GfxTexFilterMode,
 } from "../gfx/platform/GfxPlatform.js";
 import { makeMegaState, setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
+import { GfxShaderLibrary } from "../gfx/helpers/GfxShaderLibrary.js";
+import { preprocessProgram_GLSL } from "../gfx/shaderc/GfxShaderCompiler.js";
+import { fillMatrix4x4, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
+import { GXTextureMapping, fillSceneParamsDataOnTemplate, gxBindingLayouts, translateWrapModeGfx } from "../gx/gx_render.js";
+import * as GX from "../gx/gx_enum.js";
 
 export interface Background {
     update(state: WorldState): void;
@@ -76,16 +84,228 @@ const POT_OVERLAY_MEGASTATE = makeMegaState(
     )
 );
 
-function getOverlayHalfExtents(camera: any, viewZ: number): [number, number] {
+const LAVA_OVERLAY_UBO_INDEX = 1;
+const LAVA_OVERLAY_UBO_WORDS = 36;
+const POT_OVERLAY_UBO_INDEX = 1;
+const POT_OVERLAY_UBO_WORDS = 60;
+
+function createLavaOverlayProgram(ctx: RenderContext): GfxProgram {
+    const vert = `
+${GfxShaderLibrary.MatrixLibrary}
+
+layout(std140) uniform ub_SceneParams {
+    Mat4x4 u_Projection;
+    vec4 u_Misc0;
+};
+
+layout(std140) uniform ub_OverlayParams {
+    Mat4x4 u_ViewFromModel;
+    Mat4x4 u_TexMtx;
+    vec4 u_Color;
+};
+
+layout(location = 0) in vec4 a_Position;
+layout(location = 8) in vec4 a_Tex01;
+
+out vec2 v_TexCoord;
+out vec3 v_Color;
+
+void main() {
+    mat4 viewFromModel = UnpackMatrix(u_ViewFromModel);
+    vec4 posView = viewFromModel * vec4(a_Position.xyz, 1.0);
+    gl_Position = UnpackMatrix(u_Projection) * posView;
+    vec4 texCoord = UnpackMatrix(u_TexMtx) * vec4(a_Tex01.xy, 0.0, 1.0);
+    v_TexCoord = texCoord.xy;
+    v_Color = u_Color.rgb;
+}
+`;
+
+    const frag = `
+precision highp float;
+
+uniform sampler2D u_Texture;
+
+in vec2 v_TexCoord;
+in vec3 v_Color;
+
+out vec4 o_Color;
+
+void main() {
+    vec4 tex = texture(u_Texture, v_TexCoord);
+    o_Color = vec4(tex.rgb * v_Color, 1.0);
+}
+`;
+
+    const program = preprocessProgram_GLSL(ctx.device.queryVendorInfo(), vert, frag);
+    return ctx.renderInstManager.gfxRenderCache.createProgramSimple(program);
+}
+
+function createPotOverlayProgram(ctx: RenderContext): GfxProgram {
+    const vert = `
+${GfxShaderLibrary.MatrixLibrary}
+
+layout(std140) uniform ub_SceneParams {
+    Mat4x4 u_Projection;
+    vec4 u_Misc0;
+};
+
+layout(std140) uniform ub_OverlayParams {
+    Mat4x4 u_ViewFromModel;
+    Mat4x4 u_TexMtx0;
+    Mat4x4 u_TexMtx1;
+    vec4 u_IndTexMtx0;
+    vec4 u_IndTexMtx1;
+    vec4 u_AlphaCorners;
+};
+
+layout(location = 0) in vec4 a_Position;
+layout(location = 8) in vec4 a_Tex01;
+
+out vec2 v_UV;
+
+void main() {
+    mat4 viewFromModel = UnpackMatrix(u_ViewFromModel);
+    vec4 posView = viewFromModel * vec4(a_Position.xyz, 1.0);
+    gl_Position = UnpackMatrix(u_Projection) * posView;
+    v_UV = a_Tex01.xy;
+}
+`;
+
+    const frag = `
+${GfxShaderLibrary.MatrixLibrary}
+
+precision highp float;
+
+layout(std140) uniform ub_OverlayParams {
+    Mat4x4 u_ViewFromModel;
+    Mat4x4 u_TexMtx0;
+    Mat4x4 u_TexMtx1;
+    vec4 u_IndTexMtx0;
+    vec4 u_IndTexMtx1;
+    vec4 u_AlphaCorners;
+};
+
+uniform sampler2D u_Texture0;
+uniform sampler2D u_Texture1;
+
+in vec2 v_UV;
+
+out vec4 o_Color;
+
+float getAlpha(vec2 uv) {
+    float a00 = u_AlphaCorners.x;
+    float a10 = u_AlphaCorners.y;
+    float a11 = u_AlphaCorners.z;
+    float a01 = u_AlphaCorners.w;
+    float a0 = mix(a00, a10, uv.x);
+    float a1 = mix(a01, a11, uv.x);
+    return mix(a0, a1, uv.y);
+}
+
+void main() {
+    vec2 texSize = vec2(textureSize(u_Texture0, 0));
+    vec2 baseUV = (UnpackMatrix(u_TexMtx0) * vec4(v_UV, 0.0, 1.0)).xy;
+    vec2 indUV = (UnpackMatrix(u_TexMtx1) * vec4(v_UV, 0.0, 1.0)).xy;
+    vec3 indCoord = 255.0 * texture(u_Texture1, indUV).abg + vec3(-128.0);
+    vec2 indOffset = vec2(
+        dot(u_IndTexMtx0.xyz, indCoord),
+        dot(u_IndTexMtx1.xyz, indCoord)
+    );
+    vec2 finalUV = (baseUV * texSize + indOffset) / texSize;
+    vec3 tex = texture(u_Texture0, finalUV).rgb;
+    o_Color = vec4(tex, getAlpha(v_UV));
+}
+`;
+
+    const program = preprocessProgram_GLSL(ctx.device.queryVendorInfo(), vert, frag);
+    return ctx.renderInstManager.gfxRenderCache.createProgramSimple(program);
+}
+
+function ensureOverlayTextureMapping(
+    state: WorldState,
+    ctx: RenderContext,
+    overlayModel: ModelInst,
+    mapping: GXTextureMapping,
+): boolean {
+    if (mapping.gfxTexture && mapping.gfxSampler) {
+        return true;
+    }
+
+    const tevLayer = overlayModel.modelData.tevLayers[0];
+    if (!tevLayer) {
+        return false;
+    }
+    state.modelCache.fillTextureMappingFromGxTexture(tevLayer.gxTexture, mapping);
+
+    const wrapS = ((tevLayer.flags >> 2) & 0x03) as GX.WrapMode;
+    const wrapT = ((tevLayer.flags >> 4) & 0x03) as GX.WrapMode;
+    const width = tevLayer.gxTexture.width;
+    const height = tevLayer.gxTexture.height;
+    let maxLod = (tevLayer.flags >> 7) & 0x0f;
+    if (width !== height) {
+        maxLod = 0;
+    } else if (maxLod === 15) {
+        const minDim = Math.min(width, height);
+        maxLod = Math.max(0, Math.log2(minDim) - 4);
+    }
+
+    mapping.gfxSampler = ctx.renderInstManager.gfxRenderCache.createSampler({
+        wrapS: translateWrapModeGfx(wrapS),
+        wrapT: translateWrapModeGfx(wrapT),
+        minFilter: GfxTexFilterMode.Bilinear,
+        magFilter: GfxTexFilterMode.Bilinear,
+        mipFilter: maxLod === 0 ? GfxMipFilterMode.Nearest : GfxMipFilterMode.Linear,
+        minLOD: 0,
+        maxLOD: maxLod,
+    });
+    return !!mapping.gfxTexture && !!mapping.gfxSampler;
+}
+
+function toGXByteNorm(value: number): number {
+    const byte = ((Math.trunc(value) % 256) + 256) % 256;
+    return byte / 255;
+}
+
+type OverlayFrustumQuad = {
+    centerX: number;
+    centerY: number;
+    scaleX: number;
+    scaleY: number;
+};
+
+function getOverlayFrustumQuad(camera: any, viewZ: number): OverlayFrustumQuad {
+    const proj = camera?.projectionMatrix as mat4 | undefined;
+    if (proj && !camera?.isOrthographic && Math.abs(proj[0]) > 1e-6 && Math.abs(proj[5]) > 1e-6) {
+        const left = viewZ * (-1.0 + proj[8]) / proj[0];
+        const right = viewZ * (1.0 + proj[8]) / proj[0];
+        const bottom = viewZ * (-1.0 + proj[9]) / proj[5];
+        const top = viewZ * (1.0 + proj[9]) / proj[5];
+        return {
+            centerX: (left + right) * 0.5,
+            centerY: (bottom + top) * 0.5,
+            scaleX: (right - left) / (OVERLAY_MODEL_HALF_SIZE * 2.0),
+            scaleY: (top - bottom) / (OVERLAY_MODEL_HALF_SIZE * 2.0),
+        };
+    }
     if (camera?.isOrthographic) {
         const halfHeight = camera.top ?? 1;
         const halfWidth = halfHeight * (camera.aspect ?? 1);
-        return [halfWidth, halfHeight];
+        return {
+            centerX: 0.0,
+            centerY: 0.0,
+            scaleX: halfWidth / OVERLAY_MODEL_HALF_SIZE,
+            scaleY: halfHeight / OVERLAY_MODEL_HALF_SIZE,
+        };
     }
     const fovY = camera?.fovY ?? Math.PI / 3;
     const aspect = camera?.aspect ?? 1;
     const halfHeight = Math.tan(fovY * 0.5) * viewZ;
-    return [halfHeight * aspect, halfHeight];
+    return {
+        centerX: 0.0,
+        centerY: 0.0,
+        scaleX: (halfHeight * aspect) / OVERLAY_MODEL_HALF_SIZE,
+        scaleY: halfHeight / OVERLAY_MODEL_HALF_SIZE,
+    };
 }
 
 type LavaOverlayState = {
@@ -99,7 +319,6 @@ type LavaOverlayState = {
     texScale: number;
     wavePhase: number;
     waveStep: number;
-    floorY: number | null;
 };
 
 type PotOverlayState = {
@@ -119,16 +338,16 @@ type PotOverlayState = {
     alphaTopRight: number;
     alphaBottomRight: number;
     alphaBottomLeft: number;
-    phaseA: number;
-    phaseB: number;
-    floorY: number | null;
 };
 
-function clamp01(v: number): number {
-    if (v < 0) return 0;
-    if (v > 1) return 1;
-    return v;
-}
+type PotWindState = {
+    toggle: number;
+    timer: number;
+    current: vec3;
+    velocity: vec3;
+    target: vec3;
+    baseDir: vec3;
+};
 
 function randomRange(min: number, max: number): number {
     return min + Math.random() * (max - min);
@@ -140,15 +359,10 @@ function randomSign(): number {
 
 function createLavaOverlayState(): LavaOverlayState {
     const texDir = vec3.create();
-    const yaw = randomRange(0, Math.PI * 2);
-    const pitch = randomRange(-Math.PI * 0.5, Math.PI * 0.5);
-    vec3.set(
-        texDir,
-        Math.cos(pitch) * Math.cos(yaw),
-        Math.sin(pitch),
-        Math.cos(pitch) * Math.sin(yaw)
-    );
-    vec3.normalize(texDir, texDir);
+    mat4.identity(scratchMat4a);
+    mat4.rotateY(scratchMat4a, scratchMat4a, ((Math.random() * 0x8000) | 0) * S16_TO_RADIANS);
+    mat4.rotateX(scratchMat4a, scratchMat4a, ((Math.random() * 0x8000) | 0) * S16_TO_RADIANS);
+    transformVec3Mat4w0(texDir, scratchMat4a, Vec3NegZ);
     return {
         glow0: 1,
         glow0Vel: 0,
@@ -160,7 +374,6 @@ function createLavaOverlayState(): LavaOverlayState {
         texScale: 1,
         wavePhase: ((Math.random() * 0x7fff) | 0) * S16_TO_RADIANS,
         waveStep: ((Math.random() * 0x020f) | 0) * S16_TO_RADIANS,
-        floorY: null,
     };
 }
 
@@ -182,21 +395,42 @@ function createPotOverlayState(): PotOverlayState {
         alphaTopRight: 255,
         alphaBottomRight: 255,
         alphaBottomLeft: 255,
-        phaseA: randomRange(0, Math.PI * 2),
-        phaseB: randomRange(0, Math.PI * 2),
-        floorY: null,
+    };
+}
+
+function createPotWindState(): PotWindState {
+    const baseDir = vec3.create();
+    mat4.identity(scratchMat4a);
+    mat4.rotateY(scratchMat4a, scratchMat4a, ((Math.random() * 0x8000) | 0) * S16_TO_RADIANS);
+    mat4.rotateX(scratchMat4a, scratchMat4a, ((((Math.random() * 0x200) | 0) - 0x100) * S16_TO_RADIANS));
+    transformVec3Mat4w0(baseDir, scratchMat4a, Vec3NegZ);
+    return {
+        toggle: (Math.random() * 2) | 0,
+        timer: (Math.random() * 240) | 0,
+        current: vec3.fromValues(
+            (Math.random() - 0.5) * 2.0,
+            (Math.random() - 0.5) * 0.1,
+            (Math.random() - 0.5) * 2.0,
+        ),
+        velocity: vec3.create(),
+        target: vec3.create(),
+        baseDir,
     };
 }
 
 const scratchOverlayForward = vec3.create();
 const scratchOverlayCameraPos = vec3.create();
+const scratchOverlayVecA = vec3.create();
+const scratchOverlayVecB = vec3.create();
+const scratchOverlayMat4 = mat4.create();
 function getCameraForward(out: vec3, camera: any): vec3 {
-    if (!camera?.worldMatrix) {
+    if (camera?.worldMatrix) {
+        vec3.set(out, -camera.worldMatrix[8], -camera.worldMatrix[9], -camera.worldMatrix[10]);
+    } else if (camera?.viewMatrix && mat4.invert(scratchOverlayMat4, camera.viewMatrix)) {
+        transformVec3Mat4w0(out, scratchOverlayMat4, Vec3NegZ);
+    } else {
         vec3.set(out, 0, 0, -1);
-        return out;
     }
-    // Camera forward in world space.
-    vec3.set(out, -camera.worldMatrix[8], -camera.worldMatrix[9], -camera.worldMatrix[10]);
     const len = vec3.len(out);
     if (len < 1e-5) {
         vec3.set(out, 0, 0, -1);
@@ -206,15 +440,17 @@ function getCameraForward(out: vec3, camera: any): vec3 {
     return out;
 }
 
-function updateFloorY(floorY: number | null, cameraY: number, deltaFrames: number): number {
-    if (floorY === null) {
-        return cameraY;
+function getCameraPosition(out: vec3, camera: any): vec3 {
+    if (camera?.worldMatrix) {
+        mat4.getTranslation(out, camera.worldMatrix);
+        return out;
     }
-    if (cameraY <= floorY) {
-        return cameraY;
+    if (camera?.viewMatrix && mat4.invert(scratchOverlayMat4, camera.viewMatrix)) {
+        mat4.getTranslation(out, scratchOverlayMat4);
+        return out;
     }
-    const lerp = 1 - Math.pow(0.99, Math.max(0, deltaFrames));
-    return floorY + (cameraY - floorY) * lerp;
+    vec3.set(out, 0, 0, 0);
+    return out;
 }
 
 export class BgDummy implements Background {
@@ -281,6 +517,10 @@ export class BgLava2 implements Background {
     private bgObjects: BgObjectInst[] = [];
     private overlayModel: ModelInst | null;
     private overlayState: LavaOverlayState;
+    private overlayProgram: GfxProgram | null = null;
+    private overlayTextureMapping = new GXTextureMapping();
+    private tickRemainderFrames = 0.0;
+    private hasTicked = false;
 
     constructor(state: WorldState, bgObjects: BgObjectInst[]) {
         this.bgObjects = bgObjects;
@@ -305,95 +545,107 @@ export class BgLava2 implements Background {
 
         const camera = ctx.viewerInput.camera;
         const overlayState = this.overlayState;
-        const deltaFrames = Math.max(0, state.time.getDeltaTimeFrames());
-        const substepCount = Math.max(1, Math.min(8, Math.ceil(deltaFrames)));
-        const substepFrames = deltaFrames / substepCount;
-        mat4.getTranslation(scratchOverlayCameraPos, camera.worldMatrix);
-        getCameraForward(scratchOverlayForward, camera);
-        overlayState.floorY = updateFloorY(overlayState.floorY, scratchOverlayCameraPos[1], deltaFrames);
-
-        const distFromFloor = Math.max(0, scratchOverlayCameraPos[1] - overlayState.floorY);
-        let glowTargetA = 0.75;
-        let glowTargetB = -0.025;
-        const floorLerp = distFromFloor * 0.041666668;
-        if (floorLerp <= 1.0) {
-            glowTargetA = floorLerp * 0.75;
-            glowTargetB = floorLerp * -0.525 + 0.5;
+        const deltaFrames = Math.max(0.0, state.time.getDeltaTimeFrames());
+        this.tickRemainderFrames += deltaFrames;
+        let tickCount = Math.floor(this.tickRemainderFrames);
+        this.tickRemainderFrames -= tickCount;
+        if (tickCount === 0 && !this.hasTicked) {
+            tickCount = 1;
         }
-        const cameraY = scratchOverlayForward[1];
-        const glowTargetMulA = 2.0 - (cameraY + 1.0) * 0.75;
-        const glowTargetMulB = 1.0 - Math.abs(cameraY) * 0.75;
+        if (tickCount > 0) {
+            this.hasTicked = true;
+        }
+        getCameraPosition(scratchOverlayCameraPos, camera);
+        getCameraForward(scratchOverlayForward, camera);
+        for (let i = 0; i < tickCount; i++) {
+            let glowTargetA = 0.75;
+            let glowTargetB = -0.025;
+            const raycastY = state.raycastStageDown?.(scratchOverlayCameraPos);
+            if (raycastY !== undefined && raycastY !== null) {
+                const floorFactor = (scratchOverlayCameraPos[1] - raycastY) * 0.041666668;
+                if (floorFactor <= 1.0) {
+                    if (floorFactor >= 0.0) {
+                        glowTargetA = floorFactor * 0.75;
+                        glowTargetB = floorFactor * -0.525 + 0.5;
+                    } else {
+                        glowTargetA = 0.0;
+                        glowTargetB = 0.5;
+                    }
+                }
+            }
+            const cameraY = scratchOverlayForward[1];
+            const targetA = glowTargetA * (2.0 - (cameraY + 1.0) * 0.5 * 1.5);
+            const targetB = glowTargetB * (1.0 - Math.abs(cameraY) * 0.75);
 
-        for (let i = 0; i < substepCount; i++) {
-            const springA = 0.3 * substepFrames;
-            const dampA = 0.2 * substepFrames;
-            const targetA = glowTargetA * glowTargetMulA;
-            overlayState.glow0Vel += ((targetA - overlayState.glow0) * springA - overlayState.glow0Vel) * dampA;
-            overlayState.glow0Vel *= Math.pow(0.995, substepFrames);
-            overlayState.glow0 += overlayState.glow0Vel * substepFrames;
-            overlayState.glow0 = Math.max(0, overlayState.glow0);
+            overlayState.glow0Vel += ((targetA - overlayState.glow0) * 0.3 - overlayState.glow0Vel) * 0.2;
+            overlayState.glow0Vel *= 0.995;
+            overlayState.glow0 += overlayState.glow0Vel;
 
-            const springB = 0.05 * substepFrames;
-            const dampB = 0.05 * substepFrames;
-            const targetB = glowTargetB * glowTargetMulB;
-            overlayState.glow1Vel += ((targetB - overlayState.glow1) * springB - overlayState.glow1Vel) * dampB;
-            overlayState.glow1Vel *= Math.pow(0.995, substepFrames);
-            overlayState.glow1 += overlayState.glow1Vel * substepFrames;
+            overlayState.glow1Vel += ((targetB - overlayState.glow1) * 0.05 - overlayState.glow1Vel) * 0.05;
+            overlayState.glow1Vel *= 0.995;
+            overlayState.glow1 += overlayState.glow1Vel;
 
             const texTarget =
                 (overlayState.texDir[2] * scratchOverlayForward[2] +
                     overlayState.texDir[1] * scratchOverlayForward[1] +
                     overlayState.texDir[0] * scratchOverlayForward[0]) *
                 0.0016666667;
-            overlayState.texVel += (texTarget - overlayState.texVel) * (0.025 * substepFrames);
-            overlayState.texPhase += overlayState.texVel * substepFrames;
-            overlayState.wavePhase += overlayState.waveStep * substepFrames;
+            overlayState.texVel += (texTarget - overlayState.texVel) * 0.025;
+            overlayState.texPhase += overlayState.texVel;
+            overlayState.wavePhase += overlayState.waveStep;
         }
         overlayState.texScale = Math.sin(overlayState.wavePhase) * 0.1 + 1.0;
 
-        const [halfWidth, halfHeight] = getOverlayHalfExtents(camera, OVERLAY_VIEW_Z);
-        const scaleX = halfWidth / OVERLAY_MODEL_HALF_SIZE;
-        const scaleY = halfHeight / OVERLAY_MODEL_HALF_SIZE;
+        const overlayQuad = getOverlayFrustumQuad(camera, OVERLAY_VIEW_Z);
 
-        const rp = scratchRenderParams;
-        rp.reset();
-        rp.alpha = 1.0;
-        rp.sort = RenderSort.All;
-        rp.disableSpecular = true;
-        rp.colorMul.r = 1.2 * overlayState.glow0;
-        rp.colorMul.g = 1.15 * overlayState.glow0;
-        rp.colorMul.b = overlayState.glow0;
-        rp.lighting = state.lighting;
-        rp.megaStateFlags = LAVA_OVERLAY_MEGASTATE;
-        mat4.identity(rp.viewFromModel);
-        mat4.translate(rp.viewFromModel, rp.viewFromModel, [0, 0, -OVERLAY_VIEW_Z]);
-        mat4.scale(rp.viewFromModel, rp.viewFromModel, [scaleX, scaleY, 1]);
-        mat4.identity(rp.texMtx);
-        mat4.translate(rp.texMtx, rp.texMtx, [overlayState.texPhase + 0.5, 1.0, 0.0]);
-        mat4.scale(rp.texMtx, rp.texMtx, [overlayState.texScale, 1.0 / overlayState.texScale, 1.0]);
-        mat4.translate(rp.texMtx, rp.texMtx, [-0.5, -1.0, 0.0]);
-        this.overlayModel.prepareToRender(ctx, rp);
+        if (!this.overlayProgram) {
+            this.overlayProgram = createLavaOverlayProgram(ctx);
+        }
+        if (!ensureOverlayTextureMapping(state, ctx, this.overlayModel, this.overlayTextureMapping)) {
+            return;
+        }
 
-        if (overlayState.glow1 > 0.0) {
+        const drawPass = (glow: number, flipV: boolean): void => {
+            const glow255 = glow * 255.0;
+            const colorR = toGXByteNorm(glow255 * 1.2);
+            const colorG = toGXByteNorm(glow255 * 1.15);
+            const colorB = toGXByteNorm(glow255);
+
+            const rp = scratchRenderParams;
             rp.reset();
-            rp.alpha = 1.0;
             rp.sort = RenderSort.All;
-            rp.disableSpecular = true;
-            rp.colorMul.r = 1.2 * overlayState.glow1;
-            rp.colorMul.g = 1.15 * overlayState.glow1;
-            rp.colorMul.b = overlayState.glow1;
-            rp.lighting = state.lighting;
-            rp.megaStateFlags = LAVA_OVERLAY_MEGASTATE;
             mat4.identity(rp.viewFromModel);
-            mat4.translate(rp.viewFromModel, rp.viewFromModel, [0, 0, -OVERLAY_VIEW_Z]);
-            mat4.scale(rp.viewFromModel, rp.viewFromModel, [scaleX, scaleY, 1]);
+            mat4.translate(
+                rp.viewFromModel,
+                rp.viewFromModel,
+                [overlayQuad.centerX, overlayQuad.centerY, -OVERLAY_VIEW_Z],
+            );
+            mat4.scale(rp.viewFromModel, rp.viewFromModel, [overlayQuad.scaleX, overlayQuad.scaleY, 1]);
             mat4.identity(rp.texMtx);
             mat4.translate(rp.texMtx, rp.texMtx, [overlayState.texPhase + 0.5, 1.0, 0.0]);
             mat4.scale(rp.texMtx, rp.texMtx, [overlayState.texScale, 1.0 / overlayState.texScale, 1.0]);
             mat4.translate(rp.texMtx, rp.texMtx, [-0.5, -1.0, 0.0]);
-            mat4.translate(rp.texMtx, rp.texMtx, [0.0, 1.0, 0.0]);
-            mat4.scale(rp.texMtx, rp.texMtx, [1.0, -1.0, 1.0]);
-            this.overlayModel.prepareToRender(ctx, rp);
+            if (flipV) {
+                mat4.translate(rp.texMtx, rp.texMtx, [0.0, 1.0, 0.0]);
+                mat4.scale(rp.texMtx, rp.texMtx, [1.0, -1.0, 1.0]);
+            }
+
+            this.overlayModel.prepareToRenderCustom(ctx, rp, (renderInst, renderParams): void => {
+                renderInst.setBindingLayouts(gxBindingLayouts);
+                fillSceneParamsDataOnTemplate(renderInst, ctx.viewerInput, 0, state.time.getAnimTimeFrames());
+                renderInst.setGfxProgram(assertExists(this.overlayProgram));
+                renderInst.setMegaStateFlags(LAVA_OVERLAY_MEGASTATE);
+                renderInst.setSamplerBindingsFromTextureMappings([this.overlayTextureMapping]);
+                const d = renderInst.allocateUniformBufferF32(LAVA_OVERLAY_UBO_INDEX, LAVA_OVERLAY_UBO_WORDS);
+                fillMatrix4x4(d, 0, renderParams.viewFromModel);
+                fillMatrix4x4(d, 16, renderParams.texMtx);
+                fillVec4(d, 32, colorR, colorG, colorB, 1.0);
+            });
+        };
+
+        drawPass(overlayState.glow0, false);
+        if (overlayState.glow1 > 0.0) {
+            drawPass(overlayState.glow1, true);
         }
     }
 }
@@ -402,11 +654,43 @@ export class BgPot2 implements Background {
     private bgObjects: BgObjectInst[] = [];
     private overlayModel: ModelInst | null;
     private overlayState: PotOverlayState;
+    private windState: PotWindState;
+    private overlayProgram: GfxProgram | null = null;
+    private overlayTextureMapping = new GXTextureMapping();
+    private tickRemainderFrames = 0.0;
+    private hasPrevViewMatrix = false;
+    private prevViewMatrix = mat4.create();
+    private hasTicked = false;
 
     constructor(state: WorldState, bgObjects: BgObjectInst[]) {
         this.bgObjects = bgObjects;
         this.overlayModel = state.modelCache.getModel("POD_YUGE_A", GmaSrc.Bg);
         this.overlayState = createPotOverlayState();
+        this.windState = createPotWindState();
+    }
+
+    private updateWindState(): void {
+        const wind = this.windState;
+        wind.timer--;
+        if (wind.timer < 0) {
+            wind.timer = (Math.random() * 240.0) | 0;
+            wind.toggle ^= 1;
+            if (wind.toggle === 0) {
+                vec3.set(wind.target, 0.0, 0.0, 0.0);
+            } else {
+                const scale = Math.random() * 0.75 + 0.25;
+                wind.target[0] = scale * (wind.baseDir[0] + (Math.random() * 0.2 - 0.1));
+                wind.target[1] = scale * (wind.baseDir[1] + (Math.random() * 0.2 - 0.1));
+                wind.target[2] = scale * (wind.baseDir[2] + (Math.random() * 0.2 - 0.1));
+            }
+        }
+
+        wind.velocity[0] += ((wind.target[0] - wind.current[0]) * 0.1 - wind.velocity[0]) * 0.01;
+        wind.velocity[1] += ((wind.target[1] - wind.current[1]) * 0.1 - wind.velocity[1]) * 0.01;
+        wind.velocity[2] += ((wind.target[2] - wind.current[2]) * 0.1 - wind.velocity[2]) * 0.01;
+        wind.current[0] += wind.velocity[0];
+        wind.current[1] += wind.velocity[1];
+        wind.current[2] += wind.velocity[2];
     }
 
     public update(state: WorldState): void {
@@ -425,110 +709,177 @@ export class BgPot2 implements Background {
         }
 
         const camera = ctx.viewerInput.camera;
+        const viewMatrix = camera?.viewMatrix as mat4 | undefined;
+        if (!viewMatrix) {
+            return;
+        }
         const overlayState = this.overlayState;
-        const deltaFrames = Math.max(0, state.time.getDeltaTimeFrames());
-        const substepCount = Math.max(1, Math.min(8, Math.ceil(deltaFrames)));
-        const substepFrames = deltaFrames / substepCount;
-        mat4.getTranslation(scratchOverlayCameraPos, camera.worldMatrix);
-        getCameraForward(scratchOverlayForward, camera);
-        overlayState.floorY = updateFloorY(overlayState.floorY, scratchOverlayCameraPos[1], deltaFrames);
-        const distFromFloor = Math.max(0, scratchOverlayCameraPos[1] - overlayState.floorY);
-        const floorLerp = clamp01(distFromFloor * 0.05);
+        const deltaFrames = Math.max(0.0, state.time.getDeltaTimeFrames());
+        this.tickRemainderFrames += deltaFrames;
+        let tickCount = Math.floor(this.tickRemainderFrames);
+        this.tickRemainderFrames -= tickCount;
+        if (tickCount === 0 && !this.hasTicked) {
+            tickCount = 1;
+        }
+        if (tickCount > 0) {
+            this.hasTicked = true;
+        }
+        getCameraPosition(scratchOverlayCameraPos, camera);
 
-        for (let i = 0; i < substepCount; i++) {
-            const targetVelY = floorLerp * 0.025 + (1.0 - floorLerp) * 0.0025000002;
-            overlayState.velY += (targetVelY - overlayState.velY) * (0.08 * substepFrames);
-
-            overlayState.phaseA += 0.009 * substepFrames;
-            overlayState.phaseB += 0.013 * substepFrames;
-            const windX = Math.sin(overlayState.phaseA) * 0.0020833334;
-            const windY = Math.cos(overlayState.phaseB) * 0.0020833334;
-            const viewPushX = scratchOverlayForward[0] * 0.015;
-            const viewPushY = scratchOverlayForward[1] * 0.015;
-            overlayState.velX += (viewPushX + windX - overlayState.velX) * (0.04 * substepFrames);
-            overlayState.velZ += (Math.sin(overlayState.phaseB * 0.7) * 0.001 - overlayState.velZ) * (0.03 * substepFrames);
-
-            overlayState.texX += (overlayState.velX + overlayState.indScaleX * 0.0015) * substepFrames;
-            overlayState.texY += (overlayState.velY + viewPushY + windY + overlayState.indScaleY * 0.0015) * substepFrames;
-            overlayState.texZ += overlayState.velZ * substepFrames;
-
-            const proximity = clamp01(
-                0.72 + (1.0 - Math.abs(scratchOverlayForward[1])) * 0.32 + Math.sin(overlayState.phaseA) * 0.12
-            );
-            if (proximity <= 0.0) {
-                overlayState.alphaTopLeft += -overlayState.alphaTopLeft * (0.05 * substepFrames);
-                overlayState.alphaTopRight += -overlayState.alphaTopRight * (0.04 * substepFrames);
-                overlayState.alphaBottomLeft += -overlayState.alphaBottomLeft * (0.02 * substepFrames);
-                overlayState.alphaBottomRight += -overlayState.alphaBottomRight * (0.03 * substepFrames);
-            } else {
-                const topTarget = (floorLerp * 95.0 + 160.0) * proximity;
-                const bottomTarget = floorLerp * 96.0 * proximity;
-                overlayState.alphaTopLeft += (topTarget - overlayState.alphaTopLeft) * (0.05 * substepFrames);
-                overlayState.alphaTopRight += (topTarget - overlayState.alphaTopRight) * (0.04 * substepFrames);
-                overlayState.alphaBottomLeft += (bottomTarget - overlayState.alphaBottomLeft) * (0.02 * substepFrames);
-                overlayState.alphaBottomRight += (bottomTarget - overlayState.alphaBottomRight) * (0.03 * substepFrames);
+        let proximity = 0.0;
+        let nearestNormDist = -1.0;
+        const baseRadius = Math.max(1e-4, this.overlayModel.modelData.boundSphereRadius);
+        for (let i = 0; i < this.bgObjects.length; i++) {
+            const bgObject = this.bgObjects[i].bgObjectData;
+            const dx = bgObject.pos[0] - scratchOverlayCameraPos[0];
+            const dz = bgObject.pos[2] - scratchOverlayCameraPos[2];
+            const dist = Math.hypot(dx, dz);
+            const scale = Math.max(1e-4, Math.abs(bgObject.scale[0]));
+            const normDist = dist / (baseRadius * scale);
+            if (nearestNormDist < 0.0 || normDist < nearestNormDist) {
+                nearestNormDist = normDist;
+            }
+        }
+        if (nearestNormDist >= 0.0) {
+            if (nearestNormDist < 1.0) {
+                proximity = 1.0;
+            } else if (nearestNormDist < 1.5) {
+                proximity = 1.0 - (nearestNormDist - 1.0) * 2.0;
             }
         }
 
-        overlayState.alphaTopLeft = Math.max(0, Math.min(255, overlayState.alphaTopLeft));
-        overlayState.alphaTopRight = Math.max(0, Math.min(255, overlayState.alphaTopRight));
-        overlayState.alphaBottomLeft = Math.max(0, Math.min(255, overlayState.alphaBottomLeft));
-        overlayState.alphaBottomRight = Math.max(0, Math.min(255, overlayState.alphaBottomRight));
+        if (!this.hasPrevViewMatrix) {
+            mat4.copy(this.prevViewMatrix, viewMatrix);
+            this.hasPrevViewMatrix = true;
+        }
+        const cameraDrift = scratchOverlayForward;
+        if (mat4.invert(scratchOverlayMat4, this.prevViewMatrix)) {
+            transformVec3Mat4w0(cameraDrift, scratchOverlayMat4, Vec3NegZ);
+            transformVec3Mat4w0(cameraDrift, viewMatrix, cameraDrift);
+        } else {
+            vec3.set(cameraDrift, 0.0, 0.0, -1.0);
+        }
 
-        const [halfWidth, halfHeight] = getOverlayHalfExtents(camera, OVERLAY_VIEW_Z);
-        const scaleX = halfWidth / OVERLAY_MODEL_HALF_SIZE;
-        const scaleY = halfHeight / OVERLAY_MODEL_HALF_SIZE;
-        const topAlpha = clamp01((overlayState.alphaTopLeft + overlayState.alphaTopRight) / (255.0 * 2.0));
-        const bottomAlpha = clamp01((overlayState.alphaBottomLeft + overlayState.alphaBottomRight) / (255.0 * 2.0));
-        if (topAlpha <= 0.003 && bottomAlpha <= 0.003) {
+        for (let i = 0; i < tickCount; i++) {
+            this.updateWindState();
+
+            const raycastY = state.raycastStageDown?.(scratchOverlayCameraPos);
+            let floorFactor = 1.0;
+            let targetVelY = 0.025;
+            if (raycastY !== undefined && raycastY !== null) {
+                floorFactor = (scratchOverlayCameraPos[1] - raycastY) * 0.05;
+                if (floorFactor > 1.0) {
+                    floorFactor = 1.0;
+                }
+                targetVelY = floorFactor * 0.02500000037252903 + (1.0 - floorFactor) * 0.0025000002;
+            }
+            overlayState.velY += (targetVelY - overlayState.velY) * 0.08;
+
+            const windVec = scratchOverlayVecA;
+            transformVec3Mat4w0(windVec, viewMatrix, this.windState.current);
+            vec3.scale(windVec, windVec, 0.0020833334);
+
+            const scrollVec = scratchOverlayVecB;
+            vec3.set(scrollVec, overlayState.velX, overlayState.velY, overlayState.velZ);
+            transformVec3Mat4w0(scrollVec, viewMatrix, scrollVec);
+            const scrollLen = vec3.length(scrollVec);
+            scrollVec[2] = 0.0;
+            if (scrollVec[0] !== 0.0 || scrollVec[1] !== 0.0) {
+                const xyLen = Math.hypot(scrollVec[0], scrollVec[1]);
+                if (xyLen > 0.0) {
+                    const scale = scrollLen / xyLen;
+                    scrollVec[0] *= scale;
+                    scrollVec[1] *= scale;
+                }
+            } else {
+                scrollVec[1] = scrollLen;
+            }
+            scrollVec[0] += windVec[0] + cameraDrift[0];
+            scrollVec[1] += windVec[1] + cameraDrift[1];
+            overlayState.texX += scrollVec[0];
+            overlayState.texY += scrollVec[1];
+
+            if (proximity <= 0.0) {
+                overlayState.alphaTopLeft += -overlayState.alphaTopLeft * 0.05;
+                overlayState.alphaTopRight += -overlayState.alphaTopRight * 0.04;
+                overlayState.alphaBottomLeft += -overlayState.alphaBottomLeft * 0.02;
+                overlayState.alphaBottomRight += -overlayState.alphaBottomRight * 0.03;
+            } else {
+                const topTarget = (floorFactor * 95.0 + 160.0) * proximity;
+                const bottomTarget = floorFactor * 96.0 * proximity;
+                overlayState.alphaTopLeft += (topTarget - overlayState.alphaTopLeft) * 0.05;
+                overlayState.alphaTopRight += (topTarget - overlayState.alphaTopRight) * 0.04;
+                overlayState.alphaBottomLeft += (bottomTarget - overlayState.alphaBottomLeft) * 0.02;
+                overlayState.alphaBottomRight += (bottomTarget - overlayState.alphaBottomRight) * 0.03;
+            }
+        }
+        mat4.copy(this.prevViewMatrix, viewMatrix);
+
+        if (
+            overlayState.alphaTopLeft <= 1.0 &&
+            overlayState.alphaTopRight <= 1.0 &&
+            overlayState.alphaBottomLeft <= 1.0 &&
+            overlayState.alphaBottomRight <= 1.0
+        ) {
             return;
         }
 
-        const indTranslateX = overlayState.driftX * (overlayState.texX + overlayState.texY * 0.2);
-        const indTranslateY = overlayState.driftY * (overlayState.texY + overlayState.texX * 0.2);
+        if (!this.overlayProgram) {
+            this.overlayProgram = createPotOverlayProgram(ctx);
+        }
+        if (!ensureOverlayTextureMapping(state, ctx, this.overlayModel, this.overlayTextureMapping)) {
+            return;
+        }
 
+        const overlayQuad = getOverlayFrustumQuad(camera, OVERLAY_VIEW_Z);
         const rp = scratchRenderParams;
         rp.reset();
-        rp.alpha = topAlpha;
         rp.sort = RenderSort.All;
-        rp.disableSpecular = true;
-        rp.colorMul.r = 1.0;
-        rp.colorMul.g = 1.0;
-        rp.colorMul.b = 1.0;
-        rp.lighting = state.lighting;
-        rp.megaStateFlags = POT_OVERLAY_MEGASTATE;
         mat4.identity(rp.viewFromModel);
-        mat4.translate(rp.viewFromModel, rp.viewFromModel, [0, 0, -OVERLAY_VIEW_Z]);
-        mat4.scale(rp.viewFromModel, rp.viewFromModel, [scaleX, scaleY, 1]);
+        mat4.translate(
+            rp.viewFromModel,
+            rp.viewFromModel,
+            [overlayQuad.centerX, overlayQuad.centerY, -OVERLAY_VIEW_Z],
+        );
+        mat4.scale(rp.viewFromModel, rp.viewFromModel, [overlayQuad.scaleX, overlayQuad.scaleY, 1]);
         mat4.identity(rp.texMtx);
         mat4.translate(rp.texMtx, rp.texMtx, [overlayState.texX, overlayState.texY, overlayState.texZ]);
-        mat4.translate(rp.texMtx, rp.texMtx, [indTranslateX, indTranslateY, 0.0]);
-        mat4.scale(rp.texMtx, rp.texMtx, [overlayState.scaleX, overlayState.scaleY, 1.0]);
-        this.overlayModel.prepareToRender(ctx, rp);
+        mat4.identity(rp.texMtx2);
+        mat4.translate(
+            rp.texMtx2,
+            rp.texMtx2,
+            [
+                overlayState.driftX * (overlayState.texX + overlayState.texY * 0.2),
+                overlayState.driftY * (overlayState.texY + overlayState.texX * 0.2),
+                0.0,
+            ],
+        );
+        mat4.scale(rp.texMtx2, rp.texMtx2, [overlayState.scaleX, overlayState.scaleY, 1.0]);
 
-        if (bottomAlpha > 0.003) {
-            const skew =
-                (overlayState.alphaTopLeft - overlayState.alphaTopRight + overlayState.alphaBottomLeft - overlayState.alphaBottomRight) /
-                (255.0 * 4.0);
-            rp.reset();
-            rp.alpha = bottomAlpha;
-            rp.sort = RenderSort.All;
-            rp.disableSpecular = true;
-            rp.colorMul.r = 1.0;
-            rp.colorMul.g = 0.98;
-            rp.colorMul.b = 0.95;
-            rp.lighting = state.lighting;
-            rp.megaStateFlags = POT_OVERLAY_MEGASTATE;
-            mat4.identity(rp.viewFromModel);
-            mat4.translate(rp.viewFromModel, rp.viewFromModel, [0, 0, -OVERLAY_VIEW_Z]);
-            mat4.rotateZ(rp.viewFromModel, rp.viewFromModel, skew * 0.08);
-            mat4.scale(rp.viewFromModel, rp.viewFromModel, [scaleX * 1.04, scaleY * 1.04, 1]);
-            mat4.identity(rp.texMtx);
-            mat4.translate(rp.texMtx, rp.texMtx, [overlayState.texX + 0.15, overlayState.texY - 0.1, overlayState.texZ]);
-            mat4.translate(rp.texMtx, rp.texMtx, [-indTranslateX * 0.35, indTranslateY * 0.35, 0.0]);
-            mat4.scale(rp.texMtx, rp.texMtx, [overlayState.scaleX * 0.95, overlayState.scaleY * 1.05, 1.0]);
-            this.overlayModel.prepareToRender(ctx, rp);
-        }
+        const indMtx0Y = overlayState.indScaleX;
+        const indMtx1Z = overlayState.indScaleY;
+        const alpha00 = toGXByteNorm(overlayState.alphaTopLeft);
+        const alpha10 = toGXByteNorm(overlayState.alphaTopRight);
+        const alpha11 = toGXByteNorm(overlayState.alphaBottomRight);
+        const alpha01 = toGXByteNorm(overlayState.alphaBottomLeft);
+
+        this.overlayModel.prepareToRenderCustom(ctx, rp, (renderInst, renderParams): void => {
+            renderInst.setBindingLayouts(gxBindingLayouts);
+            fillSceneParamsDataOnTemplate(renderInst, ctx.viewerInput, 0, state.time.getAnimTimeFrames());
+            renderInst.setGfxProgram(assertExists(this.overlayProgram));
+            renderInst.setMegaStateFlags(POT_OVERLAY_MEGASTATE);
+            renderInst.setSamplerBindingsFromTextureMappings([
+                this.overlayTextureMapping,
+                this.overlayTextureMapping,
+            ]);
+            const d = renderInst.allocateUniformBufferF32(POT_OVERLAY_UBO_INDEX, POT_OVERLAY_UBO_WORDS);
+            fillMatrix4x4(d, 0, renderParams.viewFromModel);
+            fillMatrix4x4(d, 16, renderParams.texMtx);
+            fillMatrix4x4(d, 32, renderParams.texMtx2);
+            fillVec4(d, 48, 0.0, indMtx0Y, 0.0, 0.0);
+            fillVec4(d, 52, 0.0, 0.0, indMtx1Z, 0.0);
+            fillVec4(d, 56, alpha00, alpha10, alpha11, alpha01);
+        });
     }
 }
 

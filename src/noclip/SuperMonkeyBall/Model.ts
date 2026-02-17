@@ -27,6 +27,7 @@ export class RenderParams {
     public alpha: number;
     public sort: RenderSort;
     public texMtx = mat4.create();
+    public texMtx2 = mat4.create();
     public lighting: Lighting | null;
     public depthOffset: number;
     public colorMul: Color;
@@ -44,6 +45,7 @@ export class RenderParams {
         this.alpha = 1;
         this.sort = RenderSort.Translucent;
         mat4.identity(this.texMtx);
+        mat4.identity(this.texMtx2);
         this.lighting = null;
         this.depthOffset = 0;
         this.colorMul.r = 1;

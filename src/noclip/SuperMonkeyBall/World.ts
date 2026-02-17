@@ -97,6 +97,7 @@ export type WorldState = {
     lightingGroups: LightingGroups;
     modelCache: ModelCache;
     time: MkbTime;
+    raycastStageDown?: (pos: vec3) => number | null;
     // TODO(complexplane): Itemgroup animation state (for raycasts)
     // TODO(complexplane): Stage bounding sphere (for asteroids in Space?)
 };
@@ -184,6 +185,36 @@ const WORMHOLE_FORWARD_DEST_LOCAL = vec3.fromValues(0, 0, 1);
 const WORMHOLE_LOCAL_THROUGH = mat4.fromYRotation(mat4.create(), Math.PI);
 const WORMHOLE_NEAR_FADE_INNER_RADIUS_SCALE = 0.8;
 const WORMHOLE_NEAR_FADE_OUTER_RADIUS_SCALE = 2.0;
+const OVERLAY_RAYCAST_EPSILON = 1.1920928955078125e-7;
+const scratchOverlayRayAgFromWorld = mat4.create();
+const scratchOverlayRayTriFromAg = mat4.create();
+const scratchOverlayRayAgFromTri = mat4.create();
+const scratchOverlayRayPosAg = vec3.create();
+const scratchOverlayRayPosTri = vec3.create();
+const scratchOverlayRayDirTri = vec3.create();
+const scratchOverlayRayHitTri = vec3.create();
+const scratchOverlayRayHitAg = vec3.create();
+const scratchOverlayRayHitWorld = vec3.create();
+
+function coligridLookupStagedef(animGroup: SD.AnimGroup, x: number, z: number): number[] | null {
+    const stepX = animGroup.gridStepX;
+    const stepZ = animGroup.gridStepZ;
+    if (stepX <= 0 || stepZ <= 0) {
+        return null;
+    }
+    const cellX = Math.floor((x - animGroup.gridOriginX) / stepX);
+    const cellZ = Math.floor((z - animGroup.gridOriginZ) / stepZ);
+    if (
+        cellX < 0 ||
+        cellX >= animGroup.gridCellCountX ||
+        cellZ < 0 ||
+        cellZ >= animGroup.gridCellCountZ
+    ) {
+        return null;
+    }
+    const index = cellZ * animGroup.gridCellCountX + cellX;
+    return animGroup.gridCellTris[index] ?? null;
+}
 
 type WormholeRenderInfo = {
     id: number;
@@ -1096,6 +1127,7 @@ export class World {
             time: new MkbTime(60), // TODO(complexplane): Per-stage time limit
             lighting,
             lightingGroups: new LightingGroups(lighting),
+            raycastStageDown: (pos: vec3) => this.raycastStageDown(pos),
         };
         let goalTimerDigits: GoalTimerDigits | null = null;
         const smallDigits: (ModelInterface | null)[] = [];
@@ -1717,6 +1749,90 @@ export class World {
         for (let i = 0; i < this.balls.length; i++) {
             this.balls[i].prepareToRender(this.worldState, ballCtx);
         }
+    }
+
+    private raycastStageDown(pos: vec3): number | null {
+        const stage = this.stageData.stagedef;
+        let bestY = -Infinity;
+
+        for (let animGroupId = 0; animGroupId < stage.animGroups.length; animGroupId++) {
+            const stageAg = stage.animGroups[animGroupId];
+            const animGroup = this.animGroups[animGroupId];
+            if (!stageAg || !animGroup) {
+                continue;
+            }
+
+            const worldFromAg = animGroup.getWorldFromAg();
+            if (!mat4.invert(scratchOverlayRayAgFromWorld, worldFromAg)) {
+                continue;
+            }
+            transformVec3Mat4w1(scratchOverlayRayPosAg, scratchOverlayRayAgFromWorld, pos);
+
+            const cellTris = coligridLookupStagedef(stageAg, scratchOverlayRayPosAg[0], scratchOverlayRayPosAg[2]);
+            if (!cellTris || cellTris.length === 0) {
+                continue;
+            }
+
+            for (const triIndex of cellTris) {
+                const tri = stageAg.coliTris[triIndex];
+                if (!tri) {
+                    continue;
+                }
+
+                mat4.fromTranslation(scratchOverlayRayTriFromAg, tri.pos);
+                mat4.rotateY(scratchOverlayRayTriFromAg, scratchOverlayRayTriFromAg, tri.rot[1] * S16_TO_RADIANS);
+                mat4.rotateX(scratchOverlayRayTriFromAg, scratchOverlayRayTriFromAg, tri.rot[0] * S16_TO_RADIANS);
+                mat4.rotateZ(scratchOverlayRayTriFromAg, scratchOverlayRayTriFromAg, tri.rot[2] * S16_TO_RADIANS);
+                if (!mat4.invert(scratchOverlayRayAgFromTri, scratchOverlayRayTriFromAg)) {
+                    continue;
+                }
+
+                transformVec3Mat4w1(scratchOverlayRayPosTri, scratchOverlayRayAgFromTri, scratchOverlayRayPosAg);
+                vec3.set(scratchOverlayRayDirTri, 0.0, -1.0, 0.0);
+                transformVec3Mat4w0(scratchOverlayRayDirTri, scratchOverlayRayAgFromTri, scratchOverlayRayDirTri);
+                if (Math.abs(scratchOverlayRayDirTri[2]) <= OVERLAY_RAYCAST_EPSILON) {
+                    continue;
+                }
+
+                const t = -scratchOverlayRayPosTri[2] / scratchOverlayRayDirTri[2];
+                if (t < 0.0) {
+                    continue;
+                }
+
+                const hitX = scratchOverlayRayPosTri[0] + scratchOverlayRayDirTri[0] * t;
+                const hitY = scratchOverlayRayPosTri[1] + scratchOverlayRayDirTri[1] * t;
+                if (hitY < -OVERLAY_RAYCAST_EPSILON) {
+                    continue;
+                }
+                if (
+                    ((hitX - tri.vert2[0]) * tri.edge2Normal[0] + (hitY - tri.vert2[1]) * tri.edge2Normal[1]) <
+                    -OVERLAY_RAYCAST_EPSILON
+                ) {
+                    continue;
+                }
+                if (
+                    ((hitX - tri.vert3[0]) * tri.edge3Normal[0] + (hitY - tri.vert3[1]) * tri.edge3Normal[1]) <
+                    -OVERLAY_RAYCAST_EPSILON
+                ) {
+                    continue;
+                }
+
+                vec3.set(scratchOverlayRayHitTri, hitX, hitY, 0.0);
+                transformVec3Mat4w1(scratchOverlayRayHitAg, scratchOverlayRayTriFromAg, scratchOverlayRayHitTri);
+                transformVec3Mat4w1(scratchOverlayRayHitWorld, worldFromAg, scratchOverlayRayHitAg);
+                if (
+                    scratchOverlayRayHitWorld[1] > bestY &&
+                    scratchOverlayRayHitWorld[1] <= pos[1] + OVERLAY_RAYCAST_EPSILON
+                ) {
+                    bestY = scratchOverlayRayHitWorld[1];
+                }
+            }
+        }
+
+        if (bestY > -Infinity) {
+            return bestY;
+        }
+        return null;
     }
 
     private buildWormholeWorldFromModel(info: WormholeRenderInfo, out: mat4): boolean {

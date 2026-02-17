@@ -513,7 +513,7 @@ export class MaterialInst {
         materialColor.a *= colorMul.a;
 
         mat4.copy(materialParams.u_TexMtx[1], renderParams.texMtx);
-        mat4.identity(materialParams.u_TexMtx[2]);
+        mat4.copy(materialParams.u_TexMtx[2], renderParams.texMtx2);
 
         ambientColor.r *= colorMul.r;
         ambientColor.g *= colorMul.g;
