@@ -114,7 +114,8 @@ void main() {
     mat4 viewFromModel = UnpackMatrix(u_ViewFromModel);
     vec4 posView = viewFromModel * vec4(a_Position.xyz, 1.0);
     gl_Position = UnpackMatrix(u_Projection) * posView;
-    vec4 texCoord = UnpackMatrix(u_TexMtx) * vec4(a_Tex01.xy, 0.0, 1.0);
+    vec2 baseUV = vec2((a_Position.x + 5.0) * 0.1, (5.0 - a_Position.y) * 0.1);
+    vec4 texCoord = UnpackMatrix(u_TexMtx) * vec4(baseUV, 0.0, 1.0);
     v_TexCoord = texCoord.xy;
     v_Color = u_Color.rgb;
 }
@@ -167,7 +168,7 @@ void main() {
     mat4 viewFromModel = UnpackMatrix(u_ViewFromModel);
     vec4 posView = viewFromModel * vec4(a_Position.xyz, 1.0);
     gl_Position = UnpackMatrix(u_Projection) * posView;
-    v_UV = a_Tex01.xy;
+    v_UV = vec2((a_Position.x + 5.0) * 0.1, (5.0 - a_Position.y) * 0.1);
 }
 `;
 
@@ -423,11 +424,35 @@ const scratchOverlayCameraPos = vec3.create();
 const scratchOverlayVecA = vec3.create();
 const scratchOverlayVecB = vec3.create();
 const scratchOverlayMat4 = mat4.create();
+const scratchOverlayObjMat4 = mat4.create();
+const scratchOverlayObjCenter = vec3.create();
+
+function getCameraForwardFromView(out: vec3, viewMatrix: mat4 | undefined): boolean {
+    if (!viewMatrix || !mat4.invert(scratchOverlayMat4, viewMatrix)) {
+        return false;
+    }
+    transformVec3Mat4w0(out, scratchOverlayMat4, Vec3NegZ);
+    const len = vec3.len(out);
+    if (len < 1e-5) {
+        return false;
+    }
+    vec3.scale(out, out, 1 / len);
+    return true;
+}
+
+function getCameraPositionFromView(out: vec3, viewMatrix: mat4 | undefined): boolean {
+    if (!viewMatrix || !mat4.invert(scratchOverlayMat4, viewMatrix)) {
+        return false;
+    }
+    mat4.getTranslation(out, scratchOverlayMat4);
+    return true;
+}
+
 function getCameraForward(out: vec3, camera: any): vec3 {
-    if (camera?.worldMatrix) {
+    if (getCameraForwardFromView(out, camera?.viewMatrix as mat4 | undefined)) {
+        return out;
+    } else if (camera?.worldMatrix) {
         vec3.set(out, -camera.worldMatrix[8], -camera.worldMatrix[9], -camera.worldMatrix[10]);
-    } else if (camera?.viewMatrix && mat4.invert(scratchOverlayMat4, camera.viewMatrix)) {
-        transformVec3Mat4w0(out, scratchOverlayMat4, Vec3NegZ);
     } else {
         vec3.set(out, 0, 0, -1);
     }
@@ -441,12 +466,11 @@ function getCameraForward(out: vec3, camera: any): vec3 {
 }
 
 function getCameraPosition(out: vec3, camera: any): vec3 {
-    if (camera?.worldMatrix) {
-        mat4.getTranslation(out, camera.worldMatrix);
+    if (getCameraPositionFromView(out, camera?.viewMatrix as mat4 | undefined)) {
         return out;
     }
-    if (camera?.viewMatrix && mat4.invert(scratchOverlayMat4, camera.viewMatrix)) {
-        mat4.getTranslation(out, scratchOverlayMat4);
+    if (camera?.worldMatrix) {
+        mat4.getTranslation(out, camera.worldMatrix);
         return out;
     }
     vec3.set(out, 0, 0, 0);
@@ -519,8 +543,6 @@ export class BgLava2 implements Background {
     private overlayState: LavaOverlayState;
     private overlayProgram: GfxProgram | null = null;
     private overlayTextureMapping = new GXTextureMapping();
-    private tickRemainderFrames = 0.0;
-    private hasTicked = false;
 
     constructor(state: WorldState, bgObjects: BgObjectInst[]) {
         this.bgObjects = bgObjects;
@@ -544,56 +566,52 @@ export class BgLava2 implements Background {
         }
 
         const camera = ctx.viewerInput.camera;
+        const viewFromWorldTilted = (ctx.viewFromWorld as mat4 | undefined) ?? (camera?.viewMatrix as mat4 | undefined);
+        const viewFromWorldNoTilt =
+            (ctx.viewFromWorldNoTilt as mat4 | undefined) ?? (camera?.viewMatrix as mat4 | undefined);
         const overlayState = this.overlayState;
-        const deltaFrames = Math.max(0.0, state.time.getDeltaTimeFrames());
-        this.tickRemainderFrames += deltaFrames;
-        let tickCount = Math.floor(this.tickRemainderFrames);
-        this.tickRemainderFrames -= tickCount;
-        if (tickCount === 0 && !this.hasTicked) {
-            tickCount = 1;
+        if (!getCameraPositionFromView(scratchOverlayCameraPos, viewFromWorldTilted)) {
+            getCameraPosition(scratchOverlayCameraPos, camera);
         }
-        if (tickCount > 0) {
-            this.hasTicked = true;
+        if (!getCameraForwardFromView(scratchOverlayForward, viewFromWorldNoTilt)) {
+            getCameraForward(scratchOverlayForward, camera);
         }
-        getCameraPosition(scratchOverlayCameraPos, camera);
-        getCameraForward(scratchOverlayForward, camera);
-        for (let i = 0; i < tickCount; i++) {
-            let glowTargetA = 0.75;
-            let glowTargetB = -0.025;
-            const raycastY = state.raycastStageDown?.(scratchOverlayCameraPos);
-            if (raycastY !== undefined && raycastY !== null) {
-                const floorFactor = (scratchOverlayCameraPos[1] - raycastY) * 0.041666668;
-                if (floorFactor <= 1.0) {
-                    if (floorFactor >= 0.0) {
-                        glowTargetA = floorFactor * 0.75;
-                        glowTargetB = floorFactor * -0.525 + 0.5;
-                    } else {
-                        glowTargetA = 0.0;
-                        glowTargetB = 0.5;
-                    }
+
+        let glowTargetA = 0.75;
+        let glowTargetB = -0.025;
+        const raycastY = state.raycastStageDown?.(scratchOverlayCameraPos);
+        if (raycastY !== undefined && raycastY !== null) {
+            const floorFactor = (scratchOverlayCameraPos[1] - raycastY) * 0.041666668;
+            if (floorFactor <= 1.0) {
+                if (floorFactor >= 0.0) {
+                    glowTargetA = floorFactor * 0.75;
+                    glowTargetB = floorFactor * -0.525 + 0.5;
+                } else {
+                    glowTargetA = 0.0;
+                    glowTargetB = 0.5;
                 }
             }
-            const cameraY = scratchOverlayForward[1];
-            const targetA = glowTargetA * (2.0 - (cameraY + 1.0) * 0.5 * 1.5);
-            const targetB = glowTargetB * (1.0 - Math.abs(cameraY) * 0.75);
-
-            overlayState.glow0Vel += ((targetA - overlayState.glow0) * 0.3 - overlayState.glow0Vel) * 0.2;
-            overlayState.glow0Vel *= 0.995;
-            overlayState.glow0 += overlayState.glow0Vel;
-
-            overlayState.glow1Vel += ((targetB - overlayState.glow1) * 0.05 - overlayState.glow1Vel) * 0.05;
-            overlayState.glow1Vel *= 0.995;
-            overlayState.glow1 += overlayState.glow1Vel;
-
-            const texTarget =
-                (overlayState.texDir[2] * scratchOverlayForward[2] +
-                    overlayState.texDir[1] * scratchOverlayForward[1] +
-                    overlayState.texDir[0] * scratchOverlayForward[0]) *
-                0.0016666667;
-            overlayState.texVel += (texTarget - overlayState.texVel) * 0.025;
-            overlayState.texPhase += overlayState.texVel;
-            overlayState.wavePhase += overlayState.waveStep;
         }
+        const cameraY = scratchOverlayForward[1];
+        const targetA = glowTargetA * (2.0 - (cameraY + 1.0) * 0.5 * 1.5);
+        const targetB = glowTargetB * (1.0 - Math.abs(cameraY) * 0.75);
+
+        overlayState.glow0Vel += ((targetA - overlayState.glow0) * 0.3 - overlayState.glow0Vel) * 0.2;
+        overlayState.glow0Vel *= 0.995;
+        overlayState.glow0 += overlayState.glow0Vel;
+
+        overlayState.glow1Vel += ((targetB - overlayState.glow1) * 0.05 - overlayState.glow1Vel) * 0.05;
+        overlayState.glow1Vel *= 0.995;
+        overlayState.glow1 += overlayState.glow1Vel;
+
+        const texTarget =
+            (overlayState.texDir[2] * scratchOverlayForward[2] +
+                overlayState.texDir[1] * scratchOverlayForward[1] +
+                overlayState.texDir[0] * scratchOverlayForward[0]) *
+            0.0016666667;
+        overlayState.texVel += (texTarget - overlayState.texVel) * 0.025;
+        overlayState.texPhase += overlayState.texVel;
+        overlayState.wavePhase += overlayState.waveStep;
         overlayState.texScale = Math.sin(overlayState.wavePhase) * 0.1 + 1.0;
 
         const overlayQuad = getOverlayFrustumQuad(camera, OVERLAY_VIEW_Z);
@@ -657,10 +675,8 @@ export class BgPot2 implements Background {
     private windState: PotWindState;
     private overlayProgram: GfxProgram | null = null;
     private overlayTextureMapping = new GXTextureMapping();
-    private tickRemainderFrames = 0.0;
     private hasPrevViewMatrix = false;
     private prevViewMatrix = mat4.create();
-    private hasTicked = false;
 
     constructor(state: WorldState, bgObjects: BgObjectInst[]) {
         this.bgObjects = bgObjects;
@@ -709,33 +725,36 @@ export class BgPot2 implements Background {
         }
 
         const camera = ctx.viewerInput.camera;
-        const viewMatrix = camera?.viewMatrix as mat4 | undefined;
+        const viewMatrix = (ctx.viewFromWorld as mat4 | undefined) ?? (camera?.viewMatrix as mat4 | undefined);
         if (!viewMatrix) {
             return;
         }
+        const prevViewMatrix = (ctx.viewFromWorldPrev as mat4 | undefined) ?? this.prevViewMatrix;
+        if (!ctx.viewFromWorldPrev && !this.hasPrevViewMatrix) {
+            mat4.copy(this.prevViewMatrix, viewMatrix);
+            this.hasPrevViewMatrix = true;
+        }
         const overlayState = this.overlayState;
-        const deltaFrames = Math.max(0.0, state.time.getDeltaTimeFrames());
-        this.tickRemainderFrames += deltaFrames;
-        let tickCount = Math.floor(this.tickRemainderFrames);
-        this.tickRemainderFrames -= tickCount;
-        if (tickCount === 0 && !this.hasTicked) {
-            tickCount = 1;
+        if (!getCameraPositionFromView(scratchOverlayCameraPos, viewMatrix)) {
+            getCameraPosition(scratchOverlayCameraPos, camera);
         }
-        if (tickCount > 0) {
-            this.hasTicked = true;
-        }
-        getCameraPosition(scratchOverlayCameraPos, camera);
 
         let proximity = 0.0;
         let nearestNormDist = -1.0;
-        const baseRadius = Math.max(1e-4, this.overlayModel.modelData.boundSphereRadius);
+        const overlayBoundCenter = this.overlayModel.modelData.boundSphereCenter;
+        const overlayBoundRadius = Math.max(1e-4, this.overlayModel.modelData.boundSphereRadius);
         for (let i = 0; i < this.bgObjects.length; i++) {
-            const bgObject = this.bgObjects[i].bgObjectData;
-            const dx = bgObject.pos[0] - scratchOverlayCameraPos[0];
-            const dz = bgObject.pos[2] - scratchOverlayCameraPos[2];
+            this.bgObjects[i].copyWorldFromModel(scratchOverlayObjMat4);
+            transformVec3Mat4w1(scratchOverlayObjCenter, scratchOverlayObjMat4, overlayBoundCenter);
+            const dx = scratchOverlayObjCenter[0] - scratchOverlayCameraPos[0];
+            const dz = scratchOverlayObjCenter[2] - scratchOverlayCameraPos[2];
             const dist = Math.hypot(dx, dz);
-            const scale = Math.max(1e-4, Math.abs(bgObject.scale[0]));
-            const normDist = dist / (baseRadius * scale);
+            const scaleX = Math.hypot(
+                scratchOverlayObjMat4[0],
+                scratchOverlayObjMat4[1],
+                scratchOverlayObjMat4[2],
+            );
+            const normDist = dist / Math.max(1e-4, overlayBoundRadius * scaleX);
             if (nearestNormDist < 0.0 || normDist < nearestNormDist) {
                 nearestNormDist = normDist;
             }
@@ -748,72 +767,69 @@ export class BgPot2 implements Background {
             }
         }
 
-        if (!this.hasPrevViewMatrix) {
-            mat4.copy(this.prevViewMatrix, viewMatrix);
-            this.hasPrevViewMatrix = true;
-        }
         const cameraDrift = scratchOverlayForward;
-        if (mat4.invert(scratchOverlayMat4, this.prevViewMatrix)) {
+        if (mat4.invert(scratchOverlayMat4, prevViewMatrix)) {
             transformVec3Mat4w0(cameraDrift, scratchOverlayMat4, Vec3NegZ);
             transformVec3Mat4w0(cameraDrift, viewMatrix, cameraDrift);
         } else {
             vec3.set(cameraDrift, 0.0, 0.0, -1.0);
         }
 
-        for (let i = 0; i < tickCount; i++) {
-            this.updateWindState();
+        this.updateWindState();
 
-            const raycastY = state.raycastStageDown?.(scratchOverlayCameraPos);
-            let floorFactor = 1.0;
-            let targetVelY = 0.025;
-            if (raycastY !== undefined && raycastY !== null) {
-                floorFactor = (scratchOverlayCameraPos[1] - raycastY) * 0.05;
-                if (floorFactor > 1.0) {
-                    floorFactor = 1.0;
-                }
-                targetVelY = floorFactor * 0.02500000037252903 + (1.0 - floorFactor) * 0.0025000002;
+        const raycastY = state.raycastStageDown?.(scratchOverlayCameraPos);
+        let floorFactor = 1.0;
+        let targetVelY = 0.025;
+        if (raycastY !== undefined && raycastY !== null) {
+            floorFactor = (scratchOverlayCameraPos[1] - raycastY) * 0.05;
+            if (floorFactor > 1.0) {
+                floorFactor = 1.0;
             }
-            overlayState.velY += (targetVelY - overlayState.velY) * 0.08;
-
-            const windVec = scratchOverlayVecA;
-            transformVec3Mat4w0(windVec, viewMatrix, this.windState.current);
-            vec3.scale(windVec, windVec, 0.0020833334);
-
-            const scrollVec = scratchOverlayVecB;
-            vec3.set(scrollVec, overlayState.velX, overlayState.velY, overlayState.velZ);
-            transformVec3Mat4w0(scrollVec, viewMatrix, scrollVec);
-            const scrollLen = vec3.length(scrollVec);
-            scrollVec[2] = 0.0;
-            if (scrollVec[0] !== 0.0 || scrollVec[1] !== 0.0) {
-                const xyLen = Math.hypot(scrollVec[0], scrollVec[1]);
-                if (xyLen > 0.0) {
-                    const scale = scrollLen / xyLen;
-                    scrollVec[0] *= scale;
-                    scrollVec[1] *= scale;
-                }
-            } else {
-                scrollVec[1] = scrollLen;
-            }
-            scrollVec[0] += windVec[0] + cameraDrift[0];
-            scrollVec[1] += windVec[1] + cameraDrift[1];
-            overlayState.texX += scrollVec[0];
-            overlayState.texY += scrollVec[1];
-
-            if (proximity <= 0.0) {
-                overlayState.alphaTopLeft += -overlayState.alphaTopLeft * 0.05;
-                overlayState.alphaTopRight += -overlayState.alphaTopRight * 0.04;
-                overlayState.alphaBottomLeft += -overlayState.alphaBottomLeft * 0.02;
-                overlayState.alphaBottomRight += -overlayState.alphaBottomRight * 0.03;
-            } else {
-                const topTarget = (floorFactor * 95.0 + 160.0) * proximity;
-                const bottomTarget = floorFactor * 96.0 * proximity;
-                overlayState.alphaTopLeft += (topTarget - overlayState.alphaTopLeft) * 0.05;
-                overlayState.alphaTopRight += (topTarget - overlayState.alphaTopRight) * 0.04;
-                overlayState.alphaBottomLeft += (bottomTarget - overlayState.alphaBottomLeft) * 0.02;
-                overlayState.alphaBottomRight += (bottomTarget - overlayState.alphaBottomRight) * 0.03;
-            }
+            targetVelY = floorFactor * 0.02500000037252903 + (1.0 - floorFactor) * 0.0025000002;
         }
-        mat4.copy(this.prevViewMatrix, viewMatrix);
+        overlayState.velY += (targetVelY - overlayState.velY) * 0.08;
+
+        const windVec = scratchOverlayVecA;
+        transformVec3Mat4w0(windVec, viewMatrix, this.windState.current);
+        vec3.scale(windVec, windVec, 0.0020833334);
+
+        const scrollVec = scratchOverlayVecB;
+        vec3.set(scrollVec, overlayState.velX, overlayState.velY, overlayState.velZ);
+        transformVec3Mat4w0(scrollVec, viewMatrix, scrollVec);
+        const scrollLen = vec3.length(scrollVec);
+        scrollVec[2] = 0.0;
+        if (scrollVec[0] !== 0.0 || scrollVec[1] !== 0.0) {
+            const xyLen = Math.hypot(scrollVec[0], scrollVec[1]);
+            if (xyLen > 0.0) {
+                const scale = scrollLen / xyLen;
+                scrollVec[0] *= scale;
+                scrollVec[1] *= scale;
+            }
+        } else {
+            scrollVec[1] = scrollLen;
+        }
+        scrollVec[0] += windVec[0] + cameraDrift[0];
+        scrollVec[1] += windVec[1] + cameraDrift[1];
+        overlayState.texX += scrollVec[0];
+        overlayState.texY += scrollVec[1];
+
+        if (proximity <= 0.0) {
+            overlayState.alphaTopLeft += -overlayState.alphaTopLeft * 0.05;
+            overlayState.alphaTopRight += -overlayState.alphaTopRight * 0.04;
+            overlayState.alphaBottomLeft += -overlayState.alphaBottomLeft * 0.02;
+            overlayState.alphaBottomRight += -overlayState.alphaBottomRight * 0.03;
+        } else {
+            const topTarget = (floorFactor * 95.0 + 160.0) * proximity;
+            const bottomTarget = floorFactor * 96.0 * proximity;
+            overlayState.alphaTopLeft += (topTarget - overlayState.alphaTopLeft) * 0.05;
+            overlayState.alphaTopRight += (topTarget - overlayState.alphaTopRight) * 0.04;
+            overlayState.alphaBottomLeft += (bottomTarget - overlayState.alphaBottomLeft) * 0.02;
+            overlayState.alphaBottomRight += (bottomTarget - overlayState.alphaBottomRight) * 0.03;
+        }
+        if (!ctx.viewFromWorldPrev) {
+            mat4.copy(this.prevViewMatrix, viewMatrix);
+            this.hasPrevViewMatrix = true;
+        }
 
         if (
             overlayState.alphaTopLeft <= 1.0 &&

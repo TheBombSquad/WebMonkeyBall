@@ -19,6 +19,8 @@ export type RenderContext = {
   opaqueInstList: GfxRenderInstList;
   translucentInstList: GfxRenderInstList;
   viewFromWorld?: mat4;
+  viewFromWorldPrev?: mat4;
+  viewFromWorldNoTilt?: mat4;
   bgOpaqueInstList?: GfxRenderInstList;
   bgTranslucentInstList?: GfxRenderInstList;
   forceAlphaWrite?: boolean;

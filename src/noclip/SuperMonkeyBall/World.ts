@@ -1744,7 +1744,12 @@ export class World {
         for (let i = 0; i < this.fgObjects.length; i++) {
             this.fgObjects[i].prepareToRenderWithViewMatrix(this.worldState, stageCtx, viewFromWorldTilted);
         }
-        this.background.prepareToRender(this.worldState, bgCtx);
+        this.background.prepareToRender(this.worldState, {
+            ...bgCtx,
+            viewFromWorld: viewFromWorldTilted,
+            viewFromWorldPrev,
+            viewFromWorldNoTilt: viewFromWorld,
+        });
         const ballCtx = ctx.skipStageTilt ? stageCtx : { ...stageCtx, viewFromWorld: viewFromWorldTilted };
         for (let i = 0; i < this.balls.length; i++) {
             this.balls[i].prepareToRender(this.worldState, ballCtx);
