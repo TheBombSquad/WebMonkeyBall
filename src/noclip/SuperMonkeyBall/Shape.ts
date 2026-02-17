@@ -150,6 +150,15 @@ export class ShapeInst {
     public prepareToRender(ctx: RenderContext, renderParams: RenderParams) {
         const drawParams = scratchDrawParams;
         mat4.copy(drawParams.u_PosMtx[0], renderParams.viewFromModel);
+        const translucentSort =
+            (this.translucent && renderParams.sort === RenderSort.Translucent) ||
+            renderParams.sort === RenderSort.All;
+        let translucentSortKey = 0;
+        if (translucentSort) {
+            const originViewSpace = scratchVec3a;
+            transformVec3Mat4w1(originViewSpace, renderParams.viewFromModel, this.shapeData.origin);
+            translucentSortKey = -(vec3.len(originViewSpace) + renderParams.depthOffset);
+        }
 
         for (let i = 0; i < this.subShapes.length; i++) {
             const renderInst = ctx.renderInstManager.newRenderInst();
@@ -164,13 +173,8 @@ export class ShapeInst {
                 });
             }
 
-            if (
-                (this.translucent && renderParams.sort === RenderSort.Translucent) ||
-                renderParams.sort === RenderSort.All
-            ) {
-                const originViewSpace = scratchVec3a;
-                transformVec3Mat4w1(originViewSpace, renderParams.viewFromModel, this.shapeData.origin);
-                renderInst.sortKey = -(vec3.len(originViewSpace) + renderParams.depthOffset);
+            if (translucentSort) {
+                renderInst.sortKey = translucentSortKey;
                 ctx.translucentInstList.submitRenderInst(renderInst);
             } else {
                 ctx.opaqueInstList.submitRenderInst(renderInst);
@@ -183,6 +187,15 @@ export class ShapeInst {
         renderParams: RenderParams,
         configureRenderInst: (renderInst: GfxRenderInst, renderParams: RenderParams) => void
     ) {
+        const translucentSort =
+            renderParams.sort === RenderSort.Translucent ||
+            renderParams.sort === RenderSort.All;
+        let translucentSortKey = 0;
+        if (translucentSort) {
+            const originViewSpace = scratchVec3a;
+            transformVec3Mat4w1(originViewSpace, renderParams.viewFromModel, this.shapeData.origin);
+            translucentSortKey = -(vec3.len(originViewSpace) + renderParams.depthOffset);
+        }
         for (let i = 0; i < this.subShapes.length; i++) {
             const renderInst = ctx.renderInstManager.newRenderInst();
             configureRenderInst(renderInst, renderParams);
@@ -193,10 +206,8 @@ export class ShapeInst {
                 });
             }
 
-            if (renderParams.sort === RenderSort.Translucent || renderParams.sort === RenderSort.All) {
-                const originViewSpace = scratchVec3a;
-                transformVec3Mat4w1(originViewSpace, renderParams.viewFromModel, this.shapeData.origin);
-                renderInst.sortKey = -(vec3.len(originViewSpace) + renderParams.depthOffset);
+            if (translucentSort) {
+                renderInst.sortKey = translucentSortKey;
                 ctx.translucentInstList.submitRenderInst(renderInst);
             } else {
                 ctx.opaqueInstList.submitRenderInst(renderInst);

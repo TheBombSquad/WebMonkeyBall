@@ -8,6 +8,11 @@ export type SimPerfDebugOverlay = {
   show: (lines: string[]) => void;
 };
 
+export type RenderPerfDebugOverlay = {
+  hide: () => void;
+  show: (lines: string[]) => void;
+};
+
 function createOverlayRoot(parent: HTMLElement, id: string, side: 'left' | 'right') {
   const wrap = document.createElement('div');
   wrap.id = id;
@@ -19,6 +24,9 @@ function createOverlayRoot(parent: HTMLElement, id: string, side: 'left' | 'righ
   wrap.style.whiteSpace = 'pre';
   wrap.style.pointerEvents = 'none';
   wrap.style.textShadow = '0 1px 2px rgba(0,0,0,0.7)';
+  wrap.style.background = 'rgba(0, 0, 0, 0.5)';
+  wrap.style.padding = '8px 10px';
+  wrap.style.borderRadius = '6px';
   wrap.style.display = 'none';
   if (side === 'left') {
     wrap.style.left = '12px';
@@ -56,6 +64,24 @@ export function createNetplayDebugOverlay(parent: HTMLElement = document.body): 
 
 export function createSimPerfDebugOverlay(parent: HTMLElement = document.body): SimPerfDebugOverlay {
   const wrap = createOverlayRoot(parent, 'sim-perf-debug', 'right');
+  const infoEl = document.createElement('div');
+  infoEl.style.whiteSpace = 'pre';
+  wrap.append(infoEl);
+
+  return {
+    hide: () => {
+      wrap.style.display = 'none';
+    },
+    show: (lines) => {
+      infoEl.textContent = lines.join('\n');
+      wrap.style.display = 'block';
+    },
+  };
+}
+
+export function createRenderPerfDebugOverlay(parent: HTMLElement = document.body): RenderPerfDebugOverlay {
+  const wrap = createOverlayRoot(parent, 'render-perf-debug', 'right');
+  wrap.style.top = '340px';
   const infoEl = document.createElement('div');
   infoEl.style.whiteSpace = 'pre';
   wrap.append(infoEl);

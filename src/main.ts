@@ -30,6 +30,7 @@ import {
   multiplayerModes,
   netplayConstants,
   netplayDebugStorageKey,
+  renderPerfDebugStorageKey,
   profileTiming,
 } from './app/main/constants.js';
 import {
@@ -43,7 +44,11 @@ import { createMainControllerGraph } from './app/composition/main_controller_gra
 import { ChatUiController } from './app/netplay/chat_ui.js';
 import type { NetplayConnectionStateController } from './app/netplay/connection_state.js';
 import { createNetplayDebugState } from './app/netplay/debug_state.js';
-import { createNetplayDebugOverlay, createSimPerfDebugOverlay } from './app/netplay/debug_overlay.js';
+import {
+  createNetplayDebugOverlay,
+  createRenderPerfDebugOverlay,
+  createSimPerfDebugOverlay,
+} from './app/netplay/debug_overlay.js';
 import { GamemodeOptionsController } from './app/netplay/gamemode_options.js';
 import type { LobbyHeartbeatController } from './app/netplay/heartbeat.js';
 import type { LobbyBrowserController } from './app/netplay/lobby_browser.js';
@@ -84,6 +89,7 @@ import { CourseSelectionController } from './app/gameplay/course_selection.js';
 import type { MatchFlowController } from './app/gameplay/match_flow.js';
 import type { MatchStartFlowController } from './app/gameplay/start_flow.js';
 import { initRendererGfx, prewarmConfettiRenderer as prewarmConfettiRenderResources, type ViewerInputState } from './app/render/boot.js';
+import { createRenderPerfDebugState } from './app/render/debug_state.js';
 import { resizeCanvasToDisplaySize, startRenderLoop } from './app/render/frame_loop.js';
 import { StageLoader } from './app/render/stage_loader.js';
 import type { StageFlowController } from './app/render/stage_flow.js';
@@ -256,6 +262,7 @@ export function runMainApp() {
   const packSelection = new PackSelectionController({ gameSourceSelect, packStatus });
   const netplayDebugOverlay = createNetplayDebugOverlay(document.body);
   const simPerfDebugOverlay = createSimPerfDebugOverlay(document.body);
+  const renderPerfDebugOverlay = createRenderPerfDebugOverlay(document.body);
   const registeredGamemodes = modRegistry.listGamemodes();
   if (lobbyGameModeSelect) {
     const currentValue = lobbyGameModeSelect.value;
@@ -945,6 +952,11 @@ export function runMainApp() {
     isNetplayDebugEnabled,
   } = createNetplayDebugState({
     storageKey: netplayDebugStorageKey,
+  });
+  const {
+    isRenderPerfDebugEnabled,
+  } = createRenderPerfDebugState({
+    storageKey: renderPerfDebugStorageKey,
   });
   
   type NetplayRole = 'host' | 'client';
@@ -1737,6 +1749,13 @@ export function runMainApp() {
     },
     updateNetplayDebugOverlay: (nowMs) => {
       netplayRuntime?.updateNetplayDebugOverlay(nowMs);
+    },
+    isRenderPerfDebugEnabled: () => isRenderPerfDebugEnabled(),
+    showRenderPerfDebugOverlay: (lines) => {
+      renderPerfDebugOverlay.show(lines);
+    },
+    hideRenderPerfDebugOverlay: () => {
+      renderPerfDebugOverlay.hide();
     },
     sendLobbyHeartbeat: (now) => {
       lobbyHeartbeat?.sendLobbyHeartbeat(now);

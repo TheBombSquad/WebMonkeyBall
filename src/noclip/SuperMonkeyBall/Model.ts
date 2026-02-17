@@ -99,7 +99,7 @@ export class ModelInst implements ModelInterface {
     public prepareToRender(ctx: RenderContext, renderParams: RenderParams) {
         const scale = scratchVec3a;
         mat4.getScaling(scale, renderParams.viewFromModel);
-        const maxScale = Math.max(...scale);
+        const maxScale = Math.max(scale[0], scale[1], scale[2]);
 
         const centerWorldSpace = scratchVec3a;
         transformVec3Mat4w1(centerWorldSpace, renderParams.viewFromModel, this.modelData.boundSphereCenter);
@@ -140,7 +140,7 @@ export class ModelInst implements ModelInterface {
     ) {
         const scale = scratchVec3a;
         mat4.getScaling(scale, renderParams.viewFromModel);
-        const maxScale = Math.max(...scale);
+        const maxScale = Math.max(scale[0], scale[1], scale[2]);
 
         const centerWorldSpace = scratchVec3a;
         transformVec3Mat4w1(centerWorldSpace, renderParams.viewFromModel, this.modelData.boundSphereCenter);

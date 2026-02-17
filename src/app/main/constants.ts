@@ -41,6 +41,7 @@ export const multiplayerModes: {
 };
 
 export const netplayDebugStorageKey = 'smb_netplay_debug';
+export const renderPerfDebugStorageKey = 'smb_render_perf_debug';
 
 export const lobbyHeartbeatTiming = {
   intervalMs: 15000,

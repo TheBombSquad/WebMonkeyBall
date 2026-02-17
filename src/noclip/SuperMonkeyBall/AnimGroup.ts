@@ -38,11 +38,40 @@ type AnimGroupModelEntry = {
 
 type StageModelResolver = (name: string) => AnimGroupModel | null;
 
+export type AnimGroupRenderPerfStats = {
+    enabled: boolean;
+    groups: number;
+    modelsMs: number;
+    stageModelsMs: number;
+    bananasMs: number;
+    goalsMs: number;
+    goalTapesMs: number;
+    bumpersMs: number;
+    jamabarsMs: number;
+    wormholesMs: number;
+    goalBagsMs: number;
+    switchesMs: number;
+    blurBridgeMs: number;
+    modelsCount: number;
+    stageModelsCount: number;
+    bananasCount: number;
+    goalsCount: number;
+    goalTapesCount: number;
+    bumpersCount: number;
+    jamabarsCount: number;
+    wormholesCount: number;
+    goalBagsCount: number;
+    switchesCount: number;
+};
+
 const scratchRenderParams = new RenderParams();
 const scratchShadowParams = new RenderParams();
 
 const scratchVec3a = vec3.create();
 const scratchVec3b = vec3.create();
+const scratchVec3c = vec3.create();
+const scratchVec3d = vec3.create();
+const scratchVec3e = vec3.create();
 const scratchMat4a = mat4.create();
 const scratchMat4b = mat4.create();
 const scratchMat4c = mat4.create();
@@ -61,6 +90,7 @@ const SWITCH_MODEL_NAMES = [
 const WORMHOLE_NEAR_FADE_INNER_RADIUS_SCALE = 0.8;
 const WORMHOLE_NEAR_FADE_OUTER_RADIUS_SCALE = 2.0;
 const WORMHOLE_FADE_SIDE_NORMAL_LOCAL = vec3.fromValues(0, 0, -1);
+const animPerfNowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
 class StageModelInst {
     private worldFromModel: mat4 = mat4.create();
@@ -358,8 +388,13 @@ export class AnimGroup {
         viewFromWorld: mat4 = ctx.viewerInput.camera.viewMatrix,
         viewFromWorldBase: mat4 = viewFromWorld,
         tiltParams: { rotX: number; rotZ: number; pivot: vec3 } | null = null,
-        skipModelNames?: Set<string>
+        skipModelNames?: Set<string>,
+        perfStats?: AnimGroupRenderPerfStats
     ) {
+        const perf = perfStats;
+        const perfEnabled = !!perf?.enabled;
+        let perfPhaseStart = perfEnabled ? animPerfNowMs() : 0;
+
         const rp = scratchRenderParams;
         rp.reset();
         rp.lighting = state.lighting;
@@ -385,34 +420,104 @@ export class AnimGroup {
             }
             model.prepareToRender(ctx, rp);
         }
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.modelsMs += nowMs - perfPhaseStart;
+            perf.modelsCount += this.models.length;
+            perfPhaseStart = nowMs;
+        }
+        let stageModelsCount = 0;
         for (let i = 0; i < this.stageModels.length; i++) {
             if (skipModelNames && skipModelNames.has(this.stageModels[i].modelName)) {
                 continue;
             }
             this.stageModels[i].prepareToRender(state, ctx, viewFromAnimGroup);
+            stageModelsCount += 1;
         }
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.stageModelsMs += nowMs - perfPhaseStart;
+            perf.stageModelsCount += stageModelsCount;
+            perfPhaseStart = nowMs;
+        }
+        let bananasCount = 0;
         if (bananas) {
+            bananasCount = bananas.length;
             this.drawBananas(state, ctx, viewFromAnimGroup, bananas, viewFromWorldBase, tiltParams);
         } else {
             for (let i = 0; i < this.bananas.length; i++) {
                 if (this.bananaCollected?.[i]) continue;
                 this.bananas[i].prepareToRender(state, ctx, viewFromAnimGroup, viewFromWorld);
+                bananasCount += 1;
             }
+        }
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.bananasMs += nowMs - perfPhaseStart;
+            perf.bananasCount += bananasCount;
+            perfPhaseStart = nowMs;
         }
         for (let i = 0; i < this.goals.length; i++) {
             this.goals[i].prepareToRender(state, ctx, viewFromAnimGroup);
         }
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.goalsMs += nowMs - perfPhaseStart;
+            perf.goalsCount += this.goals.length;
+            perfPhaseStart = nowMs;
+        }
         this.drawGoalTapes(state, ctx, viewFromAnimGroup, goalTapes);
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.goalTapesMs += nowMs - perfPhaseStart;
+            perf.goalTapesCount += goalTapes?.length ?? 0;
+            perfPhaseStart = nowMs;
+        }
         for (let i = 0; i < this.bumpers.length; i++) {
             this.bumpers[i].prepareToRender(state, ctx, viewFromAnimGroup);
         }
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.bumpersMs += nowMs - perfPhaseStart;
+            perf.bumpersCount += this.bumpers.length;
+            perfPhaseStart = nowMs;
+        }
         this.drawJamabars(state, ctx, viewFromAnimGroup, jamabars);
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.jamabarsMs += nowMs - perfPhaseStart;
+            perf.jamabarsCount += jamabars?.length ?? 0;
+            perfPhaseStart = nowMs;
+        }
         for (let i = 0; i < this.wormholes.length; i++) {
             this.wormholes[i].prepareToRender(state, ctx, viewFromAnimGroup);
         }
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.wormholesMs += nowMs - perfPhaseStart;
+            perf.wormholesCount += this.wormholes.length;
+            perfPhaseStart = nowMs;
+        }
         this.drawGoalBags(state, ctx, viewFromAnimGroup, goalBags);
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.goalBagsMs += nowMs - perfPhaseStart;
+            perf.goalBagsCount += goalBags?.length ?? 0;
+            perfPhaseStart = nowMs;
+        }
         this.drawSwitches(state, ctx, viewFromAnimGroup, switches);
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.switchesMs += nowMs - perfPhaseStart;
+            perf.switchesCount += switches?.length ?? 0;
+            perfPhaseStart = nowMs;
+        }
         this.drawBlurBridgeAccordion(state, ctx, viewFromWorld);
+        if (perfEnabled && perf) {
+            const nowMs = animPerfNowMs();
+            perf.blurBridgeMs += nowMs - perfPhaseStart;
+            perf.groups += 1;
+        }
     }
 
     public prepareToRenderMirrors(
@@ -517,12 +622,14 @@ export class AnimGroup {
             rp.reset();
             rp.sort = RenderSort.None;
             rp.lighting = state.lighting;
-            mat4.translate(rp.viewFromModel, viewFromAg, [banana.pos.x, banana.pos.y, banana.pos.z]);
+            vec3.set(scratchVec3d, banana.pos.x, banana.pos.y, banana.pos.z);
+            mat4.translate(rp.viewFromModel, viewFromAg, scratchVec3d);
             mat4.rotateY(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * banana.rotY);
             mat4.rotateX(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * banana.rotX);
             mat4.rotateZ(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * banana.rotZ);
             if (banana.scale !== 1) {
-                mat4.scale(rp.viewFromModel, rp.viewFromModel, [banana.scale, banana.scale, banana.scale]);
+                vec3.set(scratchVec3e, banana.scale, banana.scale, banana.scale);
+                mat4.scale(rp.viewFromModel, rp.viewFromModel, scratchVec3e);
             }
             model.prepareToRender(ctx, rp);
         }
@@ -550,7 +657,8 @@ export class AnimGroup {
             rp.sort = RenderSort.All;
             rp.lighting = state.lighting;
 
-            mat4.translate(rp.viewFromModel, viewFromAnimGroup, [bag.uSomePos.x, bag.uSomePos.y, bag.uSomePos.z]);
+            vec3.set(scratchVec3d, bag.uSomePos.x, bag.uSomePos.y, bag.uSomePos.z);
+            mat4.translate(rp.viewFromModel, viewFromAnimGroup, scratchVec3d);
             mat4.rotateY(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * bag.rotY);
             mat4.rotateX(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * bag.rotX);
             mat4.rotateZ(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * bag.rotZ);
@@ -562,7 +670,8 @@ export class AnimGroup {
 
             const base = scratchMat4c;
             mat4.copy(base, rp.viewFromModel);
-            mat4.translate(base, base, [0, -0.5 * bag.openness, 0]);
+            vec3.set(scratchVec3e, 0, -0.5 * bag.openness, 0);
+            mat4.translate(base, base, scratchVec3e);
 
             const rotZ = 9102 * bag.openness;
             mat4.copy(rp.viewFromModel, base);
@@ -591,7 +700,8 @@ export class AnimGroup {
             rp.lighting = state.lighting;
 
             const base = scratchMat4b;
-            mat4.translate(base, viewFromAnimGroup, [tape.pos.x, tape.pos.y, tape.pos.z]);
+            vec3.set(scratchVec3d, tape.pos.x, tape.pos.y, tape.pos.z);
+            mat4.translate(base, viewFromAnimGroup, scratchVec3d);
             mat4.rotateZ(base, base, S16_TO_RADIANS * tape.rot.z);
             mat4.rotateY(base, base, S16_TO_RADIANS * tape.rot.y);
             mat4.rotateX(base, base, S16_TO_RADIANS * tape.rot.x);
@@ -667,7 +777,8 @@ export class AnimGroup {
             }
             rp.reset();
             rp.lighting = state.lighting;
-            mat4.translate(rp.viewFromModel, viewFromAnimGroup, [sw.pos.x, sw.pos.y, sw.pos.z]);
+            vec3.set(scratchVec3d, sw.pos.x, sw.pos.y, sw.pos.z);
+            mat4.translate(rp.viewFromModel, viewFromAnimGroup, scratchVec3d);
             mat4.rotateZ(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * sw.rotZ);
             mat4.rotateY(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * sw.rotY);
             mat4.rotateX(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * sw.rotX);
@@ -688,18 +799,19 @@ export class AnimGroup {
         for (const jamabar of jamabars) {
             rp.reset();
             rp.lighting = state.lighting;
-            mat4.translate(rp.viewFromModel, viewFromAnimGroup, [jamabar.pos.x, jamabar.pos.y, jamabar.pos.z]);
+            vec3.set(scratchVec3d, jamabar.pos.x, jamabar.pos.y, jamabar.pos.z);
+            mat4.translate(rp.viewFromModel, viewFromAnimGroup, scratchVec3d);
             mat4.rotateZ(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * jamabar.rot.z);
             mat4.rotateY(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * jamabar.rot.y);
             mat4.rotateX(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * jamabar.rot.x);
-            mat4.scale(rp.viewFromModel, rp.viewFromModel, [jamabar.scale.x, jamabar.scale.y, jamabar.scale.z]);
+            vec3.set(scratchVec3e, jamabar.scale.x, jamabar.scale.y, jamabar.scale.z);
+            mat4.scale(rp.viewFromModel, rp.viewFromModel, scratchVec3e);
             this.jamabarModel.prepareToRender(ctx, rp);
         }
     }
 }
 
 
-const scratchVec3c = vec3.create();
 class Banana {
     private model: ModelInst;
     private yRotRadians: number = 0;
@@ -827,7 +939,8 @@ class Goal {
         }
         mat4.copy(rp.viewFromModel, base);
         if (offsetX !== 0) {
-            mat4.translate(rp.viewFromModel, rp.viewFromModel, [offsetX, 0, 0]);
+            vec3.set(scratchVec3e, offsetX, 0, 0);
+            mat4.translate(rp.viewFromModel, rp.viewFromModel, scratchVec3e);
         }
         model.prepareToRender(ctx, rp);
     }
@@ -836,9 +949,15 @@ class Goal {
 class Bumper {
     private model: ModelInst;
     private yRotRadians: number = 0;
+    private baseFromBumper = mat4.create();
 
     constructor(modelCache: ModelCache, private bumperData: SD.Bumper) {
         this.model = assertExists(modelCache.getBumperModel());
+        mat4.fromTranslation(this.baseFromBumper, this.bumperData.pos);
+        mat4.rotateZ(this.baseFromBumper, this.baseFromBumper, S16_TO_RADIANS * this.bumperData.rot[2]);
+        mat4.rotateY(this.baseFromBumper, this.baseFromBumper, S16_TO_RADIANS * this.bumperData.rot[1]);
+        mat4.rotateX(this.baseFromBumper, this.baseFromBumper, S16_TO_RADIANS * this.bumperData.rot[0]);
+        mat4.scale(this.baseFromBumper, this.baseFromBumper, this.bumperData.scale);
     }
 
     public update(state: WorldState): void {
@@ -852,11 +971,7 @@ class Bumper {
         rp.reset();
         rp.lighting = state.lighting;
 
-        mat4.translate(rp.viewFromModel, viewFromAnimGroup, this.bumperData.pos);
-        mat4.rotateZ(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * this.bumperData.rot[2]);
-        mat4.rotateY(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * this.bumperData.rot[1]);
-        mat4.rotateX(rp.viewFromModel, rp.viewFromModel, S16_TO_RADIANS * this.bumperData.rot[0]);
-        mat4.scale(rp.viewFromModel, rp.viewFromModel, this.bumperData.scale);
+        mat4.mul(rp.viewFromModel, viewFromAnimGroup, this.baseFromBumper);
         mat4.rotateY(rp.viewFromModel, rp.viewFromModel, this.yRotRadians);
 
         this.model.prepareToRender(ctx, rp);
