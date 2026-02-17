@@ -64,6 +64,7 @@ const CHAIN_AIRBORNE_CLACKER_DAMP_MAX = 0.045;
 const CHAIN_RIBBON_WIDTH = 0.1;
 const CHAIN_RIBBON_TEXTURE = 'src/mods/chain/chain.png';
 const CHAIN_PORTAL_SEAM_MAX_CORRECTION = 0.2;
+const EMPTY_WORMHOLE_TELEPORTS: WormholeTeleportEvent[] = [];
 
 const GOAL_SEQUENCE_FRAMES = 330;
 const GOAL_SKIP_TOTAL_FRAMES = 210;
@@ -110,7 +111,7 @@ type WormholeTeleportEvent = {
 
 type SavedChainPortalState = {
   playerId: number;
-  lift: number[];
+  lift: ArrayLike<number>;
   winding: Array<{ pairKey: string; count: number }>;
 };
 
@@ -119,6 +120,27 @@ type ChainBallTransferState = {
   y: number;
   z: number;
   endpoints: ChainNodeState[];
+};
+
+type SavedChainNodeState = {
+  pos: Vec3;
+  prevPos: Vec3;
+  animGroupId: number;
+};
+
+type SavedChainLinkState = {
+  id: number;
+  playerAId: number;
+  playerBId: number;
+  portalSeamIndex: number;
+  portalFollowerId: number | null;
+  nodes: SavedChainNodeState[];
+};
+
+type SavedChainState = {
+  links: SavedChainLinkState[];
+  topologyKey: string;
+  portalStates: SavedChainPortalState[];
 };
 
 type ChainState = {
@@ -150,6 +172,33 @@ type ChainState = {
     friction: number;
     frictionMode: 'smb1' | 'smb2';
     animGroupId: number;
+  };
+  activePortalPlayerIds: Set<number>;
+  activeTeleportPlayerIds: Set<number>;
+  teleportByPlayer: Map<number, Float32Array>;
+  teleportedPlayerIds: Set<number>;
+  playerById: Map<number, any>;
+  collisionImpulseByPlayer: Map<number, Vec3>;
+  pendingBallTransfersByPlayer: Map<number, ChainBallTransferState>;
+  portalConstraintByLink: Array<ChainPortalConstraint | null>;
+  sortedPortalPlayerIds: number[];
+  sortedWindingKeys: string[];
+  tmpWormholeTeleports: WormholeTeleportEvent[];
+  tmpChainBallProxyA: {
+    pos: Vec3;
+    prevPos: Vec3;
+    currRadius: number;
+    physBall: {
+      animGroupId: number;
+    };
+  };
+  tmpChainBallProxyB: {
+    pos: Vec3;
+    prevPos: Vec3;
+    currRadius: number;
+    physBall: {
+      animGroupId: number;
+    };
   };
 };
 
@@ -194,6 +243,29 @@ function getChainState(game: object): ChainState {
         friction: 0,
         frictionMode: 'smb1',
         animGroupId: 0,
+      },
+      activePortalPlayerIds: new Set<number>(),
+      activeTeleportPlayerIds: new Set<number>(),
+      teleportByPlayer: new Map<number, Float32Array>(),
+      teleportedPlayerIds: new Set<number>(),
+      playerById: new Map<number, any>(),
+      collisionImpulseByPlayer: new Map<number, Vec3>(),
+      pendingBallTransfersByPlayer: new Map<number, ChainBallTransferState>(),
+      portalConstraintByLink: [],
+      sortedPortalPlayerIds: [],
+      sortedWindingKeys: [],
+      tmpWormholeTeleports: [],
+      tmpChainBallProxyA: {
+        pos: { x: 0, y: 0, z: 0 },
+        prevPos: { x: 0, y: 0, z: 0 },
+        currRadius: 0.5,
+        physBall: { animGroupId: 0 },
+      },
+      tmpChainBallProxyB: {
+        pos: { x: 0, y: 0, z: 0 },
+        prevPos: { x: 0, y: 0, z: 0 },
+        currRadius: 0.5,
+        physBall: { animGroupId: 0 },
       },
     };
     chainStateByGame.set(game, state);
@@ -246,19 +318,90 @@ function cloneVec3(source: Vec3): Vec3 {
   };
 }
 
-function cloneChainLinks(source: ChainLinkState[]): ChainLinkState[] {
-  return source.map((link) => ({
-    id: link.id,
-    playerAId: link.playerAId,
-    playerBId: link.playerBId,
-    portalSeamIndex: Number.isFinite(link.portalSeamIndex) ? (link.portalSeamIndex | 0) : -1,
-    portalFollowerId: toNonNegativeInt(link.portalFollowerId),
-    nodes: link.nodes.map((node) => ({
-      pos: cloneVec3(node.pos),
-      prevPos: cloneVec3(node.prevPos),
-      animGroupId: node.animGroupId ?? 0,
-    })),
-  }));
+function copyVec3Values(target: Vec3, source: Vec3 | null | undefined) {
+  target.x = Number.isFinite(source?.x) ? source.x : 0;
+  target.y = Number.isFinite(source?.y) ? source.y : 0;
+  target.z = Number.isFinite(source?.z) ? source.z : 0;
+}
+
+function writeSavedChainLinks(targetLinks: SavedChainLinkState[], sourceLinks: ChainLinkState[]) {
+  targetLinks.length = sourceLinks.length;
+  for (let i = 0; i < sourceLinks.length; i += 1) {
+    const sourceLink = sourceLinks[i];
+    const outLink = targetLinks[i] ?? {
+      id: 0,
+      playerAId: 0,
+      playerBId: 0,
+      portalSeamIndex: -1,
+      portalFollowerId: null,
+      nodes: [],
+    };
+    outLink.id = sourceLink.id;
+    outLink.playerAId = sourceLink.playerAId;
+    outLink.playerBId = sourceLink.playerBId;
+    outLink.portalSeamIndex = Number.isFinite(sourceLink.portalSeamIndex) ? (sourceLink.portalSeamIndex | 0) : -1;
+    outLink.portalFollowerId = toNonNegativeInt(sourceLink.portalFollowerId);
+    const outNodes = Array.isArray(outLink.nodes) ? outLink.nodes : [];
+    outNodes.length = sourceLink.nodes.length;
+    for (let j = 0; j < sourceLink.nodes.length; j += 1) {
+      const sourceNode = sourceLink.nodes[j];
+      const outNode = outNodes[j] ?? {
+        pos: { x: 0, y: 0, z: 0 },
+        prevPos: { x: 0, y: 0, z: 0 },
+        animGroupId: 0,
+      };
+      copyVec3Values(outNode.pos, sourceNode.pos);
+      copyVec3Values(outNode.prevPos, sourceNode.prevPos);
+      outNode.animGroupId = sourceNode.animGroupId ?? 0;
+      outNodes[j] = outNode;
+    }
+    outLink.nodes = outNodes;
+    targetLinks[i] = outLink;
+  }
+}
+
+function applySavedChainLinks(targetLinks: ChainLinkState[], sourceLinks: SavedChainLinkState[] | undefined) {
+  if (!Array.isArray(sourceLinks)) {
+    targetLinks.length = 0;
+    return;
+  }
+  targetLinks.length = sourceLinks.length;
+  for (let i = 0; i < sourceLinks.length; i += 1) {
+    const sourceLink = sourceLinks[i];
+    const targetLink = targetLinks[i] ?? {
+      id: 0,
+      playerAId: 0,
+      playerBId: 0,
+      nodes: [],
+      portalSeamIndex: -1,
+      portalFollowerId: null,
+    };
+    targetLink.id = Number.isFinite(sourceLink?.id) ? (sourceLink.id >>> 0) : 0;
+    targetLink.playerAId = toNonNegativeInt(sourceLink?.playerAId) ?? 0;
+    targetLink.playerBId = toNonNegativeInt(sourceLink?.playerBId) ?? 0;
+    targetLink.portalSeamIndex = Number.isFinite(sourceLink?.portalSeamIndex) ? (sourceLink.portalSeamIndex | 0) : -1;
+    targetLink.portalFollowerId = toNonNegativeInt(sourceLink?.portalFollowerId);
+    const sourceNodes = Array.isArray(sourceLink?.nodes) ? sourceLink.nodes : [];
+    const targetNodes = Array.isArray(targetLink.nodes) ? targetLink.nodes : [];
+    targetNodes.length = sourceNodes.length;
+    for (let j = 0; j < sourceNodes.length; j += 1) {
+      const sourceNode = sourceNodes[j];
+      const targetNode = targetNodes[j] ?? {
+        pos: { x: 0, y: 0, z: 0 },
+        prevPos: { x: 0, y: 0, z: 0 },
+        animGroupId: 0,
+      };
+      copyVec3Values(targetNode.pos, sourceNode?.pos ?? null);
+      copyVec3Values(targetNode.prevPos, sourceNode?.prevPos ?? null);
+      targetNode.animGroupId = Number.isFinite(sourceNode?.animGroupId) ? (sourceNode.animGroupId | 0) : 0;
+      // Rebuild transient sim caches after rollback load.
+      targetNode.renderPrevPos = undefined;
+      targetNode.stageCellTrisByAnimGroup = undefined;
+      targetNodes[j] = targetNode;
+    }
+    targetLink.nodes = targetNodes;
+    targetLinks[i] = targetLink;
+  }
 }
 
 function createChainPortalPlayerState(): ChainPortalPlayerState {
@@ -299,7 +442,8 @@ function getPortalPlayerState(state: ChainState, playerId: number): ChainPortalP
 }
 
 function syncPortalPlayers(state: ChainState, players: any[]) {
-  const activeIds = new Set<number>();
+  const activeIds = state.activePortalPlayerIds;
+  activeIds.clear();
   for (const player of players) {
     const playerId = toNonNegativeInt(player?.id);
     if (playerId === null) {
@@ -397,23 +541,35 @@ function applyWormholeTeleports(state: ChainState, players: any[], wormholeTelep
   }
 }
 
-function buildTeleportTransformByPlayer(wormholeTeleports: WormholeTeleportEvent[]) {
-  const transforms = new Map<number, Float32Array>();
+function fillTeleportTransformByPlayer(
+  state: ChainState,
+  wormholeTeleports: WormholeTeleportEvent[] | null | undefined,
+) {
+  const out = state.teleportByPlayer;
+  const activeIds = state.activeTeleportPlayerIds;
+  activeIds.clear();
   if (!Array.isArray(wormholeTeleports)) {
-    return transforms;
+    out.clear();
+    return out;
   }
   for (const event of wormholeTeleports) {
     const playerId = toNonNegativeInt(event?.playerId);
     if (playerId === null) {
       continue;
     }
-    const tf = mat4.create();
+    activeIds.add(playerId);
+    const tf = out.get(playerId) ?? mat4.create();
     if (!copyMatrix16(event.transform, tf)) {
       continue;
     }
-    transforms.set(playerId, tf);
+    out.set(playerId, tf);
   }
-  return transforms;
+  for (const playerId of out.keys()) {
+    if (!activeIds.has(playerId)) {
+      out.delete(playerId);
+    }
+  }
+  return out;
 }
 
 function applyFollowerTeleportToLinks(links: ChainLinkState[], teleportByPlayer: Map<number, Float32Array>) {
@@ -577,25 +733,62 @@ function getPortalConstraintForLink(
   };
 }
 
-function clonePortalConstraint(source: ChainPortalConstraint | null): ChainPortalConstraint | null {
+function createReusablePortalConstraint(): ChainPortalConstraint {
+  return {
+    seamIndex: -1,
+    bToA: mat4.create(),
+    aToB: mat4.create(),
+    bToALinear: mat3.create(),
+    aToBLinear: mat3.create(),
+  };
+}
+
+function writePortalConstraint(out: ChainPortalConstraint, source: ChainPortalConstraint) {
+  out.seamIndex = source.seamIndex;
+  out.bToA.set(source.bToA);
+  out.aToB.set(source.aToB);
+  out.bToALinear.set(source.bToALinear);
+  out.aToBLinear.set(source.aToBLinear);
+}
+
+function ensurePortalConstraintSlots(state: ChainState, count: number): Array<ChainPortalConstraint | null> {
+  const slots = state.portalConstraintByLink;
+  if (slots.length < count) {
+    for (let i = slots.length; i < count; i += 1) {
+      slots[i] = createReusablePortalConstraint();
+    }
+  } else if (slots.length > count) {
+    slots.length = count;
+  }
+  return slots;
+}
+
+function getPortalConstraintSlot(
+  slots: Array<ChainPortalConstraint | null>,
+  index: number,
+): ChainPortalConstraint {
+  const existing = slots[index];
+  if (existing) {
+    return existing;
+  }
+  const created = createReusablePortalConstraint();
+  slots[index] = created;
+  return created;
+}
+
+function copyPortalConstraintForLink(
+  slots: Array<ChainPortalConstraint | null>,
+  index: number,
+  source: ChainPortalConstraint | null,
+): ChainPortalConstraint | null {
   if (!source) {
+    slots[index] = null;
     return null;
   }
-  const bToA = mat4.create();
-  const aToB = mat4.create();
-  const bToALinear = mat3.create();
-  const aToBLinear = mat3.create();
-  bToA.set(source.bToA);
-  aToB.set(source.aToB);
-  bToALinear.set(source.bToALinear);
-  aToBLinear.set(source.aToBLinear);
-  return {
-    seamIndex: source.seamIndex,
-    bToA,
-    aToB,
-    bToALinear,
-    aToBLinear,
-  };
+  const target = getPortalConstraintSlot(slots, index);
+  writePortalConstraint(target, source);
+  slots[index] = target;
+  return target;
 }
 
 function createInitialChainNodes(start: Vec3, end: Vec3): ChainNodeState[] {
@@ -800,7 +993,7 @@ function applyChainBallTransfer(ball: any, transfer: Vec3, endpoints: ChainNodeS
 
 function syncChainTopology(game: any, state: ChainState, players: any[], forceRebuild = false) {
   if (!isChainedTogetherMode(game)) {
-    state.links = [];
+    state.links.length = 0;
     state.topologyKey = '';
     return;
   }
@@ -812,7 +1005,7 @@ function syncChainTopology(game: any, state: ChainState, players: any[], forceRe
   }
   state.topologyKey = nextKey;
   if (chainPlayers.length < 2) {
-    state.links = [];
+    state.links.length = 0;
     return;
   }
   const prevLinks = new Map<string, ChainLinkState>();
@@ -1066,26 +1259,6 @@ function collideChainInteriorNodes(
   }
 }
 
-function readVec3OrFallback(source: any, fallback: Vec3): Vec3 {
-  const x = Number.isFinite(source?.x) ? source.x : fallback.x;
-  const y = Number.isFinite(source?.y) ? source.y : fallback.y;
-  const z = Number.isFinite(source?.z) ? source.z : fallback.z;
-  return { x, y, z };
-}
-
-function normalizeVec3OrFallback(source: Vec3, fallback: Vec3): Vec3 {
-  const len = sqrt((source.x * source.x) + (source.y * source.y) + (source.z * source.z));
-  if (len > 1e-6) {
-    const invLen = 1 / len;
-    return {
-      x: source.x * invLen,
-      y: source.y * invLen,
-      z: source.z * invLen,
-    };
-  }
-  return { x: fallback.x, y: fallback.y, z: fallback.z };
-}
-
 function getBallGravityAccel(ball: any): number {
   let accel = Number.isFinite(ball?.accel) ? ball.accel : CHAIN_NODE_GRAVITY_FALLBACK;
   if (!Number.isFinite(accel)) {
@@ -1123,8 +1296,9 @@ function integrateChainNode(
   node.pos.z = oldZ + velZ + (gravityZ * gravityAccelStep);
 }
 
-function buildCollisionImpulseByPlayer(state: ChainState, players: any[]): Map<number, Vec3> {
-  const impulseByPlayer = new Map<number, Vec3>();
+function fillCollisionImpulseByPlayer(state: ChainState, players: any[]): Map<number, Vec3> {
+  const impulseByPlayer = state.collisionImpulseByPlayer;
+  impulseByPlayer.clear();
   for (const player of players) {
     const playerId = toNonNegativeInt(player?.id);
     if (playerId === null) {
@@ -1156,11 +1330,11 @@ function buildCollisionImpulseByPlayer(state: ChainState, players: any[]): Map<n
       impulseY *= clampScale;
       impulseZ *= clampScale;
     }
-    impulseByPlayer.set(playerId, {
-      x: impulseX * CHAIN_COLLISION_IMPULSE_SCALE,
-      y: impulseY * CHAIN_COLLISION_IMPULSE_SCALE,
-      z: impulseZ * CHAIN_COLLISION_IMPULSE_SCALE,
-    });
+    const out = impulseByPlayer.get(playerId) ?? { x: 0, y: 0, z: 0 };
+    out.x = impulseX * CHAIN_COLLISION_IMPULSE_SCALE;
+    out.y = impulseY * CHAIN_COLLISION_IMPULSE_SCALE;
+    out.z = impulseZ * CHAIN_COLLISION_IMPULSE_SCALE;
+    impulseByPlayer.set(playerId, out);
   }
   return impulseByPlayer;
 }
@@ -1402,22 +1576,36 @@ function dampAirborneOrbitVelocity(ballA: any, ballB: any, chainLinkLength: numb
   ballB.vel.z -= removeZ * shareB;
 }
 
-function createBallProxyInSpace(ball: any, transform: Float32Array, animGroupId: number) {
+function writeBallProxyInSpace(
+  out: {
+    pos: Vec3;
+    prevPos: Vec3;
+    currRadius: number;
+    physBall: {
+      animGroupId: number;
+    };
+  },
+  ball: any,
+  transform: Float32Array,
+  animGroupId: number,
+) {
   vec3.set(portalConstraintVecA, ball.pos.x, ball.pos.y, ball.pos.z);
   vec3.transformMat4(portalConstraintVecA, portalConstraintVecA, transform);
   vec3.set(portalConstraintVecB, ball.prevPos.x, ball.prevPos.y, ball.prevPos.z);
   vec3.transformMat4(portalConstraintVecB, portalConstraintVecB, transform);
-  return {
-    pos: { x: portalConstraintVecA[0], y: portalConstraintVecA[1], z: portalConstraintVecA[2] },
-    prevPos: { x: portalConstraintVecB[0], y: portalConstraintVecB[1], z: portalConstraintVecB[2] },
-    currRadius: ball.currRadius,
-    physBall: {
-      animGroupId,
-    },
-  };
+  out.pos.x = portalConstraintVecA[0];
+  out.pos.y = portalConstraintVecA[1];
+  out.pos.z = portalConstraintVecA[2];
+  out.prevPos.x = portalConstraintVecB[0];
+  out.prevPos.y = portalConstraintVecB[1];
+  out.prevPos.z = portalConstraintVecB[2];
+  out.currRadius = ball.currRadius;
+  out.physBall.animGroupId = animGroupId;
+  return out;
 }
 
 function anchorLinkEndpoints(
+  state: ChainState,
   link: ChainLinkState,
   playerA: any,
   playerB: any,
@@ -1442,11 +1630,11 @@ function anchorLinkEndpoints(
   let transferBToRealLinear: Float32Array | null = null;
   if (portalConstraint && followerId === link.playerAId) {
     const animGroupId = playerA.ball?.physBall?.animGroupId ?? 0;
-    ballBForChain = createBallProxyInSpace(playerB.ball, portalConstraint.bToA, animGroupId);
+    ballBForChain = writeBallProxyInSpace(state.tmpChainBallProxyB, playerB.ball, portalConstraint.bToA, animGroupId);
     transferBToRealLinear = portalConstraint.aToBLinear;
   } else if (portalConstraint && followerId === link.playerBId) {
     const animGroupId = playerB.ball?.physBall?.animGroupId ?? 0;
-    ballAForChain = createBallProxyInSpace(playerA.ball, portalConstraint.aToB, animGroupId);
+    ballAForChain = writeBallProxyInSpace(state.tmpChainBallProxyA, playerA.ball, portalConstraint.aToB, animGroupId);
     transferAToRealLinear = portalConstraint.bToALinear;
   }
   let transferA: Vec3 | null = null;
@@ -1518,21 +1706,36 @@ function simulateChainedTogether(
   }
   const allowBallInfluence = hasPlayerControlStarted(game);
   syncChainTopology(game, state, players);
-  const teleportByPlayer = buildTeleportTransformByPlayer(wormholeTeleports);
+  const teleportByPlayer = fillTeleportTransformByPlayer(state, wormholeTeleports);
   applyFollowerTeleportToLinks(state.links, teleportByPlayer);
   applyWormholeTeleports(state, players, wormholeTeleports);
   if (state.links.length === 0) {
     return;
   }
-  const playerMap = new Map<number, any>();
+  const playerMap = state.playerById;
+  playerMap.clear();
   for (const player of players) {
     playerMap.set(player.id, player);
   }
-  const gravity = game.world?.gravity ?? { x: 0, y: -1, z: 0 };
-  const normalizedGravity = normalizeVec3OrFallback(
-    readVec3OrFallback(gravity, { x: 0, y: -1, z: 0 }),
-    { x: 0, y: -1, z: 0 },
+  const gravity = game.world?.gravity;
+  let normalizedGravityX = Number.isFinite(gravity?.x) ? gravity.x : 0;
+  let normalizedGravityY = Number.isFinite(gravity?.y) ? gravity.y : -1;
+  let normalizedGravityZ = Number.isFinite(gravity?.z) ? gravity.z : 0;
+  const normalizedGravityLen = sqrt(
+    (normalizedGravityX * normalizedGravityX)
+    + (normalizedGravityY * normalizedGravityY)
+    + (normalizedGravityZ * normalizedGravityZ),
   );
+  if (normalizedGravityLen > 1e-6) {
+    const invLen = 1 / normalizedGravityLen;
+    normalizedGravityX *= invLen;
+    normalizedGravityY *= invLen;
+    normalizedGravityZ *= invLen;
+  } else {
+    normalizedGravityX = 0;
+    normalizedGravityY = -1;
+    normalizedGravityZ = 0;
+  }
   const stageFormat = game.stageRuntime.stage?.format ?? game.stage?.format ?? 'smb1';
   const animGroups = game.stageRuntime.animGroups;
   const chainLinkLength = getChainLinkLength(game);
@@ -1540,8 +1743,9 @@ function simulateChainedTogether(
   const substepDamping = Math.pow(CHAIN_NODE_DAMPING, 1 / substeps);
   const substepImpulseScale = 1 / substeps;
   const segmentRestLen = chainLinkLength / CHAIN_SEGMENTS;
-  const collisionImpulseByPlayer = buildCollisionImpulseByPlayer(state, players);
-  const teleportedPlayerIds = new Set<number>();
+  const collisionImpulseByPlayer = fillCollisionImpulseByPlayer(state, players);
+  const teleportedPlayerIds = state.teleportedPlayerIds;
+  teleportedPlayerIds.clear();
   for (const event of wormholeTeleports) {
     const eventPlayerId = toNonNegativeInt(event?.playerId);
     if (eventPlayerId !== null) {
@@ -1575,12 +1779,12 @@ function simulateChainedTogether(
     for (const link of state.links) {
       const playerA = playerMap.get(link.playerAId);
       const playerB = playerMap.get(link.playerBId);
-      let gravityAX = Number.isFinite(playerA?.world?.gravity?.x) ? playerA.world.gravity.x : normalizedGravity.x;
-      let gravityAY = Number.isFinite(playerA?.world?.gravity?.y) ? playerA.world.gravity.y : normalizedGravity.y;
-      let gravityAZ = Number.isFinite(playerA?.world?.gravity?.z) ? playerA.world.gravity.z : normalizedGravity.z;
-      let gravityBX = Number.isFinite(playerB?.world?.gravity?.x) ? playerB.world.gravity.x : normalizedGravity.x;
-      let gravityBY = Number.isFinite(playerB?.world?.gravity?.y) ? playerB.world.gravity.y : normalizedGravity.y;
-      let gravityBZ = Number.isFinite(playerB?.world?.gravity?.z) ? playerB.world.gravity.z : normalizedGravity.z;
+      let gravityAX = Number.isFinite(playerA?.world?.gravity?.x) ? playerA.world.gravity.x : normalizedGravityX;
+      let gravityAY = Number.isFinite(playerA?.world?.gravity?.y) ? playerA.world.gravity.y : normalizedGravityY;
+      let gravityAZ = Number.isFinite(playerA?.world?.gravity?.z) ? playerA.world.gravity.z : normalizedGravityZ;
+      let gravityBX = Number.isFinite(playerB?.world?.gravity?.x) ? playerB.world.gravity.x : normalizedGravityX;
+      let gravityBY = Number.isFinite(playerB?.world?.gravity?.y) ? playerB.world.gravity.y : normalizedGravityY;
+      let gravityBZ = Number.isFinite(playerB?.world?.gravity?.z) ? playerB.world.gravity.z : normalizedGravityZ;
       const gravityAccelA = getBallGravityAccel(playerA?.ball);
       const gravityAccelB = getBallGravityAccel(playerB?.ball);
       const gravityALen = sqrt((gravityAX * gravityAX) + (gravityAY * gravityAY) + (gravityAZ * gravityAZ));
@@ -1590,9 +1794,9 @@ function simulateChainedTogether(
         gravityAY *= invGravityALen;
         gravityAZ *= invGravityALen;
       } else {
-        gravityAX = normalizedGravity.x;
-        gravityAY = normalizedGravity.y;
-        gravityAZ = normalizedGravity.z;
+        gravityAX = normalizedGravityX;
+        gravityAY = normalizedGravityY;
+        gravityAZ = normalizedGravityZ;
       }
       const gravityBLen = sqrt((gravityBX * gravityBX) + (gravityBY * gravityBY) + (gravityBZ * gravityBZ));
       if (gravityBLen > 1e-6) {
@@ -1601,9 +1805,9 @@ function simulateChainedTogether(
         gravityBY *= invGravityBLen;
         gravityBZ *= invGravityBLen;
       } else {
-        gravityBX = normalizedGravity.x;
-        gravityBY = normalizedGravity.y;
-        gravityBZ = normalizedGravity.z;
+        gravityBX = normalizedGravityX;
+        gravityBY = normalizedGravityY;
+        gravityBZ = normalizedGravityZ;
       }
       const endpointGravityAccelA = gravityAccelA / substeps;
       const endpointGravityAccelB = gravityAccelB / substeps;
@@ -1632,9 +1836,9 @@ function simulateChainedTogether(
           blendGravityY *= invBlendGravityLen;
           blendGravityZ *= invBlendGravityLen;
         } else {
-          blendGravityX = normalizedGravity.x;
-          blendGravityY = normalizedGravity.y;
-          blendGravityZ = normalizedGravity.z;
+          blendGravityX = normalizedGravityX;
+          blendGravityY = normalizedGravityY;
+          blendGravityZ = normalizedGravityZ;
         }
         integrateChainNode(
           node,
@@ -1655,8 +1859,9 @@ function simulateChainedTogether(
       );
     }
 
-    const portalConstraintByLink = new Map<ChainLinkState, ChainPortalConstraint | null>();
-    for (const link of state.links) {
+    const portalConstraintByLink = ensurePortalConstraintSlots(state, state.links.length);
+    for (let linkIndex = 0; linkIndex < state.links.length; linkIndex += 1) {
+      const link = state.links[linkIndex];
       const followerId = toNonNegativeInt(link.portalFollowerId);
       const teleportedA = teleportedPlayerIds.has(link.playerAId);
       const teleportedB = teleportedPlayerIds.has(link.playerBId);
@@ -1670,25 +1875,30 @@ function simulateChainedTogether(
       } else if (teleportedB && !teleportedA) {
         forcedSeamIndex = Math.max(0, link.nodes.length - 2);
       }
-      const constraint = clonePortalConstraint(getPortalConstraintForLink(state, link, forcedSeamIndex));
+      const constraint = copyPortalConstraintForLink(
+        portalConstraintByLink,
+        linkIndex,
+        getPortalConstraintForLink(state, link, forcedSeamIndex),
+      );
       if (constraint && followerId !== null) {
         // In follower/ghost mode, do not apply seam-space segment corrections in physics;
         // the chain already lives in follower space.
         constraint.seamIndex = -1;
       }
-      portalConstraintByLink.set(link, constraint);
     }
 
     for (let iter = 0; iter < CHAIN_CONSTRAINT_ITERS; iter += 1) {
-      for (const link of state.links) {
+      for (let linkIndex = 0; linkIndex < state.links.length; linkIndex += 1) {
+        const link = state.links[linkIndex];
         const playerA = playerMap.get(link.playerAId);
         const playerB = playerMap.get(link.playerBId);
         if (!playerA || !playerB) {
           continue;
         }
-        const portalConstraint = portalConstraintByLink.get(link) ?? null;
+        const portalConstraint = portalConstraintByLink[linkIndex] ?? null;
         const reverseEndpoints = ((substep + iter) & 1) === 1;
         anchorLinkEndpoints(
+          state,
           link,
           playerA,
           playerB,
@@ -1717,7 +1927,8 @@ function simulateChainedTogether(
       }
     }
 
-    for (const link of state.links) {
+    for (let linkIndex = 0; linkIndex < state.links.length; linkIndex += 1) {
+      const link = state.links[linkIndex];
       const playerA = playerMap.get(link.playerAId);
       const playerB = playerMap.get(link.playerBId);
       if (!playerA || !playerB) {
@@ -1728,16 +1939,18 @@ function simulateChainedTogether(
       }
     }
 
-    for (const link of state.links) {
+    for (let linkIndex = 0; linkIndex < state.links.length; linkIndex += 1) {
+      const link = state.links[linkIndex];
       const playerA = playerMap.get(link.playerAId);
       const playerB = playerMap.get(link.playerBId);
       if (!playerA || !playerB) {
         continue;
       }
-      const portalConstraint = portalConstraintByLink.get(link) ?? null;
+      const portalConstraint = portalConstraintByLink[linkIndex] ?? null;
       const reverseEndpoints = (substep & 1) === 1;
       if (!allowBallInfluence) {
         anchorLinkEndpoints(
+          state,
           link,
           playerA,
           playerB,
@@ -1755,16 +1968,24 @@ function simulateChainedTogether(
       continue;
     }
 
-    const pendingBallTransfers = new Map<number, ChainBallTransferState>();
-    for (const link of state.links) {
+    const pendingBallTransfers = state.pendingBallTransfersByPlayer;
+    for (const pending of pendingBallTransfers.values()) {
+      pending.x = 0;
+      pending.y = 0;
+      pending.z = 0;
+      pending.endpoints.length = 0;
+    }
+    for (let linkIndex = 0; linkIndex < state.links.length; linkIndex += 1) {
+      const link = state.links[linkIndex];
       const playerA = playerMap.get(link.playerAId);
       const playerB = playerMap.get(link.playerBId);
       if (!playerA || !playerB) {
         continue;
       }
-      const portalConstraint = portalConstraintByLink.get(link) ?? null;
+      const portalConstraint = portalConstraintByLink[linkIndex] ?? null;
       const reverseEndpoints = (substep & 1) === 1;
       const { first, last, transferA, transferB } = anchorLinkEndpoints(
+        state,
         link,
         playerA,
         playerB,
@@ -1801,6 +2022,9 @@ function simulateChainedTogether(
     }
 
     for (const [playerId, transferState] of pendingBallTransfers.entries()) {
+      if (transferState.endpoints.length === 0) {
+        continue;
+      }
       const player = playerMap.get(playerId);
       if (!player) {
         continue;
@@ -1812,13 +2036,14 @@ function simulateChainedTogether(
       );
     }
 
-    for (const link of state.links) {
+    for (let linkIndex = 0; linkIndex < state.links.length; linkIndex += 1) {
+      const link = state.links[linkIndex];
       const playerA = playerMap.get(link.playerAId);
       const playerB = playerMap.get(link.playerBId);
       if (!playerA || !playerB) {
         continue;
       }
-      if (portalConstraintByLink.get(link)) {
+      if (portalConstraintByLink[linkIndex]) {
         continue;
       }
       dampAirborneOrbitVelocity(playerA.ball, playerB.ball, chainLinkLength);
@@ -1908,40 +2133,82 @@ function beginChainedTeamGoalSequence(game: any, players: any[], goalHit: any, r
   }
 }
 
-function serializePortalStates(portalByPlayer: Map<number, ChainPortalPlayerState>): SavedChainPortalState[] {
-  const entries = Array.from(portalByPlayer.entries()).sort((a, b) => a[0] - b[0]);
-  const out: SavedChainPortalState[] = [];
-  for (const [playerId, portalState] of entries) {
-    const windingKeys = Object.keys(portalState.windingByPair).sort();
-    out.push({
-      playerId,
-      lift: Array.from(portalState.lift),
-      winding: windingKeys.map((pairKey) => ({
-        pairKey,
-        count: portalState.windingByPair[pairKey] | 0,
-      })),
-    });
+function writeSavedPortalStates(
+  state: ChainState,
+  targetPortalStates: SavedChainPortalState[],
+  portalByPlayer: Map<number, ChainPortalPlayerState>,
+) {
+  const sortedPlayerIds = state.sortedPortalPlayerIds;
+  sortedPlayerIds.length = 0;
+  for (const playerId of portalByPlayer.keys()) {
+    sortedPlayerIds.push(playerId);
   }
-  return out;
+  sortedPlayerIds.sort((a, b) => a - b);
+  targetPortalStates.length = sortedPlayerIds.length;
+  for (let i = 0; i < sortedPlayerIds.length; i += 1) {
+    const playerId = sortedPlayerIds[i];
+    const portalState = portalByPlayer.get(playerId);
+    if (!portalState) {
+      continue;
+    }
+    const out = targetPortalStates[i] ?? {
+      playerId: 0,
+      lift: new Float32Array(16),
+      winding: [],
+    };
+    out.playerId = playerId;
+    const lift = out.lift instanceof Float32Array && out.lift.length === 16 ? out.lift : new Float32Array(16);
+    copyMatrix16(portalState.lift, lift);
+    out.lift = lift;
+    const windingKeys = state.sortedWindingKeys;
+    windingKeys.length = 0;
+    for (const pairKey in portalState.windingByPair) {
+      if (Object.prototype.hasOwnProperty.call(portalState.windingByPair, pairKey)) {
+        windingKeys.push(pairKey);
+      }
+    }
+    windingKeys.sort();
+    const winding = Array.isArray(out.winding) ? out.winding : [];
+    winding.length = windingKeys.length;
+    for (let j = 0; j < windingKeys.length; j += 1) {
+      const pairKey = windingKeys[j];
+      const windingEntry = winding[j] ?? { pairKey: '', count: 0 };
+      windingEntry.pairKey = pairKey;
+      windingEntry.count = portalState.windingByPair[pairKey] | 0;
+      winding[j] = windingEntry;
+    }
+    out.winding = winding;
+    targetPortalStates[i] = out;
+  }
 }
 
-function deserializePortalStates(source: SavedChainPortalState[] | undefined): Map<number, ChainPortalPlayerState> {
-  const out = new Map<number, ChainPortalPlayerState>();
+function applySavedPortalStates(state: ChainState, source: SavedChainPortalState[] | undefined) {
+  const portalByPlayer = state.portalByPlayer;
+  const activeIds = state.activePortalPlayerIds;
+  activeIds.clear();
   if (!Array.isArray(source)) {
-    return out;
+    portalByPlayer.clear();
+    return;
   }
   for (const entry of source) {
     const playerId = toNonNegativeInt(entry?.playerId);
     if (playerId === null) {
       continue;
     }
-    const portalState = createChainPortalPlayerState();
+    activeIds.add(playerId);
+    const portalState = getPortalPlayerState(state, playerId);
     if (!copyMatrix16(entry.lift, portalState.lift)) {
       mat4.identity(portalState.lift);
     }
     if (!mat4.invert(portalState.invLift, portalState.lift)) {
       mat4.identity(portalState.lift);
       mat4.identity(portalState.invLift);
+    }
+    const windingByPair = portalState.windingByPair;
+    for (const pairKey in windingByPair) {
+      if (Object.prototype.hasOwnProperty.call(windingByPair, pairKey)) {
+        delete windingByPair[pairKey];
+      }
     }
     if (Array.isArray(entry.winding)) {
       for (const windingEntry of entry.winding) {
@@ -1950,13 +2217,16 @@ function deserializePortalStates(source: SavedChainPortalState[] | undefined): M
         if (!pairKey || count === 0) {
           continue;
         }
-        portalState.windingByPair[pairKey] = count;
+        windingByPair[pairKey] = count;
       }
     }
-    portalState.signature = rebuildPortalSignature(portalState.windingByPair);
-    out.set(playerId, portalState);
+    portalState.signature = rebuildPortalSignature(windingByPair);
   }
-  return out;
+  for (const playerId of portalByPlayer.keys()) {
+    if (!activeIds.has(playerId)) {
+      portalByPlayer.delete(playerId);
+    }
+  }
 }
 
 function buildChainHash(state: ChainState, chainLinkLength: number): number {
@@ -2037,9 +2307,10 @@ function pushChainRibbonPrimitive(primitives: any[], id: number, points: Vec3[])
 
 function processPostChainBallWormholes(game: any, state: ChainState, players: any[]): WormholeTeleportEvent[] {
   if (!game?.stageRuntime) {
-    return [];
+    return EMPTY_WORMHOLE_TELEPORTS;
   }
-  const extraTeleports: WormholeTeleportEvent[] = [];
+  const extraTeleports = state.tmpWormholeTeleports;
+  extraTeleports.length = 0;
   for (const player of players) {
     if (player?.isSpectator || player?.pendingSpawn) {
       continue;
@@ -2057,15 +2328,24 @@ function processPostChainBallWormholes(game: any, state: ChainState, players: an
     if (!processBallWormholeTeleport(ball, game.stageRuntime)) {
       continue;
     }
-    const tf = mat4.create();
+    const nextIndex = extraTeleports.length;
+    const event = extraTeleports[nextIndex] ?? {
+      playerId: 0,
+      srcWormholeId: 0,
+      dstWormholeId: 0,
+      transform: mat4.create(),
+    };
+    const tf = event.transform instanceof Float32Array && event.transform.length === 16
+      ? event.transform
+      : mat4.create();
     if (copyMatrix16(ball.wormholeTransform, tf)) {
       const traversal = ball.wormholeTraversal;
-      extraTeleports.push({
-        playerId: player.id,
-        srcWormholeId: toNonNegativeInt(traversal?.srcWormholeId) ?? 0,
-        dstWormholeId: toNonNegativeInt(traversal?.dstWormholeId) ?? 0,
-        transform: tf,
-      });
+      event.playerId = player.id;
+      event.srcWormholeId = toNonNegativeInt(traversal?.srcWormholeId) ?? 0;
+      event.dstWormholeId = toNonNegativeInt(traversal?.dstWormholeId) ?? 0;
+      event.transform = tf;
+      extraTeleports[nextIndex] = event;
+      extraTeleports.length = nextIndex + 1;
       player.camera?.applyWormholeTransform?.(ball.wormholeTransform);
     }
     ball.wormholeTransform = null;
@@ -2074,10 +2354,11 @@ function processPostChainBallWormholes(game: any, state: ChainState, players: an
   if (extraTeleports.length === 0) {
     return extraTeleports;
   }
-  const teleportByPlayer = buildTeleportTransformByPlayer(extraTeleports);
+  const teleportByPlayer = fillTeleportTransformByPlayer(state, extraTeleports);
   applyFollowerTeleportToLinks(state.links, teleportByPlayer);
   applyWormholeTeleports(state, players, extraTeleports);
-  const teleportedPlayerIds = new Set<number>();
+  const teleportedPlayerIds = state.teleportedPlayerIds;
+  teleportedPlayerIds.clear();
   for (const event of extraTeleports) {
     const eventPlayerId = toNonNegativeInt(event.playerId);
     if (eventPlayerId !== null) {
@@ -2092,40 +2373,70 @@ function buildChainHooks(): ModHooks {
   return {
     onStageLoad: ({ game }) => {
       const state = getChainState(game as object);
-      state.links = [];
+      state.links.length = 0;
       state.topologyKey = '';
       state.portalByPlayer.clear();
       state.preStepVelByPlayer.clear();
+      state.playerById.clear();
+      state.collisionImpulseByPlayer.clear();
+      state.pendingBallTransfersByPlayer.clear();
+      state.teleportByPlayer.clear();
+      state.activeTeleportPlayerIds.clear();
+      state.teleportedPlayerIds.clear();
+      state.portalConstraintByLink.length = 0;
     },
     onSaveState: ({ game, modState }) => {
       if (!isChainedTogetherMode(game)) {
+        delete (modState as any).chain;
         return;
       }
       const state = getChainState(game as object);
-      modState.chain = {
-        links: cloneChainLinks(state.links),
-        topologyKey: state.topologyKey,
-        portalStates: serializePortalStates(state.portalByPlayer),
-      };
+      const saved: SavedChainState = (
+        modState.chain
+        && typeof modState.chain === 'object'
+        && !Array.isArray(modState.chain)
+      )
+        ? (modState.chain as SavedChainState)
+        : { links: [], topologyKey: '', portalStates: [] };
+      if (!Array.isArray(saved.links)) {
+        saved.links = [];
+      }
+      if (!Array.isArray(saved.portalStates)) {
+        saved.portalStates = [];
+      }
+      writeSavedChainLinks(saved.links, state.links);
+      saved.topologyKey = state.topologyKey;
+      writeSavedPortalStates(state, saved.portalStates, state.portalByPlayer);
+      modState.chain = saved;
     },
     onLoadState: ({ game, modState }) => {
       const state = getChainState(game as object);
-      const saved = modState.chain as {
-        links?: ChainLinkState[];
-        topologyKey?: string;
-        portalStates?: SavedChainPortalState[];
-      } | undefined;
+      const saved = modState.chain as SavedChainState | undefined;
       if (!saved) {
-        state.links = [];
+        state.links.length = 0;
         state.topologyKey = '';
         state.portalByPlayer.clear();
         state.preStepVelByPlayer.clear();
+        state.playerById.clear();
+        state.collisionImpulseByPlayer.clear();
+        state.pendingBallTransfersByPlayer.clear();
+        state.teleportByPlayer.clear();
+        state.activeTeleportPlayerIds.clear();
+        state.teleportedPlayerIds.clear();
+        state.portalConstraintByLink.length = 0;
         return;
       }
-      state.links = Array.isArray(saved.links) ? cloneChainLinks(saved.links) : [];
+      applySavedChainLinks(state.links, saved.links);
       state.topologyKey = saved.topologyKey ?? '';
-      state.portalByPlayer = deserializePortalStates(saved.portalStates);
+      applySavedPortalStates(state, saved.portalStates);
       state.preStepVelByPlayer.clear();
+      state.playerById.clear();
+      state.collisionImpulseByPlayer.clear();
+      state.pendingBallTransfersByPlayer.clear();
+      state.teleportByPlayer.clear();
+      state.activeTeleportPlayerIds.clear();
+      state.teleportedPlayerIds.clear();
+      state.portalConstraintByLink.length = 0;
     },
     onDeterminismHash: ({ game }) => {
       if (!isChainedTogetherMode(game)) {
@@ -2165,11 +2476,11 @@ function buildChainHooks(): ModHooks {
         return;
       }
       const state = getChainState(game as object);
-      state.preStepVelByPlayer.set(playerId, {
-        x: Number.isFinite((ball as any)?.vel?.x) ? (ball as any).vel.x : 0,
-        y: Number.isFinite((ball as any)?.vel?.y) ? (ball as any).vel.y : 0,
-        z: Number.isFinite((ball as any)?.vel?.z) ? (ball as any).vel.z : 0,
-      });
+      const preStepVel = state.preStepVelByPlayer.get(playerId) ?? { x: 0, y: 0, z: 0 };
+      preStepVel.x = Number.isFinite((ball as any)?.vel?.x) ? (ball as any).vel.x : 0;
+      preStepVel.y = Number.isFinite((ball as any)?.vel?.y) ? (ball as any).vel.y : 0;
+      preStepVel.z = Number.isFinite((ball as any)?.vel?.z) ? (ball as any).vel.z : 0;
+      state.preStepVelByPlayer.set(playerId, preStepVel);
     },
     onAfterBallStep: ({
       game,
@@ -2184,8 +2495,14 @@ function buildChainHooks(): ModHooks {
         return;
       }
       const state = getChainState(game as object);
-      const sortedPlayers = getPlayersSorted(players as any[]);
-      const teleportEvents = Array.isArray(wormholeTeleports) ? (wormholeTeleports as WormholeTeleportEvent[]) : [];
+      let sortedPlayers = players as any[];
+      for (let i = 1; i < sortedPlayers.length; i += 1) {
+        if ((sortedPlayers[i - 1]?.id ?? 0) > (sortedPlayers[i]?.id ?? 0)) {
+          sortedPlayers = getPlayersSorted(sortedPlayers);
+          break;
+        }
+      }
+      const teleportEvents = Array.isArray(wormholeTeleports) ? (wormholeTeleports as WormholeTeleportEvent[]) : EMPTY_WORMHOLE_TELEPORTS;
       if (hasBallDropStarted(game)) {
         syncChainTopology(game, state, sortedPlayers);
         simulateChainedTogether(game, state, sortedPlayers, teleportEvents);
@@ -2193,7 +2510,7 @@ function buildChainHooks(): ModHooks {
           processPostChainBallWormholes(game, state, sortedPlayers);
         }
       } else {
-        state.links = [];
+        state.links.length = 0;
         state.topologyKey = '';
         state.portalByPlayer.clear();
       }

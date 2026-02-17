@@ -1185,7 +1185,14 @@ export class GameCore {
     state.stageRuntime = this.stageRuntime.writeRollbackState(state.stageRuntime ?? null);
 
     if (this.modHooks.length > 0) {
-      const modState: Record<string, unknown> = {};
+      const existingModState = (state as any).modState;
+      const modState: Record<string, unknown> = (
+        existingModState
+        && typeof existingModState === 'object'
+        && !Array.isArray(existingModState)
+      )
+        ? existingModState
+        : {};
       this.emitModHook('onSaveState', { game: this, state, modState });
       if (Object.keys(modState).length > 0) {
         (state as any).modState = modState;
