@@ -485,6 +485,15 @@ export class NetplayRuntimeController {
         : 'ag=0 b=0 j=0 g=0 t=0 s=0';
       simLines.push(`sim stageTests ${stageTests}`);
       simLines.push(`sim objectTests ${objectTests}`);
+      const modAllAvg = simPerf.modHookCalls > 0 ? (simPerf.modHookMsTotal / simPerf.modHookCalls) : 0;
+      const modBeforeAvg = simPerf.modBeforeSimTickCalls > 0 ? (simPerf.modBeforeSimTickMsTotal / simPerf.modBeforeSimTickCalls) : 0;
+      const modAfterAvg = simPerf.modAfterSimTickCalls > 0 ? (simPerf.modAfterSimTickMsTotal / simPerf.modAfterSimTickCalls) : 0;
+      const modBallAvg = simPerf.modBallUpdateCalls > 0 ? (simPerf.modBallUpdateMsTotal / simPerf.modBallUpdateCalls) : 0;
+      const modPostAvg = simPerf.modAfterBallStepCalls > 0 ? (simPerf.modAfterBallStepMsTotal / simPerf.modAfterBallStepCalls) : 0;
+      const modCameraAvg = simPerf.modCameraUpdateCalls > 0 ? (simPerf.modCameraUpdateMsTotal / simPerf.modCameraUpdateCalls) : 0;
+      const modGoalAvg = simPerf.modGoalHitCalls > 0 ? (simPerf.modGoalHitMsTotal / simPerf.modGoalHitCalls) : 0;
+      simLines.push(`sim mod all=${modAllAvg.toFixed(3)}/${simPerf.modHookMsMax.toFixed(2)} ball=${modBallAvg.toFixed(3)}/${simPerf.modBallUpdateMsMax.toFixed(2)} post=${modPostAvg.toFixed(3)}/${simPerf.modAfterBallStepMsMax.toFixed(2)}`);
+      simLines.push(`sim mod pre=${modBeforeAvg.toFixed(3)} aft=${modAfterAvg.toFixed(3)} cam=${modCameraAvg.toFixed(3)} goal=${modGoalAvg.toFixed(3)} n=${simPerf.modHookCalls}`);
     }
     if (stagePerf) {
       const animAvg = stagePerf.tickCount > 0 ? (stagePerf.animMs / stagePerf.tickCount) : 0;

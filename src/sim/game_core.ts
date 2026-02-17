@@ -149,6 +149,38 @@ function createSimPerfStats() {
     objectGoalBagTests: 0,
     objectGoalTapeTests: 0,
     objectSwitchTests: 0,
+    modHookCalls: 0,
+    modHookMsTotal: 0,
+    modHookMsLast: 0,
+    modHookMsMax: 0,
+    modBeforeSimTickCalls: 0,
+    modBeforeSimTickMsTotal: 0,
+    modBeforeSimTickMsLast: 0,
+    modBeforeSimTickMsMax: 0,
+    modAfterSimTickCalls: 0,
+    modAfterSimTickMsTotal: 0,
+    modAfterSimTickMsLast: 0,
+    modAfterSimTickMsMax: 0,
+    modBallUpdateCalls: 0,
+    modBallUpdateMsTotal: 0,
+    modBallUpdateMsLast: 0,
+    modBallUpdateMsMax: 0,
+    modAfterBallStepCalls: 0,
+    modAfterBallStepMsTotal: 0,
+    modAfterBallStepMsLast: 0,
+    modAfterBallStepMsMax: 0,
+    modCameraUpdateCalls: 0,
+    modCameraUpdateMsTotal: 0,
+    modCameraUpdateMsLast: 0,
+    modCameraUpdateMsMax: 0,
+    modGoalHitCalls: 0,
+    modGoalHitMsTotal: 0,
+    modGoalHitMsLast: 0,
+    modGoalHitMsMax: 0,
+    modOtherCalls: 0,
+    modOtherMsTotal: 0,
+    modOtherMsLast: 0,
+    modOtherMsMax: 0,
   };
 }
 
@@ -843,14 +875,66 @@ export class GameCore {
     this.ruleset = getRulesetById(this.stageRulesetId);
   }
 
+  private recordModHookBucket(countKey: string, totalKey: string, lastKey: string, maxKey: string, durationMs: number) {
+    const simPerf = this.simPerf;
+    if (!simPerf?.enabled) {
+      return;
+    }
+    simPerf[countKey] += 1;
+    simPerf[totalKey] += durationMs;
+    simPerf[lastKey] = durationMs;
+    if (durationMs > simPerf[maxKey]) {
+      simPerf[maxKey] = durationMs;
+    }
+  }
+
+  private recordModHookPerf(name: keyof ModHooks, durationMs: number) {
+    const simPerf = this.simPerf;
+    if (!simPerf?.enabled) {
+      return;
+    }
+    this.recordModHookBucket('modHookCalls', 'modHookMsTotal', 'modHookMsLast', 'modHookMsMax', durationMs);
+    switch (name) {
+      case 'onBeforeSimTick':
+        this.recordModHookBucket('modBeforeSimTickCalls', 'modBeforeSimTickMsTotal', 'modBeforeSimTickMsLast', 'modBeforeSimTickMsMax', durationMs);
+        break;
+      case 'onAfterSimTick':
+        this.recordModHookBucket('modAfterSimTickCalls', 'modAfterSimTickMsTotal', 'modAfterSimTickMsLast', 'modAfterSimTickMsMax', durationMs);
+        break;
+      case 'onBallUpdate':
+        this.recordModHookBucket('modBallUpdateCalls', 'modBallUpdateMsTotal', 'modBallUpdateMsLast', 'modBallUpdateMsMax', durationMs);
+        break;
+      case 'onAfterBallStep':
+        this.recordModHookBucket('modAfterBallStepCalls', 'modAfterBallStepMsTotal', 'modAfterBallStepMsLast', 'modAfterBallStepMsMax', durationMs);
+        break;
+      case 'onCameraUpdate':
+        this.recordModHookBucket('modCameraUpdateCalls', 'modCameraUpdateMsTotal', 'modCameraUpdateMsLast', 'modCameraUpdateMsMax', durationMs);
+        break;
+      case 'onGoalHit':
+        this.recordModHookBucket('modGoalHitCalls', 'modGoalHitMsTotal', 'modGoalHitMsLast', 'modGoalHitMsMax', durationMs);
+        break;
+      default:
+        this.recordModHookBucket('modOtherCalls', 'modOtherMsTotal', 'modOtherMsLast', 'modOtherMsMax', durationMs);
+        break;
+    }
+  }
+
   private emitModHook<T extends keyof ModHooks>(name: T, payload: Parameters<NonNullable<ModHooks[T]>>[0]) {
     if (!this.modHooks.length) {
       return;
     }
-    for (const hooks of this.modHooks) {
-      const handler = hooks?.[name] as ((ctx: any) => void) | undefined;
-      if (handler) {
-        handler(payload);
+    const simPerfEnabled = !!this.simPerf?.enabled;
+    const startMs = simPerfEnabled ? simNowMs() : 0;
+    try {
+      for (const hooks of this.modHooks) {
+        const handler = hooks?.[name] as ((ctx: any) => void) | undefined;
+        if (handler) {
+          handler(payload);
+        }
+      }
+    } finally {
+      if (simPerfEnabled) {
+        this.recordModHookPerf(name, simNowMs() - startMs);
       }
     }
   }
@@ -859,14 +943,22 @@ export class GameCore {
     if (!this.modHooks.length) {
       return false;
     }
+    const simPerfEnabled = !!this.simPerf?.enabled;
+    const startMs = simPerfEnabled ? simNowMs() : 0;
     let handled = false;
-    for (const hooks of this.modHooks) {
-      const handler = hooks?.[name] as ((ctx: any) => boolean | void) | undefined;
-      if (!handler) {
-        continue;
+    try {
+      for (const hooks of this.modHooks) {
+        const handler = hooks?.[name] as ((ctx: any) => boolean | void) | undefined;
+        if (!handler) {
+          continue;
+        }
+        if (handler(payload)) {
+          handled = true;
+        }
       }
-      if (handler(payload)) {
-        handled = true;
+    } finally {
+      if (simPerfEnabled) {
+        this.recordModHookPerf(name, simNowMs() - startMs);
       }
     }
     return handled;
@@ -876,22 +968,30 @@ export class GameCore {
     if (!this.modHooks.length) {
       return { ringoutActive: payload.ringoutActive, skipStandardRingout: false };
     }
+    const simPerfEnabled = !!this.simPerf?.enabled;
+    const startMs = simPerfEnabled ? simNowMs() : 0;
     let ringoutActive = payload.ringoutActive;
     let skipStandardRingout = false;
-    for (const hooks of this.modHooks) {
-      const handler = hooks?.onAfterBallStep as ((ctx: any) => { ringoutActive?: boolean; skipStandardRingout?: boolean } | void) | undefined;
-      if (!handler) {
-        continue;
+    try {
+      for (const hooks of this.modHooks) {
+        const handler = hooks?.onAfterBallStep as ((ctx: any) => { ringoutActive?: boolean; skipStandardRingout?: boolean } | void) | undefined;
+        if (!handler) {
+          continue;
+        }
+        const result = handler(payload);
+        if (!result) {
+          continue;
+        }
+        if (result.ringoutActive !== undefined) {
+          ringoutActive = result.ringoutActive;
+        }
+        if (result.skipStandardRingout) {
+          skipStandardRingout = true;
+        }
       }
-      const result = handler(payload);
-      if (!result) {
-        continue;
-      }
-      if (result.ringoutActive !== undefined) {
-        ringoutActive = result.ringoutActive;
-      }
-      if (result.skipStandardRingout) {
-        skipStandardRingout = true;
+    } finally {
+      if (simPerfEnabled) {
+        this.recordModHookPerf('onAfterBallStep', simNowMs() - startMs);
       }
     }
     return { ringoutActive, skipStandardRingout };
