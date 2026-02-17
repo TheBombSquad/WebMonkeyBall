@@ -1719,12 +1719,11 @@ export class World {
             transformVec3Mat4w1(scratchOverlayRayPosAg, scratchOverlayRayAgFromWorld, pos);
 
             const cellTris = coligridLookupStagedef(stageAg, scratchOverlayRayPosAg[0], scratchOverlayRayPosAg[2]);
-            if (!cellTris || cellTris.length === 0) {
-                continue;
-            }
+            const useCellTris = !!cellTris && cellTris.length > 0;
+            const triIndices = useCellTris ? cellTris : stageAg.coliTris;
 
-            for (const triIndex of cellTris) {
-                const tri = stageAg.coliTris[triIndex];
+            for (let triIndex = 0; triIndex < triIndices.length; triIndex++) {
+                const tri = useCellTris ? stageAg.coliTris[triIndices[triIndex]] : triIndices[triIndex];
                 if (!tri) {
                     continue;
                 }
