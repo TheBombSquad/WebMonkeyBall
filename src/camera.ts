@@ -184,48 +184,100 @@ export class GameplayCamera {
     this.goalReplayRadius = 2;
   }
 
+  private ensureStateVec3(target, key) {
+    let value = target[key];
+    if (!value) {
+      value = { x: 0, y: 0, z: 0 };
+      target[key] = value;
+    }
+    return value;
+  }
+
+  writeState(target = null) {
+    const out = target ?? {};
+    const eye = this.ensureStateVec3(out, 'eye');
+    eye.x = this.eye.x;
+    eye.y = this.eye.y;
+    eye.z = this.eye.z;
+    const lookAt = this.ensureStateVec3(out, 'lookAt');
+    lookAt.x = this.lookAt.x;
+    lookAt.y = this.lookAt.y;
+    lookAt.z = this.lookAt.z;
+    const eyeVel = this.ensureStateVec3(out, 'eyeVel');
+    eyeVel.x = this.eyeVel.x;
+    eyeVel.y = this.eyeVel.y;
+    eyeVel.z = this.eyeVel.z;
+    const lookAtVel = this.ensureStateVec3(out, 'lookAtVel');
+    lookAtVel.x = this.lookAtVel.x;
+    lookAtVel.y = this.lookAtVel.y;
+    lookAtVel.z = this.lookAtVel.z;
+    out.rotX = this.rotX;
+    out.rotY = this.rotY;
+    out.rotZ = this.rotZ;
+    out.flags = this.flags;
+    out.state = this.state;
+    out.timerCurr = this.timerCurr;
+    out.timerMax = this.timerMax;
+    const unk54 = this.ensureStateVec3(out, 'unk54');
+    unk54.x = this.unk54.x;
+    unk54.y = this.unk54.y;
+    unk54.z = this.unk54.z;
+    out.unk60 = this.unk60;
+    out.unk64 = this.unk64;
+    out.unk68 = this.unk68;
+    out.unk6C = this.unk6C;
+    out.unk70 = this.unk70;
+    const unk74 = this.ensureStateVec3(out, 'unk74');
+    unk74.x = this.unk74.x;
+    unk74.y = this.unk74.y;
+    unk74.z = this.unk74.z;
+    out.unk88 = this.unk88;
+    out.unk8C = this.unk8C;
+    out.unk90 = this.unk90;
+    const unkAC = this.ensureStateVec3(out, 'unkAC');
+    unkAC.x = this.unkAC.x;
+    unkAC.y = this.unkAC.y;
+    unkAC.z = this.unkAC.z;
+    out.unkB8 = this.unkB8;
+    out.unk10C = this.unk10C;
+    out.readyMode = this.readyMode;
+    out.smb2Standstill = this.smb2Standstill;
+    out.smb2PivotXRot = this.smb2PivotXRot;
+    out.smb2YawVel = this.smb2YawVel;
+    out.smb2FrameCounter = this.smb2FrameCounter;
+    out.goalReplayMode = this.goalReplayMode;
+    out.goalReplayGoalId = this.goalReplayGoalId;
+    out.goalReplayAnimGroupId = this.goalReplayAnimGroupId;
+    const goalReplayLocalPos = this.ensureStateVec3(out, 'goalReplayLocalPos');
+    goalReplayLocalPos.x = this.goalReplayLocalPos.x;
+    goalReplayLocalPos.y = this.goalReplayLocalPos.y;
+    goalReplayLocalPos.z = this.goalReplayLocalPos.z;
+    const goalReplayRot = this.ensureStateVec3(out, 'goalReplayRot');
+    goalReplayRot.x = this.goalReplayRot.x;
+    goalReplayRot.y = this.goalReplayRot.y;
+    goalReplayRot.z = this.goalReplayRot.z;
+    const goalReplayGoal = this.ensureStateVec3(out, 'goalReplayGoal');
+    goalReplayGoal.x = this.goalReplayGoal.x;
+    goalReplayGoal.y = this.goalReplayGoal.y;
+    goalReplayGoal.z = this.goalReplayGoal.z;
+    const goalReplayDir = this.ensureStateVec3(out, 'goalReplayDir');
+    goalReplayDir.x = this.goalReplayDir.x;
+    goalReplayDir.y = this.goalReplayDir.y;
+    goalReplayDir.z = this.goalReplayDir.z;
+    const goalReplayEventPos = this.ensureStateVec3(out, 'goalReplayEventPos');
+    goalReplayEventPos.x = this.goalReplayEventPos.x;
+    goalReplayEventPos.y = this.goalReplayEventPos.y;
+    goalReplayEventPos.z = this.goalReplayEventPos.z;
+    const goalReplayAnchor = this.ensureStateVec3(out, 'goalReplayAnchor');
+    goalReplayAnchor.x = this.goalReplayAnchor.x;
+    goalReplayAnchor.y = this.goalReplayAnchor.y;
+    goalReplayAnchor.z = this.goalReplayAnchor.z;
+    out.goalReplayRadius = this.goalReplayRadius;
+    return out;
+  }
+
   getState() {
-    return {
-      eye: { x: this.eye.x, y: this.eye.y, z: this.eye.z },
-      lookAt: { x: this.lookAt.x, y: this.lookAt.y, z: this.lookAt.z },
-      eyeVel: { x: this.eyeVel.x, y: this.eyeVel.y, z: this.eyeVel.z },
-      lookAtVel: { x: this.lookAtVel.x, y: this.lookAtVel.y, z: this.lookAtVel.z },
-      rotX: this.rotX,
-      rotY: this.rotY,
-      rotZ: this.rotZ,
-      flags: this.flags,
-      state: this.state,
-      timerCurr: this.timerCurr,
-      timerMax: this.timerMax,
-      unk54: { x: this.unk54.x, y: this.unk54.y, z: this.unk54.z },
-      unk60: this.unk60,
-      unk64: this.unk64,
-      unk68: this.unk68,
-      unk6C: this.unk6C,
-      unk70: this.unk70,
-      unk74: { x: this.unk74.x, y: this.unk74.y, z: this.unk74.z },
-      unk88: this.unk88,
-      unk8C: this.unk8C,
-      unk90: this.unk90,
-      unkAC: { x: this.unkAC.x, y: this.unkAC.y, z: this.unkAC.z },
-      unkB8: this.unkB8,
-      unk10C: this.unk10C,
-      readyMode: this.readyMode,
-      smb2Standstill: this.smb2Standstill,
-      smb2PivotXRot: this.smb2PivotXRot,
-      smb2YawVel: this.smb2YawVel,
-      smb2FrameCounter: this.smb2FrameCounter,
-      goalReplayMode: this.goalReplayMode,
-      goalReplayGoalId: this.goalReplayGoalId,
-      goalReplayAnimGroupId: this.goalReplayAnimGroupId,
-      goalReplayLocalPos: { x: this.goalReplayLocalPos.x, y: this.goalReplayLocalPos.y, z: this.goalReplayLocalPos.z },
-      goalReplayRot: { x: this.goalReplayRot.x, y: this.goalReplayRot.y, z: this.goalReplayRot.z },
-      goalReplayGoal: { x: this.goalReplayGoal.x, y: this.goalReplayGoal.y, z: this.goalReplayGoal.z },
-      goalReplayDir: { x: this.goalReplayDir.x, y: this.goalReplayDir.y, z: this.goalReplayDir.z },
-      goalReplayEventPos: { x: this.goalReplayEventPos.x, y: this.goalReplayEventPos.y, z: this.goalReplayEventPos.z },
-      goalReplayAnchor: { x: this.goalReplayAnchor.x, y: this.goalReplayAnchor.y, z: this.goalReplayAnchor.z },
-      goalReplayRadius: this.goalReplayRadius,
-    };
+    return this.writeState();
   }
 
   setState(state) {

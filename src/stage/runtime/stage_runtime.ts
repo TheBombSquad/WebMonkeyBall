@@ -379,6 +379,229 @@ export class StageRuntime {
     }
   }
 
+  writeRollbackState(target = null) {
+    const num = (value, fallback = 0) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const writeVec3 = (dest, source) => {
+      const out = dest ?? { x: 0, y: 0, z: 0 };
+      out.x = num(source?.x);
+      out.y = num(source?.y);
+      out.z = num(source?.z);
+      return out;
+    };
+    const writeIndexList = (dest, source) => {
+      const out = Array.isArray(dest) ? dest : new Array(source.length);
+      out.length = source.length;
+      for (let i = 0; i < source.length; i += 1) {
+        out[i] = source[i];
+      }
+      return out;
+    };
+    const writeMat12 = (dest, source, identityFallback = false) => {
+      const out = dest instanceof Float32Array && dest.length === 12 ? dest : new Float32Array(12);
+      if (source) {
+        const src = source as any;
+        for (let i = 0; i < 12; i += 1) {
+          out[i] = num(src[i]);
+        }
+      } else {
+        for (let i = 0; i < 12; i += 1) {
+          out[i] = 0;
+        }
+      }
+      if (
+        identityFallback
+        && out[0] === 0 && out[1] === 0 && out[2] === 0
+        && out[4] === 0 && out[5] === 0 && out[6] === 0
+        && out[8] === 0 && out[9] === 0 && out[10] === 0
+      ) {
+        out[0] = 1;
+        out[5] = 1;
+        out[10] = 1;
+      }
+      return out;
+    };
+
+    const state: any = target ?? {};
+    state.rulesetId = this.rulesetId;
+    state.timerFrames = this.timerFrames;
+
+    const animGroupIndices = this.animGroupStateIndices;
+    const animGroups = Array.isArray(state.animGroups) ? state.animGroups : [];
+    animGroups.length = animGroupIndices.length;
+    for (let listIndex = 0; listIndex < animGroupIndices.length; listIndex += 1) {
+      const groupIndex = animGroupIndices[listIndex];
+      const group = this.animGroups[groupIndex];
+      if (!group) {
+        animGroups[listIndex] = null;
+        continue;
+      }
+      const out: any = animGroups[listIndex] ?? {};
+      out.pos = writeVec3(out.pos, group.pos);
+      out.prevPos = writeVec3(out.prevPos, group.prevPos);
+      out.rot = writeVec3(out.rot, group.rot);
+      out.prevRot = writeVec3(out.prevRot, group.prevRot);
+      out.transform = writeMat12(out.transform, group.transform, true);
+      out.prevTransform = writeMat12(out.prevTransform, group.prevTransform, true);
+      if (group.animFrame !== undefined) {
+        out.animFrame = num(group.animFrame);
+      } else {
+        out.animFrame = undefined;
+      }
+      if (group.playbackState !== undefined) {
+        out.playbackState = num(group.playbackState) | 0;
+      } else {
+        out.playbackState = undefined;
+      }
+      if (group.seesawState) {
+        const seesawState: any = out.seesawState ?? {};
+        seesawState.angle = num(group.seesawState.angle);
+        seesawState.prevAngle = num(group.seesawState.prevAngle);
+        seesawState.angleVel = num(group.seesawState.angleVel);
+        out.seesawState = seesawState;
+      } else {
+        out.seesawState = undefined;
+      }
+      animGroups[listIndex] = out;
+    }
+    state.animGroups = animGroups;
+    state.animGroupIndices = writeIndexList(state.animGroupIndices, animGroupIndices);
+
+    const jamabarGroupIndices = this.jamabarGroupIndices;
+    const jamabars = Array.isArray(state.jamabars) ? state.jamabars : [];
+    jamabars.length = jamabarGroupIndices.length;
+    for (let listIndex = 0; listIndex < jamabarGroupIndices.length; listIndex += 1) {
+      const groupIndex = jamabarGroupIndices[listIndex];
+      const sourceGroup = this.jamabars[groupIndex] ?? [];
+      const outGroup = Array.isArray(jamabars[listIndex]) ? jamabars[listIndex] : [];
+      outGroup.length = sourceGroup.length;
+      for (let i = 0; i < sourceGroup.length; i += 1) {
+        const jamabar = sourceGroup[i];
+        const out: any = outGroup[i] ?? {};
+        out.pos = writeVec3(out.pos, jamabar?.pos);
+        out.localPos = writeVec3(out.localPos, jamabar?.localPos);
+        out.localVel = writeVec3(out.localVel, jamabar?.localVel);
+        outGroup[i] = out;
+      }
+      jamabars[listIndex] = outGroup;
+    }
+    state.jamabars = jamabars;
+    state.jamabarGroupIndices = writeIndexList(state.jamabarGroupIndices, jamabarGroupIndices);
+
+    const goalBags = Array.isArray(state.goalBags) ? state.goalBags : [];
+    goalBags.length = this.goalBags.length;
+    for (let i = 0; i < this.goalBags.length; i += 1) {
+      const bag = this.goalBags[i];
+      const out: any = goalBags[i] ?? {};
+      out.state = num(bag?.state) | 0;
+      out.counter = num(bag?.counter) | 0;
+      out.flags = num(bag?.flags) | 0;
+      out.openness = num(bag?.openness);
+      out.unk8 = num(bag?.unk8);
+      out.openFrame = num(bag?.openFrame) | 0;
+      out.rotX = num(bag?.rotX) | 0;
+      out.rotY = num(bag?.rotY) | 0;
+      out.rotZ = num(bag?.rotZ) | 0;
+      out.uSomePos = writeVec3(out.uSomePos, bag?.uSomePos);
+      out.localPos = writeVec3(out.localPos, bag?.localPos);
+      out.localVel = writeVec3(out.localVel, bag?.localVel);
+      out.modelOrigin = writeVec3(out.modelOrigin, bag?.modelOrigin);
+      out.boundSphereRadius = num(bag?.boundSphereRadius);
+      out.position = writeVec3(out.position, bag?.position);
+      goalBags[i] = out;
+    }
+    state.goalBags = goalBags;
+
+    const goalTapes = Array.isArray(state.goalTapes) ? state.goalTapes : [];
+    goalTapes.length = this.goalTapes.length;
+    for (let i = 0; i < this.goalTapes.length; i += 1) {
+      const tape = this.goalTapes[i];
+      const outTape: any = goalTapes[i] ?? {};
+      outTape.flags = num(tape?.flags) | 0;
+      outTape.breakFrame = num(tape?.breakFrame) | 0;
+      outTape.groundY = num(tape?.groundY);
+      outTape.anchorY = num(tape?.anchorY);
+      outTape.targetY = num(tape?.targetY);
+      const sourcePoints = Array.isArray(tape?.points) ? tape.points : [];
+      const outPoints = Array.isArray(outTape.points) ? outTape.points : [];
+      outPoints.length = sourcePoints.length;
+      for (let pointIndex = 0; pointIndex < sourcePoints.length; pointIndex += 1) {
+        const point = sourcePoints[pointIndex];
+        const outPoint: any = outPoints[pointIndex] ?? {};
+        outPoint.pos = writeVec3(outPoint.pos, point?.pos);
+        outPoint.normal = writeVec3(outPoint.normal, point?.normal);
+        outPoint.vel = writeVec3(outPoint.vel, point?.vel);
+        outPoint.flags = num(point?.flags) | 0;
+        outPoint.len = num(point?.len);
+        outPoints[pointIndex] = outPoint;
+      }
+      outTape.points = outPoints;
+      goalTapes[i] = outTape;
+    }
+    state.goalTapes = goalTapes;
+
+    const bananas = Array.isArray(state.bananas) ? state.bananas : [];
+    bananas.length = this.bananas.length;
+    for (let i = 0; i < this.bananas.length; i += 1) {
+      const banana = this.bananas[i];
+      const out: any = bananas[i] ?? {};
+      out.localPos = writeVec3(out.localPos, banana?.localPos);
+      out.flags = num(banana?.flags) | 0;
+      out.cooldown = num(banana?.cooldown) | 0;
+      out.collected = !!banana?.collected;
+      out.state = num(banana?.state) | 0;
+      out.collectTimer = num(banana?.collectTimer) | 0;
+      out.holdTimer = num(banana?.holdTimer) | 0;
+      out.holdOffset = writeVec3(out.holdOffset, banana?.holdOffset);
+      out.holdScaleTarget = num(banana?.holdScaleTarget);
+      out.holdRotVel = num(banana?.holdRotVel) | 0;
+      out.flyTimer = num(banana?.flyTimer) | 0;
+      out.flyScaleTarget = num(banana?.flyScaleTarget);
+      out.flyStartPos = writeVec3(out.flyStartPos, banana?.flyStartPos);
+      out.flyStartScale = num(banana?.flyStartScale);
+      out.tiltTimer = num(banana?.tiltTimer) | 0;
+      out.scale = num(banana?.scale, 1);
+      out.vel = writeVec3(out.vel, banana?.vel);
+      out.rotX = num(banana?.rotX) | 0;
+      out.rotY = num(banana?.rotY) | 0;
+      out.rotZ = num(banana?.rotZ) | 0;
+      out.rotVelX = num(banana?.rotVelX) | 0;
+      out.rotVelY = num(banana?.rotVelY) | 0;
+      out.rotVelZ = num(banana?.rotVelZ) | 0;
+      bananas[i] = out;
+    }
+    state.bananas = bananas;
+
+    const switches = Array.isArray(state.switches) ? state.switches : [];
+    switches.length = this.switches.length;
+    for (let i = 0; i < this.switches.length; i += 1) {
+      const stageSwitch = this.switches[i];
+      const out: any = switches[i] ?? {};
+      out.pos = writeVec3(out.pos, stageSwitch?.pos);
+      out.localPos = writeVec3(out.localPos, stageSwitch?.localPos);
+      out.localVel = writeVec3(out.localVel, stageSwitch?.localVel);
+      out.state = num(stageSwitch?.state) | 0;
+      out.pressImpulse = !!stageSwitch?.pressImpulse;
+      out.triggered = !!stageSwitch?.triggered;
+      out.counter = num(stageSwitch?.counter) | 0;
+      out.cooldown = num(stageSwitch?.cooldown) | 0;
+      switches[i] = out;
+    }
+    state.switches = switches;
+
+    state.switchPressCount = this.switchPressCount ?? 0;
+    state.goalHoldOpen = this.goalHoldOpen;
+    state.switchesEnabled = this.switchesEnabled;
+    state.simRngState = this.simRng?.state ?? 0;
+    state.bumpers = undefined;
+    state.confetti = undefined;
+    state.effects = undefined;
+    state.visualRngState = undefined;
+    return state;
+  }
+
   getState({ includeVisual = true } = {}) {
     const num = (value, fallback = 0) => {
       const n = Number(value);

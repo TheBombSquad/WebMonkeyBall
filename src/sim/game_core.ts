@@ -626,8 +626,8 @@ export class GameCore {
       return this.rollbackSession;
     }
     this.rollbackSession = new RollbackSession({
-      saveState: () => {
-        return this.saveRollbackState();
+      saveState: (reuseState) => {
+        return this.saveRollbackState(reuseState);
       },
       loadState: (state) => {
         this.loadRollbackState(state);
@@ -963,98 +963,152 @@ export class GameCore {
     }
   }
 
-  saveRollbackState() {
+  saveRollbackState(reuseState = null) {
     if (!this.stageRuntime) {
       return null;
     }
-    const cloneWorldState = (world) => ({
-      xrot: world.xrot,
-      zrot: world.zrot,
-      xrotPrev: world.xrotPrev,
-      zrotPrev: world.zrotPrev,
-      gravity: this.cloneVec3(world.gravity),
-    });
-    const state = {
-      simTick: this.simTick,
-      hudGoalEventTick: this.hudGoalEventTick,
-      hudRingoutEventTick: this.hudRingoutEventTick,
-      stageTimerFrames: this.stageTimerFrames,
-      stageTimeLimitFrames: this.stageTimeLimitFrames,
-      bananasLeft: this.bananasLeft,
-      introTimerFrames: this.introTimerFrames,
-      introTotalFrames: this.introTotalFrames,
-      timeoverTimerFrames: this.timeoverTimerFrames,
-      multiplayerGoalTimerFrames: this.multiplayerGoalTimerFrames,
-      multiplayerTimeoverHadGoal: this.multiplayerTimeoverHadGoal,
-      bonusClearPending: this.bonusClearPending,
-      hurryUpAnnouncerPlayed: this.hurryUpAnnouncerPlayed,
-      timeOverAnnouncerPlayed: this.timeOverAnnouncerPlayed,
-      pendingAdvance: this.pendingAdvance,
-      goalReplayStartArmed: this.goalReplayStartArmed,
-      multiplayerGameMode: this.multiplayerGameMode,
-      infiniteTimeEnabled: this.infiniteTimeEnabled,
-      world: this.world ? cloneWorldState(this.world) : null,
-      players: this.players.map((player) => ({
-        id: player.id,
-        isSpectator: player.isSpectator,
-        pendingSpawn: player.pendingSpawn,
-        finished: player.finished,
-        freeFly: player.freeFly,
-        goalType: player.goalType,
-        goalTimerFrames: player.goalTimerFrames,
-        goalSkipTimerFrames: player.goalSkipTimerFrames,
-        goalInfo: player.goalInfo ? structuredClone(player.goalInfo) : null,
-        spectateTimerFrames: player.spectateTimerFrames,
-        respawnTimerFrames: player.respawnTimerFrames,
-        ringoutTimerFrames: player.ringoutTimerFrames,
-        ringoutSkipTimerFrames: player.ringoutSkipTimerFrames,
-        cameraRotY: player.cameraRotY,
-        camera: player.camera?.getState?.() ?? null,
-        world: cloneWorldState(player.world),
-        ball: this.cloneBallState(player.ball),
-      })),
-      noCollidePairs: Array.from(this.noCollidePairs),
-      playerCollisionEnabled: this.playerCollisionEnabled,
-      stageRuntime: this.stageRuntime.getState({ includeVisual: false }),
+    const cloneWorldState = (world, target = null) => {
+      if (!world) {
+        return null;
+      }
+      const out = target ?? {};
+      out.xrot = world.xrot;
+      out.zrot = world.zrot;
+      out.xrotPrev = world.xrotPrev;
+      out.zrotPrev = world.zrotPrev;
+      out.gravity = this.cloneVec3(world.gravity, out.gravity);
+      return out;
     };
+    const state = reuseState ?? {};
+    state.simTick = this.simTick;
+    state.hudGoalEventTick = this.hudGoalEventTick;
+    state.hudRingoutEventTick = this.hudRingoutEventTick;
+    state.stageTimerFrames = this.stageTimerFrames;
+    state.stageTimeLimitFrames = this.stageTimeLimitFrames;
+    state.bananasLeft = this.bananasLeft;
+    state.introTimerFrames = this.introTimerFrames;
+    state.introTotalFrames = this.introTotalFrames;
+    state.timeoverTimerFrames = this.timeoverTimerFrames;
+    state.multiplayerGoalTimerFrames = this.multiplayerGoalTimerFrames;
+    state.multiplayerTimeoverHadGoal = this.multiplayerTimeoverHadGoal;
+    state.bonusClearPending = this.bonusClearPending;
+    state.hurryUpAnnouncerPlayed = this.hurryUpAnnouncerPlayed;
+    state.timeOverAnnouncerPlayed = this.timeOverAnnouncerPlayed;
+    state.pendingAdvance = this.pendingAdvance;
+    state.goalReplayStartArmed = this.goalReplayStartArmed;
+    state.multiplayerGameMode = this.multiplayerGameMode;
+    state.infiniteTimeEnabled = this.infiniteTimeEnabled;
+    state.world = this.world ? cloneWorldState(this.world, state.world) : null;
+
+    const players = Array.isArray(state.players) ? state.players : [];
+    players.length = this.players.length;
+    for (let i = 0; i < this.players.length; i += 1) {
+      const player = this.players[i];
+      const outPlayer = players[i] ?? {};
+      outPlayer.id = player.id;
+      outPlayer.isSpectator = player.isSpectator;
+      outPlayer.pendingSpawn = player.pendingSpawn;
+      outPlayer.finished = player.finished;
+      outPlayer.freeFly = player.freeFly;
+      outPlayer.goalType = player.goalType;
+      outPlayer.goalTimerFrames = player.goalTimerFrames;
+      outPlayer.goalSkipTimerFrames = player.goalSkipTimerFrames;
+      outPlayer.goalInfo = this.cloneGoalInfo(player.goalInfo, outPlayer.goalInfo);
+      outPlayer.spectateTimerFrames = player.spectateTimerFrames;
+      outPlayer.respawnTimerFrames = player.respawnTimerFrames;
+      outPlayer.ringoutTimerFrames = player.ringoutTimerFrames;
+      outPlayer.ringoutSkipTimerFrames = player.ringoutSkipTimerFrames;
+      outPlayer.cameraRotY = player.cameraRotY;
+      outPlayer.camera = player.camera?.writeState?.(outPlayer.camera ?? null) ?? null;
+      outPlayer.world = cloneWorldState(player.world, outPlayer.world);
+      outPlayer.ball = this.cloneBallState(player.ball, outPlayer.ball);
+      players[i] = outPlayer;
+    }
+    state.players = players;
+
+    const noCollidePairs = Array.isArray(state.noCollidePairs) ? state.noCollidePairs : [];
+    noCollidePairs.length = 0;
+    for (const pairKey of this.noCollidePairs) {
+      noCollidePairs.push(pairKey);
+    }
+    state.noCollidePairs = noCollidePairs;
+    state.playerCollisionEnabled = this.playerCollisionEnabled;
+    state.stageRuntime = this.stageRuntime.writeRollbackState(state.stageRuntime ?? null);
+
     if (this.modHooks.length > 0) {
       const modState: Record<string, unknown> = {};
       this.emitModHook('onSaveState', { game: this, state, modState });
       if (Object.keys(modState).length > 0) {
         (state as any).modState = modState;
+      } else {
+        (state as any).modState = undefined;
       }
+    } else {
+      (state as any).modState = undefined;
     }
     return state;
   }
 
-  private cloneVec3(source) {
+  private cloneGoalInfo(source, target = null) {
+    if (!source || typeof source !== 'object') {
+      return null;
+    }
+    const out = target && typeof target === 'object' ? target : {};
+    const src = source as Record<string, unknown>;
+    for (const key of Object.keys(out)) {
+      if (!(key in src)) {
+        out[key] = undefined;
+      }
+    }
+    for (const [key, value] of Object.entries(src)) {
+      if (key === 'replayEntryVel') {
+        out.replayEntryVel = value && typeof value === 'object'
+          ? this.cloneVec3(value, out.replayEntryVel ?? null)
+          : null;
+        continue;
+      }
+      if (value === null || typeof value !== 'object') {
+        out[key] = value;
+        continue;
+      }
+      out[key] = structuredClone(value);
+    }
+    return out;
+  }
+
+  private cloneVec3(source, target = null) {
     const finite = (value) => {
       const num = Number(value);
       return Number.isFinite(num) ? num : 0;
     };
-    return {
-      x: finite(source?.x),
-      y: finite(source?.y),
-      z: finite(source?.z),
-    };
+    const out = target ?? { x: 0, y: 0, z: 0 };
+    out.x = finite(source?.x);
+    out.y = finite(source?.y);
+    out.z = finite(source?.z);
+    return out;
   }
 
-  private cloneQuat(source) {
+  private cloneQuat(source, target = null) {
     const finite = (value, fallback = 0) => {
       const num = Number(value);
       return Number.isFinite(num) ? num : fallback;
     };
-    return {
-      x: finite(source?.x),
-      y: finite(source?.y),
-      z: finite(source?.z),
-      w: finite(source?.w, 1),
-    };
+    const out = target ?? { x: 0, y: 0, z: 0, w: 1 };
+    out.x = finite(source?.x);
+    out.y = finite(source?.y);
+    out.z = finite(source?.z);
+    out.w = finite(source?.w, 1);
+    return out;
   }
 
-  private cloneNumericArray(source, size) {
-    const out = new Float32Array(size);
+  private cloneNumericArray(source, size, target = null) {
+    const out = target instanceof Float32Array && target.length === size
+      ? target
+      : new Float32Array(size);
     if (!source) {
+      for (let i = 0; i < size; i += 1) {
+        out[i] = 0;
+      }
       return out;
     }
     const src = source as any;
@@ -1065,6 +1119,9 @@ export class GameCore {
         const num = Number(src[i]);
         out[i] = Number.isFinite(num) ? num : 0;
       }
+      for (let i = safeLength; i < size; i += 1) {
+        out[i] = 0;
+      }
       return out;
     }
     for (let i = 0; i < size; i += 1) {
@@ -1074,75 +1131,83 @@ export class GameCore {
     return out;
   }
 
-  private cloneBallState(source) {
+  private cloneBallState(source, target = null) {
     if (!source) {
       return null;
     }
-    return {
-      playerId: source.playerId ?? 0,
-      pos: this.cloneVec3(source.pos),
-      prevPos: this.cloneVec3(source.prevPos),
-      vel: this.cloneVec3(source.vel),
-      rotX: source.rotX ?? 0,
-      rotY: source.rotY ?? 0,
-      rotZ: source.rotZ ?? 0,
-      flags: source.flags ?? 0,
-      state: source.state ?? 0,
-      startPos: this.cloneVec3(source.startPos),
-      startRotY: source.startRotY ?? 0,
-      goalTimer: source.goalTimer ?? 0,
-      currRadius: source.currRadius ?? 0.5,
-      accel: source.accel ?? 0,
-      restitution: source.restitution ?? 0,
-      unk60: source.unk60 ?? 0,
-      unk62: source.unk62 ?? 0,
-      unk64: source.unk64 ?? 0,
-      unk80: source.unk80 ?? 0,
-      unk92: source.unk92 ?? 0,
-      apeYaw: source.apeYaw ?? 0,
-      unkA8: this.cloneQuat(source.unkA8),
-      unkB8: this.cloneVec3(source.unkB8),
-      unkC4: source.unkC4 ?? 0,
-      unkF8: source.unkF8 ?? 0,
-      apeQuat: this.cloneQuat(source.apeQuat),
-      apeFlags: source.apeFlags ?? 0,
-      transform: this.cloneNumericArray(source.transform, 12),
-      prevTransform: this.cloneNumericArray(source.prevTransform, 12),
-      unk114: this.cloneVec3(source.unk114),
-      deltaQuat: this.cloneQuat(source.deltaQuat),
-      orientation: this.cloneQuat(source.orientation),
-      prevOrientation: this.cloneQuat(source.prevOrientation),
-      speed: source.speed ?? 0,
-      bananas: source.bananas ?? 0,
-      wormholeCooldown: source.wormholeCooldown ?? 0,
-      wormholeTransform: source.wormholeTransform ? this.cloneNumericArray(source.wormholeTransform, 16) : null,
-      wormholeTraversal: source.wormholeTraversal
-        ? {
-          srcWormholeId: source.wormholeTraversal.srcWormholeId ?? 0,
-          dstWormholeId: source.wormholeTraversal.dstWormholeId ?? 0,
-        }
-        : null,
-      physBall: source.physBall
-        ? {
-          flags: source.physBall.flags ?? 0,
-          pos: this.cloneVec3(source.physBall.pos),
-          prevPos: this.cloneVec3(source.physBall.prevPos),
-          vel: this.cloneVec3(source.physBall.vel),
-          radius: source.physBall.radius ?? 0.5,
-          gravityAccel: source.physBall.gravityAccel ?? 0,
-          restitution: source.physBall.restitution ?? 0,
-          hardestColiSpeed: source.physBall.hardestColiSpeed ?? 0,
-          hardestColiPlane: {
-            point: this.cloneVec3(source.physBall.hardestColiPlane?.point),
-            normal: this.cloneVec3(source.physBall.hardestColiPlane?.normal),
-          },
-          hardestColiAnimGroupId: source.physBall.hardestColiAnimGroupId ?? 0,
-          friction: source.physBall.friction ?? 0,
-          frictionMode: source.physBall.frictionMode ?? 'smb1',
-          animGroupId: source.physBall.animGroupId ?? 0,
-        }
-        : null,
-    };
+    const out = target ?? {};
+    out.playerId = source.playerId ?? 0;
+    out.pos = this.cloneVec3(source.pos, out.pos);
+    out.prevPos = this.cloneVec3(source.prevPos, out.prevPos);
+    out.vel = this.cloneVec3(source.vel, out.vel);
+    out.rotX = source.rotX ?? 0;
+    out.rotY = source.rotY ?? 0;
+    out.rotZ = source.rotZ ?? 0;
+    out.flags = source.flags ?? 0;
+    out.state = source.state ?? 0;
+    out.startPos = this.cloneVec3(source.startPos, out.startPos);
+    out.startRotY = source.startRotY ?? 0;
+    out.goalTimer = source.goalTimer ?? 0;
+    out.currRadius = source.currRadius ?? 0.5;
+    out.accel = source.accel ?? 0;
+    out.restitution = source.restitution ?? 0;
+    out.unk60 = source.unk60 ?? 0;
+    out.unk62 = source.unk62 ?? 0;
+    out.unk64 = source.unk64 ?? 0;
+    out.unk80 = source.unk80 ?? 0;
+    out.unk92 = source.unk92 ?? 0;
+    out.apeYaw = source.apeYaw ?? 0;
+    out.unkA8 = this.cloneQuat(source.unkA8, out.unkA8);
+    out.unkB8 = this.cloneVec3(source.unkB8, out.unkB8);
+    out.unkC4 = source.unkC4 ?? 0;
+    out.unkF8 = source.unkF8 ?? 0;
+    out.apeQuat = this.cloneQuat(source.apeQuat, out.apeQuat);
+    out.apeFlags = source.apeFlags ?? 0;
+    out.transform = this.cloneNumericArray(source.transform, 12, out.transform);
+    out.prevTransform = this.cloneNumericArray(source.prevTransform, 12, out.prevTransform);
+    out.unk114 = this.cloneVec3(source.unk114, out.unk114);
+    out.deltaQuat = this.cloneQuat(source.deltaQuat, out.deltaQuat);
+    out.orientation = this.cloneQuat(source.orientation, out.orientation);
+    out.prevOrientation = this.cloneQuat(source.prevOrientation, out.prevOrientation);
+    out.speed = source.speed ?? 0;
+    out.bananas = source.bananas ?? 0;
+    out.wormholeCooldown = source.wormholeCooldown ?? 0;
+    if (source.wormholeTransform) {
+      out.wormholeTransform = this.cloneNumericArray(source.wormholeTransform, 16, out.wormholeTransform);
+    } else {
+      out.wormholeTransform = null;
+    }
+    if (source.wormholeTraversal) {
+      const traversal = out.wormholeTraversal ?? {};
+      traversal.srcWormholeId = source.wormholeTraversal.srcWormholeId ?? 0;
+      traversal.dstWormholeId = source.wormholeTraversal.dstWormholeId ?? 0;
+      out.wormholeTraversal = traversal;
+    } else {
+      out.wormholeTraversal = null;
+    }
+    if (source.physBall) {
+      const phys = out.physBall ?? {};
+      phys.flags = source.physBall.flags ?? 0;
+      phys.pos = this.cloneVec3(source.physBall.pos, phys.pos);
+      phys.prevPos = this.cloneVec3(source.physBall.prevPos, phys.prevPos);
+      phys.vel = this.cloneVec3(source.physBall.vel, phys.vel);
+      phys.radius = source.physBall.radius ?? 0.5;
+      phys.gravityAccel = source.physBall.gravityAccel ?? 0;
+      phys.restitution = source.physBall.restitution ?? 0;
+      phys.hardestColiSpeed = source.physBall.hardestColiSpeed ?? 0;
+      const hardestColiPlane = phys.hardestColiPlane ?? {};
+      hardestColiPlane.point = this.cloneVec3(source.physBall.hardestColiPlane?.point, hardestColiPlane.point);
+      hardestColiPlane.normal = this.cloneVec3(source.physBall.hardestColiPlane?.normal, hardestColiPlane.normal);
+      phys.hardestColiPlane = hardestColiPlane;
+      phys.hardestColiAnimGroupId = source.physBall.hardestColiAnimGroupId ?? 0;
+      phys.friction = source.physBall.friction ?? 0;
+      phys.frictionMode = source.physBall.frictionMode ?? 'smb1';
+      phys.animGroupId = source.physBall.animGroupId ?? 0;
+      out.physBall = phys;
+    } else {
+      out.physBall = null;
+    }
+    return out;
   }
 
   loadRollbackState(state, { resetResultReplay = true }: { resetResultReplay?: boolean } = {}) {
@@ -1195,8 +1260,15 @@ export class GameCore {
       }
     }
     if (Array.isArray(state.players)) {
-      for (const saved of state.players) {
-        const player = this.players.find((p) => p.id === saved.id);
+      for (let i = 0; i < state.players.length; i += 1) {
+        const saved = state.players[i];
+        if (!saved) {
+          continue;
+        }
+        let player = this.players[i];
+        if (!player || player.id !== saved.id) {
+          player = this.players.find((p) => p.id === saved.id);
+        }
         if (!player) {
           continue;
         }
@@ -1207,7 +1279,7 @@ export class GameCore {
         player.goalType = saved.goalType ?? null;
         player.goalTimerFrames = saved.goalTimerFrames ?? 0;
         player.goalSkipTimerFrames = saved.goalSkipTimerFrames ?? 0;
-        player.goalInfo = structuredClone(saved.goalInfo);
+        player.goalInfo = this.cloneGoalInfo(saved.goalInfo, player.goalInfo);
         player.spectateTimerFrames = saved.spectateTimerFrames ?? 0;
         player.respawnTimerFrames = saved.respawnTimerFrames ?? 0;
         player.ringoutTimerFrames = saved.ringoutTimerFrames ?? 0;
@@ -1270,7 +1342,12 @@ export class GameCore {
     if (localPlayer && !localNonPlayable) {
       localPlayer.freeFly = false;
     }
-    this.noCollidePairs = new Set(state.noCollidePairs ?? []);
+    this.noCollidePairs.clear();
+    if (Array.isArray(state.noCollidePairs)) {
+      for (const pairKey of state.noCollidePairs) {
+        this.noCollidePairs.add(pairKey);
+      }
+    }
     if (state.playerCollisionEnabled !== undefined) {
       this.playerCollisionEnabled = !!state.playerCollisionEnabled;
     }
