@@ -19,7 +19,7 @@ import {
   GXRenderHelperGfx,
   fillSceneParamsDataOnTemplate,
 } from './gx/gx_render.js';
-import { MirrorMode, StageData, World, type WorldRenderPerfStats } from './SuperMonkeyBall/World.js';
+import { MirrorMode, StageData, World } from './SuperMonkeyBall/World.js';
 import { StageId } from './SuperMonkeyBall/StageInfo.js';
 import type { ModRenderPrimitive } from '../mods/render_primitives.js';
 
@@ -172,56 +172,6 @@ export type GameplaySyncState = {
   stageTilt?: StageTiltRenderState | null;
 };
 
-export type RenderPerfStats = {
-  enabled: boolean;
-  frameCount: number;
-  lastPrepareTotalMs: number;
-  lastRenderGraphMs: number;
-  lastTotalMs: number;
-  lastWorldUpdateMs: number;
-  lastMainWorldMs: number;
-  lastMirrorCaptureMs: number;
-  lastMirrorOverlayMs: number;
-  lastMirrorDistortMs: number;
-  lastWormholeCaptureMs: number;
-  lastWormholeOverlayMs: number;
-  worldMainAnimGroupsMs: number;
-  worldMainAnimModelsMs: number;
-  worldMainAnimStageModelsMs: number;
-  worldMainAnimBananasMs: number;
-  worldMainAnimGoalsMs: number;
-  worldMainAnimGoalTapesMs: number;
-  worldMainAnimBumpersMs: number;
-  worldMainAnimJamabarsMs: number;
-  worldMainAnimWormholesMs: number;
-  worldMainAnimGoalBagsMs: number;
-  worldMainAnimSwitchesMs: number;
-  worldMainAnimBlurBridgeMs: number;
-  worldMainEffectsMs: number;
-  worldMainFgMs: number;
-  worldMainBgMs: number;
-  worldMainBallsMs: number;
-  worldMainAnimRenderedGroups: number;
-  worldMainAnimModelsCount: number;
-  worldMainAnimStageModelsCount: number;
-  worldMainAnimBananasRendered: number;
-  worldMainAnimGoalsRendered: number;
-  worldMainAnimGoalTapesRendered: number;
-  worldMainAnimBumpersRendered: number;
-  worldMainAnimJamabarsRendered: number;
-  worldMainAnimWormholesRendered: number;
-  worldMainAnimGoalBagsRendered: number;
-  worldMainAnimSwitchesRendered: number;
-  worldMainAnimGroupCount: number;
-  worldMainFgCount: number;
-  worldMainBallCount: number;
-  worldMainBananaCount: number;
-  worldMainJamabarCount: number;
-  worldMainGoalBagCount: number;
-  worldMainGoalTapeCount: number;
-  worldMainSwitchCount: number;
-};
-
 const scratchMirrorPlaneNormal = vec3.create();
 const scratchMirrorPlanePoint = vec3.create();
 const scratchMirrorReflection = mat4.create();
@@ -238,7 +188,6 @@ const scratchWormholeClipPlanePoint = vec3.create();
 const scratchWormholeClipPlaneNormal = vec3.create();
 const mirrorFlipX = mat4.fromScaling(mat4.create(), [-1, 1, 1]);
 const WAVY_MIRROR_ALPHA = 0x60 / 0xff;
-const perfNowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 function computeReflectionMatrix(out: mat4, planePoint: vec3, planeNormal: vec3): void {
   vec3.normalize(scratchMirrorPlaneNormal, planeNormal);
@@ -327,67 +276,10 @@ export class Renderer {
   private activeWormholeSourceId: number | null = null;
   private activeWormholeDestId: number | null = null;
   private lastExternalTimeFrames: number | null = null;
-  public readonly perfStats: RenderPerfStats = {
-    enabled: false,
-    frameCount: 0,
-    lastPrepareTotalMs: 0,
-    lastRenderGraphMs: 0,
-    lastTotalMs: 0,
-    lastWorldUpdateMs: 0,
-    lastMainWorldMs: 0,
-    lastMirrorCaptureMs: 0,
-    lastMirrorOverlayMs: 0,
-    lastMirrorDistortMs: 0,
-    lastWormholeCaptureMs: 0,
-    lastWormholeOverlayMs: 0,
-    worldMainAnimGroupsMs: 0,
-    worldMainAnimModelsMs: 0,
-    worldMainAnimStageModelsMs: 0,
-    worldMainAnimBananasMs: 0,
-    worldMainAnimGoalsMs: 0,
-    worldMainAnimGoalTapesMs: 0,
-    worldMainAnimBumpersMs: 0,
-    worldMainAnimJamabarsMs: 0,
-    worldMainAnimWormholesMs: 0,
-    worldMainAnimGoalBagsMs: 0,
-    worldMainAnimSwitchesMs: 0,
-    worldMainAnimBlurBridgeMs: 0,
-    worldMainEffectsMs: 0,
-    worldMainFgMs: 0,
-    worldMainBgMs: 0,
-    worldMainBallsMs: 0,
-    worldMainAnimRenderedGroups: 0,
-    worldMainAnimModelsCount: 0,
-    worldMainAnimStageModelsCount: 0,
-    worldMainAnimBananasRendered: 0,
-    worldMainAnimGoalsRendered: 0,
-    worldMainAnimGoalTapesRendered: 0,
-    worldMainAnimBumpersRendered: 0,
-    worldMainAnimJamabarsRendered: 0,
-    worldMainAnimWormholesRendered: 0,
-    worldMainAnimGoalBagsRendered: 0,
-    worldMainAnimSwitchesRendered: 0,
-    worldMainAnimGroupCount: 0,
-    worldMainFgCount: 0,
-    worldMainBallCount: 0,
-    worldMainBananaCount: 0,
-    worldMainJamabarCount: 0,
-    worldMainGoalBagCount: 0,
-    worldMainGoalTapeCount: 0,
-    worldMainSwitchCount: 0,
-  };
 
   constructor(device: GfxDevice, private stageData: StageData) {
     this.renderHelper = new GXRenderHelperGfx(device);
     this.world = new World(device, this.renderHelper.renderCache, stageData);
-  }
-
-  public setPerfEnabled(enabled: boolean): void {
-    if (this.perfStats.enabled === enabled) {
-      return;
-    }
-    this.perfStats.enabled = enabled;
-    this.world.setRenderPerfEnabled(enabled);
   }
 
   private prepareToRender(
@@ -396,56 +288,6 @@ export class Renderer {
     opaqueInstList: GfxRenderInstList,
     translucentInstList: GfxRenderInstList
   ): void {
-    const perf = this.perfStats;
-    const perfEnabled = perf.enabled;
-    this.world.setRenderPerfEnabled(perfEnabled);
-    const prepareStartMs = perfEnabled ? perfNowMs() : 0;
-    if (perfEnabled) {
-      perf.lastPrepareTotalMs = 0;
-      perf.lastWorldUpdateMs = 0;
-      perf.lastMainWorldMs = 0;
-      perf.lastMirrorCaptureMs = 0;
-      perf.lastMirrorOverlayMs = 0;
-      perf.lastMirrorDistortMs = 0;
-      perf.lastWormholeCaptureMs = 0;
-      perf.lastWormholeOverlayMs = 0;
-      perf.worldMainAnimGroupsMs = 0;
-      perf.worldMainAnimModelsMs = 0;
-      perf.worldMainAnimStageModelsMs = 0;
-      perf.worldMainAnimBananasMs = 0;
-      perf.worldMainAnimGoalsMs = 0;
-      perf.worldMainAnimGoalTapesMs = 0;
-      perf.worldMainAnimBumpersMs = 0;
-      perf.worldMainAnimJamabarsMs = 0;
-      perf.worldMainAnimWormholesMs = 0;
-      perf.worldMainAnimGoalBagsMs = 0;
-      perf.worldMainAnimSwitchesMs = 0;
-      perf.worldMainAnimBlurBridgeMs = 0;
-      perf.worldMainEffectsMs = 0;
-      perf.worldMainFgMs = 0;
-      perf.worldMainBgMs = 0;
-      perf.worldMainBallsMs = 0;
-      perf.worldMainAnimRenderedGroups = 0;
-      perf.worldMainAnimModelsCount = 0;
-      perf.worldMainAnimStageModelsCount = 0;
-      perf.worldMainAnimBananasRendered = 0;
-      perf.worldMainAnimGoalsRendered = 0;
-      perf.worldMainAnimGoalTapesRendered = 0;
-      perf.worldMainAnimBumpersRendered = 0;
-      perf.worldMainAnimJamabarsRendered = 0;
-      perf.worldMainAnimWormholesRendered = 0;
-      perf.worldMainAnimGoalBagsRendered = 0;
-      perf.worldMainAnimSwitchesRendered = 0;
-      perf.worldMainAnimGroupCount = 0;
-      perf.worldMainFgCount = 0;
-      perf.worldMainBallCount = 0;
-      perf.worldMainBananaCount = 0;
-      perf.worldMainJamabarCount = 0;
-      perf.worldMainGoalBagCount = 0;
-      perf.worldMainGoalTapeCount = 0;
-      perf.worldMainSwitchCount = 0;
-    }
-
     this.renderHelper.renderInstManager.reset();
     this.mirrorCaptureOpaqueInstList.reset();
     this.mirrorCaptureTranslucentInstList.reset();
@@ -454,11 +296,7 @@ export class Renderer {
     this.wormholeCaptureOpaqueInstList.reset();
     this.wormholeCaptureTranslucentInstList.reset();
     this.wormholeOverlayInstList.reset();
-    const worldUpdateStartMs = perfEnabled ? perfNowMs() : 0;
     this.world.update(viewerInput);
-    if (perfEnabled) {
-      perf.lastWorldUpdateMs = perfNowMs() - worldUpdateStartMs;
-    }
 
     viewerInput.camera.setClipPlanes(0.1);
 
@@ -542,11 +380,7 @@ export class Renderer {
         mirrorPlanePoint: scratchMirrorPlanePoint,
         mirrorPlaneNormal: scratchMirrorPlaneNormal,
       };
-      const mirrorCaptureStartMs = perfEnabled ? perfNowMs() : 0;
       this.world.prepareToRender(mirrorCtx);
-      if (perfEnabled) {
-        perf.lastMirrorCaptureMs = perfNowMs() - mirrorCaptureStartMs;
-      }
       this.renderHelper.renderInstManager.popTemplate();
 
       mat4.copy(scratchMirrorViewFromWorldTilted, scratchMirrorViewFromWorld);
@@ -588,7 +422,6 @@ export class Renderer {
         translucentInstList: this.mirrorOverlayInstList,
       };
       const mirrorAlpha = this.mirrorMode === 'wavy' ? WAVY_MIRROR_ALPHA : 1.0;
-      const mirrorOverlayStartMs = perfEnabled ? perfNowMs() : 0;
       this.world.prepareToRenderMirrors(
         mirrorOverlayCtx,
         viewerInput.camera.viewMatrix,
@@ -598,9 +431,6 @@ export class Renderer {
         indTexMtx0,
         indTexMtx1
       );
-      if (perfEnabled) {
-        perf.lastMirrorOverlayMs = perfNowMs() - mirrorOverlayStartMs;
-      }
       if (this.mirrorNeedsDistort) {
         const mirrorDistortCtx: RenderContext = {
           device,
@@ -609,11 +439,7 @@ export class Renderer {
           opaqueInstList: this.mirrorDistortInstList,
           translucentInstList: this.mirrorDistortInstList,
         };
-        const mirrorDistortStartMs = perfEnabled ? perfNowMs() : 0;
         this.world.prepareToRenderWavyDistort(mirrorDistortCtx, viewerInput.camera.viewMatrix);
-        if (perfEnabled) {
-          perf.lastMirrorDistortMs = perfNowMs() - mirrorDistortStartMs;
-        }
       }
       this.renderHelper.renderInstManager.popTemplate();
     }
@@ -679,11 +505,7 @@ export class Renderer {
             clipPlanePoint: hasWormholeClipPlane ? scratchWormholeClipPlanePoint : undefined,
             clipPlaneNormal: hasWormholeClipPlane ? scratchWormholeClipPlaneNormal : undefined,
           };
-          const wormholeCaptureStartMs = perfEnabled ? perfNowMs() : 0;
           this.world.prepareToRender(wormholeCaptureCtx);
-          if (perfEnabled) {
-            perf.lastWormholeCaptureMs = perfNowMs() - wormholeCaptureStartMs;
-          }
           this.renderHelper.renderInstManager.popTemplate();
 
           const wormholeOverlayTemplate = this.renderHelper.pushTemplateRenderInst();
@@ -695,7 +517,6 @@ export class Renderer {
             opaqueInstList: this.wormholeOverlayInstList,
             translucentInstList: this.wormholeOverlayInstList,
           };
-          const wormholeOverlayStartMs = perfEnabled ? perfNowMs() : 0;
           this.world.prepareToRenderWormholeSurface(
             wormholeOverlayCtx,
             viewerInput.camera.viewMatrix,
@@ -703,9 +524,6 @@ export class Renderer {
             this.activeWormholeSourceId,
             this.activeWormholeDestId
           );
-          if (perfEnabled) {
-            perf.lastWormholeOverlayMs = perfNowMs() - wormholeOverlayStartMs;
-          }
           this.renderHelper.renderInstManager.popTemplate();
         } else {
           this.activeWormholeSourceId = null;
@@ -724,62 +542,12 @@ export class Renderer {
       opaqueInstList,
       translucentInstList,
     };
-    const mainWorldStartMs = perfEnabled ? perfNowMs() : 0;
     this.world.prepareToRender(renderCtx);
-    if (perfEnabled) {
-      perf.lastMainWorldMs = perfNowMs() - mainWorldStartMs;
-      const worldPerf: WorldRenderPerfStats = this.world.getRenderPerfStats();
-      perf.worldMainAnimGroupsMs = worldPerf.lastAnimGroupsMs;
-      perf.worldMainAnimModelsMs = worldPerf.lastAnimModelsMs;
-      perf.worldMainAnimStageModelsMs = worldPerf.lastAnimStageModelsMs;
-      perf.worldMainAnimBananasMs = worldPerf.lastAnimBananasMs;
-      perf.worldMainAnimGoalsMs = worldPerf.lastAnimGoalsMs;
-      perf.worldMainAnimGoalTapesMs = worldPerf.lastAnimGoalTapesMs;
-      perf.worldMainAnimBumpersMs = worldPerf.lastAnimBumpersMs;
-      perf.worldMainAnimJamabarsMs = worldPerf.lastAnimJamabarsMs;
-      perf.worldMainAnimWormholesMs = worldPerf.lastAnimWormholesMs;
-      perf.worldMainAnimGoalBagsMs = worldPerf.lastAnimGoalBagsMs;
-      perf.worldMainAnimSwitchesMs = worldPerf.lastAnimSwitchesMs;
-      perf.worldMainAnimBlurBridgeMs = worldPerf.lastAnimBlurBridgeMs;
-      perf.worldMainEffectsMs = worldPerf.lastEffectsMs;
-      perf.worldMainFgMs = worldPerf.lastFgMs;
-      perf.worldMainBgMs = worldPerf.lastBgMs;
-      perf.worldMainBallsMs = worldPerf.lastBallsMs;
-      perf.worldMainAnimRenderedGroups = worldPerf.lastAnimRenderedGroups;
-      perf.worldMainAnimModelsCount = worldPerf.lastAnimModelsCount;
-      perf.worldMainAnimStageModelsCount = worldPerf.lastAnimStageModelsCount;
-      perf.worldMainAnimBananasRendered = worldPerf.lastAnimBananasRendered;
-      perf.worldMainAnimGoalsRendered = worldPerf.lastAnimGoalsRendered;
-      perf.worldMainAnimGoalTapesRendered = worldPerf.lastAnimGoalTapesRendered;
-      perf.worldMainAnimBumpersRendered = worldPerf.lastAnimBumpersRendered;
-      perf.worldMainAnimJamabarsRendered = worldPerf.lastAnimJamabarsRendered;
-      perf.worldMainAnimWormholesRendered = worldPerf.lastAnimWormholesRendered;
-      perf.worldMainAnimGoalBagsRendered = worldPerf.lastAnimGoalBagsRendered;
-      perf.worldMainAnimSwitchesRendered = worldPerf.lastAnimSwitchesRendered;
-      perf.worldMainAnimGroupCount = worldPerf.lastAnimGroupCount;
-      perf.worldMainFgCount = worldPerf.lastFgObjectCount;
-      perf.worldMainBallCount = worldPerf.lastBallCount;
-      perf.worldMainBananaCount = worldPerf.lastBananaCount;
-      perf.worldMainJamabarCount = worldPerf.lastJamabarCount;
-      perf.worldMainGoalBagCount = worldPerf.lastGoalBagCount;
-      perf.worldMainGoalTapeCount = worldPerf.lastGoalTapeCount;
-      perf.worldMainSwitchCount = worldPerf.lastSwitchCount;
-    }
     this.renderHelper.prepareToRender();
     this.renderHelper.renderInstManager.popTemplate();
-    if (perfEnabled) {
-      perf.lastPrepareTotalMs = perfNowMs() - prepareStartMs;
-    }
   }
 
   public render(device: GfxDevice, viewerInput: RenderContext['viewerInput']) {
-    const perf = this.perfStats;
-    const perfEnabled = perf.enabled;
-    const renderStartMs = perfEnabled ? perfNowMs() : 0;
-    if (perfEnabled) {
-      perf.lastRenderGraphMs = 0;
-      perf.lastTotalMs = 0;
-    }
     this.prepareToRender(device, viewerInput, this.opaqueInstList, this.translucentInstList);
     const mainColorDesc = makeBackbufferDescSimple(
       GfxrAttachmentSlot.Color0,
@@ -955,13 +723,7 @@ export class Renderer {
     );
     builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
-    const renderGraphStartMs = perfEnabled ? perfNowMs() : 0;
     this.renderHelper.renderGraph.execute(builder);
-    if (perfEnabled) {
-      perf.lastRenderGraphMs = perfNowMs() - renderGraphStartMs;
-      perf.lastTotalMs = perfNowMs() - renderStartMs;
-      perf.frameCount += 1;
-    }
   }
 
   public prewarmConfetti(device: GfxDevice, viewerInput: RenderContext['viewerInput']): void {

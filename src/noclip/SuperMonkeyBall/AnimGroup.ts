@@ -38,32 +38,6 @@ type AnimGroupModelEntry = {
 
 type StageModelResolver = (name: string) => AnimGroupModel | null;
 
-export type AnimGroupRenderPerfStats = {
-    enabled: boolean;
-    groups: number;
-    modelsMs: number;
-    stageModelsMs: number;
-    bananasMs: number;
-    goalsMs: number;
-    goalTapesMs: number;
-    bumpersMs: number;
-    jamabarsMs: number;
-    wormholesMs: number;
-    goalBagsMs: number;
-    switchesMs: number;
-    blurBridgeMs: number;
-    modelsCount: number;
-    stageModelsCount: number;
-    bananasCount: number;
-    goalsCount: number;
-    goalTapesCount: number;
-    bumpersCount: number;
-    jamabarsCount: number;
-    wormholesCount: number;
-    goalBagsCount: number;
-    switchesCount: number;
-};
-
 const scratchRenderParams = new RenderParams();
 const scratchShadowParams = new RenderParams();
 
@@ -90,7 +64,6 @@ const SWITCH_MODEL_NAMES = [
 const WORMHOLE_NEAR_FADE_INNER_RADIUS_SCALE = 0.8;
 const WORMHOLE_NEAR_FADE_OUTER_RADIUS_SCALE = 2.0;
 const WORMHOLE_FADE_SIDE_NORMAL_LOCAL = vec3.fromValues(0, 0, -1);
-const animPerfNowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
 class StageModelInst {
     private worldFromModel: mat4 = mat4.create();
@@ -389,12 +362,7 @@ export class AnimGroup {
         viewFromWorldBase: mat4 = viewFromWorld,
         tiltParams: { rotX: number; rotZ: number; pivot: vec3 } | null = null,
         skipModelNames?: Set<string>,
-        perfStats?: AnimGroupRenderPerfStats
     ) {
-        const perf = perfStats;
-        const perfEnabled = !!perf?.enabled;
-        let perfPhaseStart = perfEnabled ? animPerfNowMs() : 0;
-
         const rp = scratchRenderParams;
         rp.reset();
         rp.lighting = state.lighting;
@@ -420,104 +388,34 @@ export class AnimGroup {
             }
             model.prepareToRender(ctx, rp);
         }
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.modelsMs += nowMs - perfPhaseStart;
-            perf.modelsCount += this.models.length;
-            perfPhaseStart = nowMs;
-        }
-        let stageModelsCount = 0;
         for (let i = 0; i < this.stageModels.length; i++) {
             if (skipModelNames && skipModelNames.has(this.stageModels[i].modelName)) {
                 continue;
             }
             this.stageModels[i].prepareToRender(state, ctx, viewFromAnimGroup);
-            stageModelsCount += 1;
         }
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.stageModelsMs += nowMs - perfPhaseStart;
-            perf.stageModelsCount += stageModelsCount;
-            perfPhaseStart = nowMs;
-        }
-        let bananasCount = 0;
         if (bananas) {
-            bananasCount = bananas.length;
             this.drawBananas(state, ctx, viewFromAnimGroup, bananas, viewFromWorldBase, tiltParams);
         } else {
             for (let i = 0; i < this.bananas.length; i++) {
                 if (this.bananaCollected?.[i]) continue;
                 this.bananas[i].prepareToRender(state, ctx, viewFromAnimGroup, viewFromWorld);
-                bananasCount += 1;
             }
-        }
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.bananasMs += nowMs - perfPhaseStart;
-            perf.bananasCount += bananasCount;
-            perfPhaseStart = nowMs;
         }
         for (let i = 0; i < this.goals.length; i++) {
             this.goals[i].prepareToRender(state, ctx, viewFromAnimGroup);
         }
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.goalsMs += nowMs - perfPhaseStart;
-            perf.goalsCount += this.goals.length;
-            perfPhaseStart = nowMs;
-        }
         this.drawGoalTapes(state, ctx, viewFromAnimGroup, goalTapes);
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.goalTapesMs += nowMs - perfPhaseStart;
-            perf.goalTapesCount += goalTapes?.length ?? 0;
-            perfPhaseStart = nowMs;
-        }
         for (let i = 0; i < this.bumpers.length; i++) {
             this.bumpers[i].prepareToRender(state, ctx, viewFromAnimGroup);
         }
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.bumpersMs += nowMs - perfPhaseStart;
-            perf.bumpersCount += this.bumpers.length;
-            perfPhaseStart = nowMs;
-        }
         this.drawJamabars(state, ctx, viewFromAnimGroup, jamabars);
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.jamabarsMs += nowMs - perfPhaseStart;
-            perf.jamabarsCount += jamabars?.length ?? 0;
-            perfPhaseStart = nowMs;
-        }
         for (let i = 0; i < this.wormholes.length; i++) {
             this.wormholes[i].prepareToRender(state, ctx, viewFromAnimGroup);
         }
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.wormholesMs += nowMs - perfPhaseStart;
-            perf.wormholesCount += this.wormholes.length;
-            perfPhaseStart = nowMs;
-        }
         this.drawGoalBags(state, ctx, viewFromAnimGroup, goalBags);
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.goalBagsMs += nowMs - perfPhaseStart;
-            perf.goalBagsCount += goalBags?.length ?? 0;
-            perfPhaseStart = nowMs;
-        }
         this.drawSwitches(state, ctx, viewFromAnimGroup, switches);
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.switchesMs += nowMs - perfPhaseStart;
-            perf.switchesCount += switches?.length ?? 0;
-            perfPhaseStart = nowMs;
-        }
         this.drawBlurBridgeAccordion(state, ctx, viewFromWorld);
-        if (perfEnabled && perf) {
-            const nowMs = animPerfNowMs();
-            perf.blurBridgeMs += nowMs - perfPhaseStart;
-            perf.groups += 1;
-        }
     }
 
     public prepareToRenderMirrors(

@@ -53,7 +53,7 @@ import type {
 import * as SD from "./Stagedef.js";
 import { BgInfos, StageId, StageInfo } from "./StageInfo.js";
 import { MkbTime } from "./Utils.js";
-import { AnimGroup, type AnimGroupRenderPerfStats } from "./AnimGroup.js";
+import { AnimGroup } from "./AnimGroup.js";
 import { Lighting, LightingGroups } from "./Lighting.js";
 import { CommonModelID } from "./ModelInfo.js";
 import { GAME_SOURCES } from "../../shared/constants/index.js";
@@ -118,47 +118,6 @@ export type GoalBagModels = {
     closed: ModelInterface | null;
     openA: ModelInterface | null;
     openB: ModelInterface | null;
-};
-
-export type WorldRenderPerfStats = {
-    enabled: boolean;
-    frameCount: number;
-    lastAnimGroupsMs: number;
-    lastAnimModelsMs: number;
-    lastAnimStageModelsMs: number;
-    lastAnimBananasMs: number;
-    lastAnimGoalsMs: number;
-    lastAnimGoalTapesMs: number;
-    lastAnimBumpersMs: number;
-    lastAnimJamabarsMs: number;
-    lastAnimWormholesMs: number;
-    lastAnimGoalBagsMs: number;
-    lastAnimSwitchesMs: number;
-    lastAnimBlurBridgeMs: number;
-    lastEffectsMs: number;
-    lastFgMs: number;
-    lastBgMs: number;
-    lastBallsMs: number;
-    lastTotalMs: number;
-    lastAnimRenderedGroups: number;
-    lastAnimModelsCount: number;
-    lastAnimStageModelsCount: number;
-    lastAnimBananasRendered: number;
-    lastAnimGoalsRendered: number;
-    lastAnimGoalTapesRendered: number;
-    lastAnimBumpersRendered: number;
-    lastAnimJamabarsRendered: number;
-    lastAnimWormholesRendered: number;
-    lastAnimGoalBagsRendered: number;
-    lastAnimSwitchesRendered: number;
-    lastAnimGroupCount: number;
-    lastFgObjectCount: number;
-    lastBallCount: number;
-    lastBananaCount: number;
-    lastJamabarCount: number;
-    lastGoalBagCount: number;
-    lastGoalTapeCount: number;
-    lastSwitchCount: number;
 };
 
 const BALL_BASE_RADIUS = 0.5;
@@ -236,7 +195,6 @@ const scratchOverlayRayDirTri = vec3.create();
 const scratchOverlayRayHitTri = vec3.create();
 const scratchOverlayRayHitAg = vec3.create();
 const scratchOverlayRayHitWorld = vec3.create();
-const perfNowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
 function coligridLookupStagedef(animGroup: SD.AnimGroup, x: number, z: number): number[] | null {
     const stepX = animGroup.gridStepX;
@@ -994,71 +952,6 @@ export class World {
     private prevViewFromWorld = mat4.create();
     private lastViewFromWorld = mat4.create();
     private hasPrevViewFromWorld = false;
-    private readonly animGroupRenderPerf: AnimGroupRenderPerfStats = {
-        enabled: false,
-        groups: 0,
-        modelsMs: 0,
-        stageModelsMs: 0,
-        bananasMs: 0,
-        goalsMs: 0,
-        goalTapesMs: 0,
-        bumpersMs: 0,
-        jamabarsMs: 0,
-        wormholesMs: 0,
-        goalBagsMs: 0,
-        switchesMs: 0,
-        blurBridgeMs: 0,
-        modelsCount: 0,
-        stageModelsCount: 0,
-        bananasCount: 0,
-        goalsCount: 0,
-        goalTapesCount: 0,
-        bumpersCount: 0,
-        jamabarsCount: 0,
-        wormholesCount: 0,
-        goalBagsCount: 0,
-        switchesCount: 0,
-    };
-    private readonly renderPerf: WorldRenderPerfStats = {
-        enabled: false,
-        frameCount: 0,
-        lastAnimGroupsMs: 0,
-        lastAnimModelsMs: 0,
-        lastAnimStageModelsMs: 0,
-        lastAnimBananasMs: 0,
-        lastAnimGoalsMs: 0,
-        lastAnimGoalTapesMs: 0,
-        lastAnimBumpersMs: 0,
-        lastAnimJamabarsMs: 0,
-        lastAnimWormholesMs: 0,
-        lastAnimGoalBagsMs: 0,
-        lastAnimSwitchesMs: 0,
-        lastAnimBlurBridgeMs: 0,
-        lastEffectsMs: 0,
-        lastFgMs: 0,
-        lastBgMs: 0,
-        lastBallsMs: 0,
-        lastTotalMs: 0,
-        lastAnimRenderedGroups: 0,
-        lastAnimModelsCount: 0,
-        lastAnimStageModelsCount: 0,
-        lastAnimBananasRendered: 0,
-        lastAnimGoalsRendered: 0,
-        lastAnimGoalTapesRendered: 0,
-        lastAnimBumpersRendered: 0,
-        lastAnimJamabarsRendered: 0,
-        lastAnimWormholesRendered: 0,
-        lastAnimGoalBagsRendered: 0,
-        lastAnimSwitchesRendered: 0,
-        lastAnimGroupCount: 0,
-        lastFgObjectCount: 0,
-        lastBallCount: 0,
-        lastBananaCount: 0,
-        lastJamabarCount: 0,
-        lastGoalBagCount: 0,
-        lastGoalTapeCount: 0,
-        lastSwitchCount: 0,
-    };
     private streakMegaState = makeMegaState(
         setAttachmentStateSimple({ depthWrite: false, cullMode: GfxCullMode.None }, {
             blendMode: GfxBlendMode.Add,
@@ -1712,84 +1605,7 @@ export class World {
         this.worldState.lightingGroups.update(viewerInput);
     }
 
-    public setRenderPerfEnabled(enabled: boolean): void {
-        this.renderPerf.enabled = enabled;
-    }
-
-    public getRenderPerfStats(): WorldRenderPerfStats {
-        return this.renderPerf;
-    }
-
     public prepareToRender(ctx: RenderContext): void {
-        const perf = this.renderPerf;
-        const perfEnabled = perf.enabled && !ctx.mirrorCapture && !ctx.wormholeCapture;
-        const perfStart = perfEnabled ? perfNowMs() : 0;
-        let perfPhaseStart = perfStart;
-        const animPerf = this.animGroupRenderPerf;
-        if (perfEnabled) {
-            perf.lastAnimGroupsMs = 0;
-            perf.lastAnimModelsMs = 0;
-            perf.lastAnimStageModelsMs = 0;
-            perf.lastAnimBananasMs = 0;
-            perf.lastAnimGoalsMs = 0;
-            perf.lastAnimGoalTapesMs = 0;
-            perf.lastAnimBumpersMs = 0;
-            perf.lastAnimJamabarsMs = 0;
-            perf.lastAnimWormholesMs = 0;
-            perf.lastAnimGoalBagsMs = 0;
-            perf.lastAnimSwitchesMs = 0;
-            perf.lastAnimBlurBridgeMs = 0;
-            perf.lastEffectsMs = 0;
-            perf.lastFgMs = 0;
-            perf.lastBgMs = 0;
-            perf.lastBallsMs = 0;
-            perf.lastTotalMs = 0;
-            perf.lastAnimRenderedGroups = 0;
-            perf.lastAnimModelsCount = 0;
-            perf.lastAnimStageModelsCount = 0;
-            perf.lastAnimBananasRendered = 0;
-            perf.lastAnimGoalsRendered = 0;
-            perf.lastAnimGoalTapesRendered = 0;
-            perf.lastAnimBumpersRendered = 0;
-            perf.lastAnimJamabarsRendered = 0;
-            perf.lastAnimWormholesRendered = 0;
-            perf.lastAnimGoalBagsRendered = 0;
-            perf.lastAnimSwitchesRendered = 0;
-            perf.lastAnimGroupCount = this.animGroups.length;
-            perf.lastFgObjectCount = this.fgObjects.length;
-            perf.lastBallCount = this.balls.length;
-            perf.lastBananaCount = this.bananas?.length ?? 0;
-            perf.lastJamabarCount = this.jamabars?.length ?? 0;
-            perf.lastGoalBagCount = this.goalBags?.length ?? 0;
-            perf.lastGoalTapeCount = this.goalTapes?.length ?? 0;
-            perf.lastSwitchCount = this.switches?.length ?? 0;
-
-            animPerf.enabled = true;
-            animPerf.groups = 0;
-            animPerf.modelsMs = 0;
-            animPerf.stageModelsMs = 0;
-            animPerf.bananasMs = 0;
-            animPerf.goalsMs = 0;
-            animPerf.goalTapesMs = 0;
-            animPerf.bumpersMs = 0;
-            animPerf.jamabarsMs = 0;
-            animPerf.wormholesMs = 0;
-            animPerf.goalBagsMs = 0;
-            animPerf.switchesMs = 0;
-            animPerf.blurBridgeMs = 0;
-            animPerf.modelsCount = 0;
-            animPerf.stageModelsCount = 0;
-            animPerf.bananasCount = 0;
-            animPerf.goalsCount = 0;
-            animPerf.goalTapesCount = 0;
-            animPerf.bumpersCount = 0;
-            animPerf.jamabarsCount = 0;
-            animPerf.wormholesCount = 0;
-            animPerf.goalBagsCount = 0;
-            animPerf.switchesCount = 0;
-        } else {
-            animPerf.enabled = false;
-        }
         const bgOpaqueInstList = ctx.bgOpaqueInstList ?? ctx.opaqueInstList;
         const bgTranslucentInstList = ctx.bgTranslucentInstList ?? ctx.translucentInstList;
         const stageCtx = ctx.forceAlphaWrite
@@ -1854,36 +1670,8 @@ export class World {
                 viewFromWorldTilted,
                 viewFromWorld,
                 tiltParams,
-                skipModelNames,
-                perfEnabled ? animPerf : undefined
+                skipModelNames
             );
-        }
-        if (perfEnabled) {
-            const nowMs = perfNowMs();
-            perf.lastAnimGroupsMs = nowMs - perfPhaseStart;
-            perf.lastAnimModelsMs = animPerf.modelsMs;
-            perf.lastAnimStageModelsMs = animPerf.stageModelsMs;
-            perf.lastAnimBananasMs = animPerf.bananasMs;
-            perf.lastAnimGoalsMs = animPerf.goalsMs;
-            perf.lastAnimGoalTapesMs = animPerf.goalTapesMs;
-            perf.lastAnimBumpersMs = animPerf.bumpersMs;
-            perf.lastAnimJamabarsMs = animPerf.jamabarsMs;
-            perf.lastAnimWormholesMs = animPerf.wormholesMs;
-            perf.lastAnimGoalBagsMs = animPerf.goalBagsMs;
-            perf.lastAnimSwitchesMs = animPerf.switchesMs;
-            perf.lastAnimBlurBridgeMs = animPerf.blurBridgeMs;
-            perf.lastAnimRenderedGroups = animPerf.groups;
-            perf.lastAnimModelsCount = animPerf.modelsCount;
-            perf.lastAnimStageModelsCount = animPerf.stageModelsCount;
-            perf.lastAnimBananasRendered = animPerf.bananasCount;
-            perf.lastAnimGoalsRendered = animPerf.goalsCount;
-            perf.lastAnimGoalTapesRendered = animPerf.goalTapesCount;
-            perf.lastAnimBumpersRendered = animPerf.bumpersCount;
-            perf.lastAnimJamabarsRendered = animPerf.jamabarsCount;
-            perf.lastAnimWormholesRendered = animPerf.wormholesCount;
-            perf.lastAnimGoalBagsRendered = animPerf.goalBagsCount;
-            perf.lastAnimSwitchesRendered = animPerf.switchesCount;
-            perfPhaseStart = nowMs;
         }
         if (this.bonusWaveModel && !ctx.mirrorCapture) {
             const rp = scratchRenderParams;
@@ -1898,18 +1686,8 @@ export class World {
         if (!ctx.mirrorCapture && !ctx.wormholeCapture) {
             this.drawEffects(stageCtx, viewFromWorldTilted, viewFromWorldPrev, viewFromWorld);
         }
-        if (perfEnabled) {
-            const nowMs = perfNowMs();
-            perf.lastEffectsMs = nowMs - perfPhaseStart;
-            perfPhaseStart = nowMs;
-        }
         for (let i = 0; i < this.fgObjects.length; i++) {
             this.fgObjects[i].prepareToRenderWithViewMatrix(this.worldState, stageCtx, viewFromWorldTilted);
-        }
-        if (perfEnabled) {
-            const nowMs = perfNowMs();
-            perf.lastFgMs = nowMs - perfPhaseStart;
-            perfPhaseStart = nowMs;
         }
         this.background.prepareToRender(this.worldState, {
             ...bgCtx,
@@ -1917,20 +1695,9 @@ export class World {
             viewFromWorldPrev,
             viewFromWorldNoTilt: viewFromWorld,
         });
-        if (perfEnabled) {
-            const nowMs = perfNowMs();
-            perf.lastBgMs = nowMs - perfPhaseStart;
-            perfPhaseStart = nowMs;
-        }
         const ballCtx = ctx.skipStageTilt ? stageCtx : { ...stageCtx, viewFromWorld: viewFromWorldTilted };
         for (let i = 0; i < this.balls.length; i++) {
             this.balls[i].prepareToRender(this.worldState, ballCtx);
-        }
-        if (perfEnabled) {
-            const nowMs = perfNowMs();
-            perf.lastBallsMs = nowMs - perfPhaseStart;
-            perf.lastTotalMs = nowMs - perfStart;
-            perf.frameCount += 1;
         }
     }
 

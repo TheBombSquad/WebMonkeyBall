@@ -52,6 +52,8 @@ const BONUS_STAR_PHASE_STEP = (2 * Math.PI) / 180;
 const OVERLAY_VIEW_Z = 100.0;
 const OVERLAY_MODEL_HALF_SIZE = 5.0;
 const POT_PROXIMITY_OBJECT_NAMES = new Set(["POD_POD_A", "POD_KAMADO_A"]);
+const POT_PROXIMITY_OBJECT_PREFIX = "POD_";
+const POT_PROXIMITY_MODEL_NAMES = ["POD_POD_A", "POD_KAMADO_A", "POD_RENZ_FREA_A"];
 
 const LAVA_OVERLAY_MEGASTATE = makeMegaState(
     setAttachmentStateSimple(
@@ -625,13 +627,7 @@ export class BgLava2 implements Background {
             (ctx.viewFromWorldNoTilt as mat4 | undefined) ?? (camera?.viewMatrix as mat4 | undefined);
         const tickFrame = Math.floor(state.time.getAnimTimeFrames());
         if (tickFrame !== this.lastOverlayTickFrame) {
-            let steps = 1;
-            if (this.lastOverlayTickFrame >= 0 && tickFrame > this.lastOverlayTickFrame) {
-                steps = Math.min(8, tickFrame - this.lastOverlayTickFrame);
-            }
-            for (let i = 0; i < steps; i++) {
-                this.updateOverlayState(state, camera, viewFromWorldTilted, viewFromWorldNoTilt);
-            }
+            this.updateOverlayState(state, camera, viewFromWorldTilted, viewFromWorldNoTilt);
             this.lastOverlayTickFrame = tickFrame;
         }
         const overlayState = this.overlayState;
@@ -699,16 +695,29 @@ export class BgPot2 implements Background {
     private windState: PotWindState;
     private overlayProgram: GfxProgram | null = null;
     private overlayTextureMapping = new GXTextureMapping();
+    private lastOverlayTickFrame = -1;
     private hasPrevViewMatrix = false;
     private prevViewMatrix = mat4.create();
 
     constructor(state: WorldState, bgObjects: BgObjectInst[]) {
         this.bgObjects = bgObjects;
         this.overlayModel = state.modelCache.getModel("POD_YUGE_A", GmaSrc.Bg);
-        this.proximityModel = state.modelCache.getModel("POD_RENZ_FREA_A", GmaSrc.Bg) ?? this.overlayModel;
+        this.proximityModel = this.overlayModel;
+        for (const modelName of POT_PROXIMITY_MODEL_NAMES) {
+            const model = state.modelCache.getModel(modelName, GmaSrc.Bg);
+            if (model !== null) {
+                this.proximityModel = model;
+                break;
+            }
+        }
         this.proximityObjects = this.bgObjects.filter((bgObject) =>
             POT_PROXIMITY_OBJECT_NAMES.has(bgObject.bgObjectData.modelName),
         );
+        if (this.proximityObjects.length === 0) {
+            this.proximityObjects = this.bgObjects.filter((bgObject) =>
+                bgObject.bgObjectData.modelName.startsWith(POT_PROXIMITY_OBJECT_PREFIX),
+            );
+        }
         if (this.proximityObjects.length === 0) {
             this.proximityObjects = this.bgObjects;
         }
@@ -746,25 +755,7 @@ export class BgPot2 implements Background {
         }
     }
 
-    public prepareToRender(state: WorldState, ctx: RenderContext): void {
-        for (let i = 0; i < this.bgObjects.length; i++) {
-            this.bgObjects[i].prepareToRender(state, ctx);
-        }
-
-        if (!this.overlayModel || ctx.mirrorCapture || ctx.wormholeCapture) {
-            return;
-        }
-
-        const camera = ctx.viewerInput.camera;
-        const viewMatrix = (ctx.viewFromWorld as mat4 | undefined) ?? (camera?.viewMatrix as mat4 | undefined);
-        if (!viewMatrix) {
-            return;
-        }
-        const prevViewMatrix = (ctx.viewFromWorldPrev as mat4 | undefined) ?? this.prevViewMatrix;
-        if (!ctx.viewFromWorldPrev && !this.hasPrevViewMatrix) {
-            mat4.copy(this.prevViewMatrix, viewMatrix);
-            this.hasPrevViewMatrix = true;
-        }
+    private updateOverlayState(state: WorldState, camera: any, viewMatrix: mat4, prevViewMatrix: mat4): void {
         const overlayState = this.overlayState;
         if (!getCameraPositionFromView(scratchOverlayCameraPos, viewMatrix)) {
             getCameraPosition(scratchOverlayCameraPos, camera);
@@ -858,10 +849,31 @@ export class BgPot2 implements Background {
             overlayState.alphaBottomLeft += (bottomTarget - overlayState.alphaBottomLeft) * 0.02;
             overlayState.alphaBottomRight += (bottomTarget - overlayState.alphaBottomRight) * 0.03;
         }
-        if (!ctx.viewFromWorldPrev) {
+    }
+
+    public prepareToRender(state: WorldState, ctx: RenderContext): void {
+        for (let i = 0; i < this.bgObjects.length; i++) {
+            this.bgObjects[i].prepareToRender(state, ctx);
+        }
+
+        if (!this.overlayModel || ctx.mirrorCapture || ctx.wormholeCapture) {
+            return;
+        }
+
+        const camera = ctx.viewerInput.camera;
+        const viewMatrix = (ctx.viewFromWorld as mat4 | undefined) ?? (camera?.viewMatrix as mat4 | undefined);
+        if (!viewMatrix) {
+            return;
+        }
+        const tickFrame = Math.floor(state.time.getAnimTimeFrames());
+        if (tickFrame !== this.lastOverlayTickFrame) {
+            const prevViewMatrix = this.hasPrevViewMatrix ? this.prevViewMatrix : viewMatrix;
+            this.updateOverlayState(state, camera, viewMatrix, prevViewMatrix);
             mat4.copy(this.prevViewMatrix, viewMatrix);
             this.hasPrevViewMatrix = true;
+            this.lastOverlayTickFrame = tickFrame;
         }
+        const overlayState = this.overlayState;
 
         if (
             overlayState.alphaTopLeft <= 1.0 &&

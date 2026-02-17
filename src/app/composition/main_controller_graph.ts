@@ -84,7 +84,6 @@ export function createMainControllerGraph(args: any) {
     getAvatarValidationCached,
     isNetplayDebugEnabled,
     netplayDebugOverlay,
-    simPerfDebugOverlay,
     ensureGfxReady,
     hasGfxDevice,
     destroyRenderer,
@@ -811,7 +810,6 @@ netplayRuntime = new NetplayRuntimeController({
   getClientLeadFrames: (state) => netplaySync?.getClientLeadFrames(state) ?? NETPLAY_CLIENT_LEAD,
   isNetplayDebugEnabled,
   netplayDebugOverlay,
-  simPerfDebugOverlay,
   constants: {
     maxFrameDelta: NETPLAY_MAX_FRAME_DELTA,
     clientAheadSlack: NETPLAY_CLIENT_AHEAD_SLACK,

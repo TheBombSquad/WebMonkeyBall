@@ -3,14 +3,9 @@ export type NetplayDebugOverlay = {
   show: (warning: string | null, lines: string[]) => void;
 };
 
-export type SimPerfDebugOverlay = {
+export type FrameStatsOverlay = {
   hide: () => void;
-  show: (lines: string[]) => void;
-};
-
-export type RenderPerfDebugOverlay = {
-  hide: () => void;
-  show: (lines: string[]) => void;
+  show: (line: string) => void;
 };
 
 function createOverlayRoot(parent: HTMLElement, id: string, side: 'left' | 'right') {
@@ -62,8 +57,8 @@ export function createNetplayDebugOverlay(parent: HTMLElement = document.body): 
   };
 }
 
-export function createSimPerfDebugOverlay(parent: HTMLElement = document.body): SimPerfDebugOverlay {
-  const wrap = createOverlayRoot(parent, 'sim-perf-debug', 'right');
+export function createFrameStatsOverlay(parent: HTMLElement = document.body): FrameStatsOverlay {
+  const wrap = createOverlayRoot(parent, 'frame-stats-debug', 'right');
   const infoEl = document.createElement('div');
   infoEl.style.whiteSpace = 'pre';
   wrap.append(infoEl);
@@ -72,26 +67,8 @@ export function createSimPerfDebugOverlay(parent: HTMLElement = document.body): 
     hide: () => {
       wrap.style.display = 'none';
     },
-    show: (lines) => {
-      infoEl.textContent = lines.join('\n');
-      wrap.style.display = 'block';
-    },
-  };
-}
-
-export function createRenderPerfDebugOverlay(parent: HTMLElement = document.body): RenderPerfDebugOverlay {
-  const wrap = createOverlayRoot(parent, 'render-perf-debug', 'right');
-  wrap.style.top = '340px';
-  const infoEl = document.createElement('div');
-  infoEl.style.whiteSpace = 'pre';
-  wrap.append(infoEl);
-
-  return {
-    hide: () => {
-      wrap.style.display = 'none';
-    },
-    show: (lines) => {
-      infoEl.textContent = lines.join('\n');
+    show: (line) => {
+      infoEl.textContent = line;
       wrap.style.display = 'block';
     },
   };

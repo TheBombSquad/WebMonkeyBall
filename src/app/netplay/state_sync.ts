@@ -43,27 +43,6 @@ export class NetplayStateSyncController {
     return buf[0] >>> 0;
   }
 
-  private createRollbackPerfStats() {
-    return {
-      rollbackEvents: 0,
-      rollbackFails: 0,
-      rollbackResimFrames: 0,
-      rollbackResimMsTotal: 0,
-      rollbackResimMsLast: 0,
-      rollbackResimMsMax: 0,
-      snapshotApplyCount: 0,
-      snapshotResimEvents: 0,
-      snapshotResimFrames: 0,
-      snapshotResimMsTotal: 0,
-      snapshotResimMsLast: 0,
-      snapshotResimMsMax: 0,
-      lastRollbackStartFrame: -1,
-      lastRollbackDistance: 0,
-      lastSnapshotFrame: -1,
-      lastSnapshotResimFrames: 0,
-    };
-  }
-
   quantizedEqual(a: QuantizedInput, b: QuantizedInput) {
     return a.x === b.x && a.y === b.y && (a.buttons ?? 0) === (b.buttons ?? 0);
   }
@@ -141,7 +120,6 @@ export class NetplayStateSyncController {
       awaitingSnapshot: false,
       pendingHostRollbackFrame: null,
       pendingHostRollbackPlayers: new Set<number>(),
-      rollbackPerf: this.createRollbackPerfStats(),
     };
     this.deps.setNetplayState(next);
     return next;
@@ -179,7 +157,6 @@ export class NetplayStateSyncController {
     state.awaitingSnapshot = false;
     state.pendingHostRollbackFrame = null;
     state.pendingHostRollbackPlayers.clear();
-    state.rollbackPerf = this.createRollbackPerfStats();
     state.currentStageId = null;
     state.readyPlayers.clear();
     state.awaitingStageReady = false;
