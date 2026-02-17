@@ -270,6 +270,11 @@ function toGXByteNorm(value: number): number {
     return byte / 255;
 }
 
+function toGXByteNormClamped(value: number): number {
+    const byte = Math.max(0, Math.min(255, Math.trunc(value)));
+    return byte / 255;
+}
+
 type OverlayFrustumQuad = {
     centerX: number;
     centerY: number;
@@ -643,9 +648,10 @@ export class BgLava2 implements Background {
 
         const drawPass = (glow: number, flipV: boolean): void => {
             const glow255 = glow * 255.0;
-            const colorR = toGXByteNorm(glow255 * 1.2);
-            const colorG = toGXByteNorm(glow255 * 1.15);
-            const colorB = toGXByteNorm(glow255);
+            // Keep lava overlay color in byte range to avoid wraparound hue flashes in WebGL.
+            const colorR = toGXByteNormClamped(glow255 * 1.2);
+            const colorG = toGXByteNormClamped(glow255 * 1.15);
+            const colorB = toGXByteNormClamped(glow255);
 
             const rp = scratchRenderParams;
             rp.reset();

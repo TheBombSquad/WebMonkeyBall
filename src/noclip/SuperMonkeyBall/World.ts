@@ -186,6 +186,7 @@ const WORMHOLE_LOCAL_THROUGH = mat4.fromYRotation(mat4.create(), Math.PI);
 const WORMHOLE_NEAR_FADE_INNER_RADIUS_SCALE = 0.8;
 const WORMHOLE_NEAR_FADE_OUTER_RADIUS_SCALE = 2.0;
 const OVERLAY_RAYCAST_EPSILON = 1.1920928955078125e-7;
+const OVERLAY_RAYCAST_EDGE_EPSILON = 0.01;
 const scratchOverlayRayAgFromWorld = mat4.create();
 const scratchOverlayRayTriFromAg = mat4.create();
 const scratchOverlayRayAgFromTri = mat4.create();
@@ -202,8 +203,9 @@ function coligridLookupStagedef(animGroup: SD.AnimGroup, x: number, z: number): 
     if (stepX <= 0 || stepZ <= 0) {
         return null;
     }
-    const cellX = Math.floor((x - animGroup.gridOriginX) / stepX);
-    const cellZ = Math.floor((z - animGroup.gridOriginZ) / stepZ);
+    // SMB2 casts to int here, which truncates toward zero (not floor for negatives).
+    const cellX = Math.trunc((x - animGroup.gridOriginX) / stepX);
+    const cellZ = Math.trunc((z - animGroup.gridOriginZ) / stepZ);
     if (
         cellX < 0 ||
         cellX >= animGroup.gridCellCountX ||
@@ -1719,11 +1721,12 @@ export class World {
             transformVec3Mat4w1(scratchOverlayRayPosAg, scratchOverlayRayAgFromWorld, pos);
 
             const cellTris = coligridLookupStagedef(stageAg, scratchOverlayRayPosAg[0], scratchOverlayRayPosAg[2]);
-            const useCellTris = !!cellTris && cellTris.length > 0;
-            const triIndices = useCellTris ? cellTris : stageAg.coliTris;
+            if (!cellTris || cellTris.length === 0) {
+                continue;
+            }
 
-            for (let triIndex = 0; triIndex < triIndices.length; triIndex++) {
-                const tri = useCellTris ? stageAg.coliTris[triIndices[triIndex]] : triIndices[triIndex];
+            for (let triIndex = 0; triIndex < cellTris.length; triIndex++) {
+                const tri = stageAg.coliTris[cellTris[triIndex]];
                 if (!tri) {
                     continue;
                 }
@@ -1739,6 +1742,10 @@ export class World {
                 transformVec3Mat4w1(scratchOverlayRayPosTri, scratchOverlayRayAgFromTri, scratchOverlayRayPosAg);
                 vec3.set(scratchOverlayRayDirTri, 0.0, -1.0, 0.0);
                 transformVec3Mat4w0(scratchOverlayRayDirTri, scratchOverlayRayAgFromTri, scratchOverlayRayDirTri);
+                // Match SMB2 raycast_tri front-face tests before solving intersection.
+                if (scratchOverlayRayPosTri[2] < 0.0 || scratchOverlayRayDirTri[2] > 0.0) {
+                    continue;
+                }
                 if (Math.abs(scratchOverlayRayDirTri[2]) <= OVERLAY_RAYCAST_EPSILON) {
                     continue;
                 }
@@ -1750,18 +1757,18 @@ export class World {
 
                 const hitX = scratchOverlayRayPosTri[0] + scratchOverlayRayDirTri[0] * t;
                 const hitY = scratchOverlayRayPosTri[1] + scratchOverlayRayDirTri[1] * t;
-                if (hitY < -OVERLAY_RAYCAST_EPSILON) {
+                if (hitY < -OVERLAY_RAYCAST_EDGE_EPSILON) {
                     continue;
                 }
                 if (
                     ((hitX - tri.vert2[0]) * tri.edge2Normal[0] + (hitY - tri.vert2[1]) * tri.edge2Normal[1]) <
-                    -OVERLAY_RAYCAST_EPSILON
+                    -OVERLAY_RAYCAST_EDGE_EPSILON
                 ) {
                     continue;
                 }
                 if (
                     ((hitX - tri.vert3[0]) * tri.edge3Normal[0] + (hitY - tri.vert3[1]) * tri.edge3Normal[1]) <
-                    -OVERLAY_RAYCAST_EPSILON
+                    -OVERLAY_RAYCAST_EDGE_EPSILON
                 ) {
                     continue;
                 }
@@ -1769,10 +1776,7 @@ export class World {
                 vec3.set(scratchOverlayRayHitTri, hitX, hitY, 0.0);
                 transformVec3Mat4w1(scratchOverlayRayHitAg, scratchOverlayRayTriFromAg, scratchOverlayRayHitTri);
                 transformVec3Mat4w1(scratchOverlayRayHitWorld, worldFromAg, scratchOverlayRayHitAg);
-                if (
-                    scratchOverlayRayHitWorld[1] > bestY &&
-                    scratchOverlayRayHitWorld[1] <= pos[1] + OVERLAY_RAYCAST_EPSILON
-                ) {
+                if (scratchOverlayRayHitWorld[1] > bestY) {
                     bestY = scratchOverlayRayHitWorld[1];
                 }
             }
