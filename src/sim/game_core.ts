@@ -1352,7 +1352,11 @@ export class GameCore {
       this.playerCollisionEnabled = !!state.playerCollisionEnabled;
     }
     if (state.stageRuntime) {
-      this.stageRuntime.setState(state.stageRuntime);
+      if (typeof this.stageRuntime.applyRollbackState === 'function') {
+        this.stageRuntime.applyRollbackState(state.stageRuntime);
+      } else {
+        this.stageRuntime.setState(state.stageRuntime);
+      }
     }
     if (this.modHooks.length > 0) {
       const modState = (state as any).modState ?? {};

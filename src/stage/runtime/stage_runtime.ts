@@ -602,6 +602,242 @@ export class StageRuntime {
     return state;
   }
 
+  applyRollbackState(state) {
+    if (!state) {
+      return;
+    }
+
+    const copyVec3 = (target, source) => {
+      if (!target || !source) {
+        return;
+      }
+      target.x = source.x;
+      target.y = source.y;
+      target.z = source.z;
+    };
+    const copyMat12 = (target, source) => {
+      if (!target || !source) {
+        return;
+      }
+      for (let i = 0; i < 12; i += 1) {
+        target[i] = source[i];
+      }
+    };
+
+    if (state.rulesetId !== undefined) {
+      this.rulesetId = state.rulesetId;
+    }
+    if (state.timerFrames !== undefined) {
+      this.timerFrames = state.timerFrames;
+    }
+
+    const srcAnimGroups = Array.isArray(state.animGroups) ? state.animGroups : null;
+    if (srcAnimGroups) {
+      const srcAnimGroupIndices = Array.isArray(state.animGroupIndices) ? state.animGroupIndices : null;
+      const fallbackAnimIndices = this.animGroupStateIndices;
+      const count = srcAnimGroupIndices
+        ? Math.min(srcAnimGroups.length, srcAnimGroupIndices.length)
+        : srcAnimGroups.length;
+      for (let i = 0; i < count; i += 1) {
+        const targetIndex = srcAnimGroupIndices
+          ? (srcAnimGroupIndices[i] | 0)
+          : (srcAnimGroups.length === fallbackAnimIndices.length ? (fallbackAnimIndices[i] | 0) : i);
+        if (targetIndex < 0 || targetIndex >= this.animGroups.length) {
+          continue;
+        }
+        const target = this.animGroups[targetIndex];
+        const source = srcAnimGroups[i];
+        if (!target || !source) {
+          continue;
+        }
+        copyVec3(target.pos, source.pos);
+        copyVec3(target.prevPos, source.prevPos);
+        copyVec3(target.rot, source.rot);
+        copyVec3(target.prevRot, source.prevRot);
+        copyMat12(target.transform, source.transform);
+        copyMat12(target.prevTransform, source.prevTransform);
+        if (target.renderPrevTransform) {
+          copyMat12(target.renderPrevTransform, source.prevTransform);
+        }
+        if (source.animFrame !== undefined) {
+          target.animFrame = source.animFrame;
+        }
+        if (source.playbackState !== undefined) {
+          target.playbackState = source.playbackState | 0;
+        }
+        if (target.seesawState && source.seesawState) {
+          target.seesawState.angle = source.seesawState.angle ?? target.seesawState.angle;
+          target.seesawState.prevAngle = source.seesawState.prevAngle ?? target.seesawState.prevAngle;
+          target.seesawState.angleVel = source.seesawState.angleVel ?? target.seesawState.angleVel;
+        }
+      }
+    }
+
+    const srcJamabars = Array.isArray(state.jamabars) ? state.jamabars : null;
+    if (srcJamabars) {
+      const srcJamabarGroupIndices = Array.isArray(state.jamabarGroupIndices) ? state.jamabarGroupIndices : null;
+      const fallbackJamabarIndices = this.jamabarGroupIndices;
+      const groupCount = srcJamabarGroupIndices
+        ? Math.min(srcJamabars.length, srcJamabarGroupIndices.length)
+        : srcJamabars.length;
+      for (let listIndex = 0; listIndex < groupCount; listIndex += 1) {
+        const groupIndex = srcJamabarGroupIndices
+          ? (srcJamabarGroupIndices[listIndex] | 0)
+          : (srcJamabars.length === fallbackJamabarIndices.length ? (fallbackJamabarIndices[listIndex] | 0) : listIndex);
+        if (groupIndex < 0 || groupIndex >= this.jamabars.length) {
+          continue;
+        }
+        const targetGroup = this.jamabars[groupIndex] ?? [];
+        const sourceGroup = Array.isArray(srcJamabars[listIndex]) ? srcJamabars[listIndex] : [];
+        const jamabarCount = Math.min(targetGroup.length, sourceGroup.length);
+        for (let i = 0; i < jamabarCount; i += 1) {
+          const target = targetGroup[i];
+          const source = sourceGroup[i];
+          if (!target || !source) {
+            continue;
+          }
+          copyVec3(target.pos, source.pos);
+          copyVec3(target.localPos, source.localPos);
+          copyVec3(target.localVel, source.localVel);
+        }
+      }
+    }
+
+    const srcGoalBags = Array.isArray(state.goalBags) ? state.goalBags : null;
+    if (srcGoalBags) {
+      const goalBagCount = Math.min(this.goalBags.length, srcGoalBags.length);
+      for (let i = 0; i < goalBagCount; i += 1) {
+        const target = this.goalBags[i];
+        const source = srcGoalBags[i];
+        if (!target || !source) {
+          continue;
+        }
+        target.state = (source.state ?? target.state) | 0;
+        target.counter = (source.counter ?? target.counter) | 0;
+        target.flags = (source.flags ?? target.flags) | 0;
+        target.openness = source.openness ?? target.openness;
+        target.unk8 = source.unk8 ?? target.unk8;
+        target.openFrame = (source.openFrame ?? target.openFrame) | 0;
+        target.rotX = (source.rotX ?? target.rotX) | 0;
+        target.rotY = (source.rotY ?? target.rotY) | 0;
+        target.rotZ = (source.rotZ ?? target.rotZ) | 0;
+        target.boundSphereRadius = source.boundSphereRadius ?? target.boundSphereRadius;
+        copyVec3(target.uSomePos, source.uSomePos);
+        copyVec3(target.localPos, source.localPos);
+        copyVec3(target.localVel, source.localVel);
+        copyVec3(target.modelOrigin, source.modelOrigin);
+        copyVec3(target.position, source.position);
+      }
+    }
+
+    const srcGoalTapes = Array.isArray(state.goalTapes) ? state.goalTapes : null;
+    if (srcGoalTapes) {
+      const goalTapeCount = Math.min(this.goalTapes.length, srcGoalTapes.length);
+      for (let i = 0; i < goalTapeCount; i += 1) {
+        const target = this.goalTapes[i];
+        const source = srcGoalTapes[i];
+        if (!target || !source) {
+          continue;
+        }
+        target.flags = (source.flags ?? target.flags) | 0;
+        target.breakFrame = (source.breakFrame ?? target.breakFrame) | 0;
+        target.groundY = source.groundY ?? target.groundY;
+        target.anchorY = source.anchorY ?? target.anchorY;
+        target.targetY = source.targetY ?? target.targetY;
+        const sourcePoints = Array.isArray(source.points) ? source.points : [];
+        const pointCount = Math.min(target.points?.length ?? 0, sourcePoints.length);
+        for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
+          const targetPoint = target.points[pointIndex];
+          const sourcePoint = sourcePoints[pointIndex];
+          if (!targetPoint || !sourcePoint) {
+            continue;
+          }
+          copyVec3(targetPoint.pos, sourcePoint.pos);
+          copyVec3(targetPoint.normal, sourcePoint.normal);
+          copyVec3(targetPoint.vel, sourcePoint.vel);
+          targetPoint.flags = (sourcePoint.flags ?? targetPoint.flags) | 0;
+          if (sourcePoint.len !== undefined) {
+            targetPoint.len = sourcePoint.len;
+          }
+        }
+      }
+    }
+
+    const srcBananas = Array.isArray(state.bananas) ? state.bananas : null;
+    if (srcBananas) {
+      const bananaCount = Math.min(this.bananas.length, srcBananas.length);
+      for (let i = 0; i < bananaCount; i += 1) {
+        const target = this.bananas[i];
+        const source = srcBananas[i];
+        if (!target || !source) {
+          continue;
+        }
+        copyVec3(target.localPos, source.localPos);
+        target.flags = (source.flags ?? target.flags) | 0;
+        target.cooldown = (source.cooldown ?? target.cooldown) | 0;
+        if (source.collected !== undefined) {
+          target.collected = !!source.collected;
+        }
+        target.state = (source.state ?? target.state) | 0;
+        target.collectTimer = (source.collectTimer ?? target.collectTimer) | 0;
+        target.holdTimer = (source.holdTimer ?? target.holdTimer) | 0;
+        copyVec3(target.holdOffset, source.holdOffset);
+        target.holdScaleTarget = source.holdScaleTarget ?? target.holdScaleTarget;
+        target.holdRotVel = (source.holdRotVel ?? target.holdRotVel) | 0;
+        target.flyTimer = (source.flyTimer ?? target.flyTimer) | 0;
+        target.flyScaleTarget = source.flyScaleTarget ?? target.flyScaleTarget;
+        copyVec3(target.flyStartPos, source.flyStartPos);
+        target.flyStartScale = source.flyStartScale ?? target.flyStartScale;
+        target.tiltTimer = (source.tiltTimer ?? target.tiltTimer) | 0;
+        target.scale = source.scale ?? target.scale;
+        copyVec3(target.vel, source.vel);
+        target.rotX = (source.rotX ?? target.rotX) | 0;
+        target.rotY = (source.rotY ?? target.rotY) | 0;
+        target.rotZ = (source.rotZ ?? target.rotZ) | 0;
+        target.rotVelX = (source.rotVelX ?? target.rotVelX) | 0;
+        target.rotVelY = (source.rotVelY ?? target.rotVelY) | 0;
+        target.rotVelZ = (source.rotVelZ ?? target.rotVelZ) | 0;
+      }
+    }
+
+    const srcSwitches = Array.isArray(state.switches) ? state.switches : null;
+    if (srcSwitches) {
+      const switchCount = Math.min(this.switches.length, srcSwitches.length);
+      for (let i = 0; i < switchCount; i += 1) {
+        const target = this.switches[i];
+        const source = srcSwitches[i];
+        if (!target || !source) {
+          continue;
+        }
+        copyVec3(target.pos, source.pos);
+        copyVec3(target.localPos, source.localPos);
+        copyVec3(target.localVel, source.localVel);
+        target.state = (source.state ?? target.state) | 0;
+        if (source.pressImpulse !== undefined) {
+          target.pressImpulse = !!source.pressImpulse;
+        }
+        if (source.triggered !== undefined) {
+          target.triggered = !!source.triggered;
+        }
+        target.counter = (source.counter ?? target.counter) | 0;
+        target.cooldown = (source.cooldown ?? target.cooldown) | 0;
+      }
+    }
+
+    if (state.switchPressCount !== undefined) {
+      this.switchPressCount = state.switchPressCount | 0;
+    }
+    if (state.goalHoldOpen !== undefined) {
+      this.goalHoldOpen = !!state.goalHoldOpen;
+    }
+    if (state.switchesEnabled !== undefined) {
+      this.switchesEnabled = !!state.switchesEnabled;
+    }
+    if (this.simRng && state.simRngState !== undefined) {
+      this.simRng.state = state.simRngState;
+    }
+  }
+
   getState({ includeVisual = true } = {}) {
     const num = (value, fallback = 0) => {
       const n = Number(value);
