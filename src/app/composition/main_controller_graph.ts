@@ -789,6 +789,7 @@ netplayRuntime = new NetplayRuntimeController({
     netplaySimSync?.trimNetplayHistory(frame);
   },
   getSimHash: () => netplaySync?.getSimHash() ?? 0,
+  getSimHashBreakdown: () => netplaySync?.getSimHashBreakdown?.(),
   requestSnapshot: (reason, frame, force) => {
     snapshotFlow?.requestSnapshot(reason, frame, force);
   },

@@ -94,6 +94,17 @@ export type SnapshotMessage = {
   gameSource?: GameSource;
 };
 
+export type HashProbeMessage = {
+  type: 'hash_probe';
+  stageSeq: number;
+  frame: number;
+  hash: number;
+  ballsHash: number;
+  worldsHash: number;
+  stageHash: number;
+  detHash: number;
+};
+
 export type SnapshotRequestMessage = {
   type: 'snapshot_request';
   stageSeq: number;
@@ -163,6 +174,7 @@ export type HostToClientMessage =
   | PongMessage
   | StageSyncMessage
   | FrameBundleMessage
+  | HashProbeMessage
   | SnapshotMessage
   | StartMatchMessage
   | PlayerJoinMessage

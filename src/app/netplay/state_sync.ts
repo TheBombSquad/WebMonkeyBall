@@ -2,7 +2,7 @@ import type { Game, MultiplayerGameMode } from '../../game.js';
 import type { QuantizedInput } from '../../determinism.js';
 import type { FrameBundleMessage } from '../../netcode_protocol.js';
 import type { GameSource } from '../../shared/constants/index.js';
-import { hashSimState } from '../../sim_hash.js';
+import { hashSimStateBreakdown } from '../../sim_hash.js';
 
 type NetplayRole = 'host' | 'client';
 
@@ -98,6 +98,34 @@ export class NetplayStateSyncController {
       hashInterval: this.deps.hashInterval,
       hashHistory: new Map<number, number>(),
       expectedHashes: new Map<number, number>(),
+      hashBreakdownHistory: new Map<number, {
+        ballsHash: number;
+        worldsHash: number;
+        stageHash: number;
+        detHash: number;
+        fullHash: number;
+      }>(),
+      expectedHashProbeByFrame: new Map<number, {
+        hash: number;
+        ballsHash: number;
+        worldsHash: number;
+        stageHash: number;
+        detHash: number;
+      }>(),
+      receivedHostFrames: new Set<number>(),
+      pendingHostFrameReceipts: new Set<number>(),
+      highestContiguousHostFrame: -1,
+      debugHashMismatchCount: 0,
+      debugLastMismatchFrame: null,
+      debugLastMismatchLocalHash: null,
+      debugLastMismatchExpectedHash: null,
+      debugLastMismatchAtMs: null,
+      debugLastMismatchParts: null,
+      debugSnapshotRequestsMismatch: 0,
+      debugSnapshotRequestsLag: 0,
+      debugLastSnapshotRequestReason: null,
+      debugLastSnapshotRequestFrame: null,
+      debugLastSnapshotRequestAtMs: null,
       lastAuthHashFrameSent: -1,
       pendingHostUpdates: new Set<number>(),
       lastHostFrameTimeMs: null,
@@ -145,6 +173,22 @@ export class NetplayStateSyncController {
     state.pendingLocalInputs.clear();
     state.hashHistory.clear();
     state.expectedHashes.clear();
+    state.hashBreakdownHistory.clear();
+    state.expectedHashProbeByFrame.clear();
+    state.receivedHostFrames.clear();
+    state.pendingHostFrameReceipts.clear();
+    state.highestContiguousHostFrame = -1;
+    state.debugHashMismatchCount = 0;
+    state.debugLastMismatchFrame = null;
+    state.debugLastMismatchLocalHash = null;
+    state.debugLastMismatchExpectedHash = null;
+    state.debugLastMismatchAtMs = null;
+    state.debugLastMismatchParts = null;
+    state.debugSnapshotRequestsMismatch = 0;
+    state.debugSnapshotRequestsLag = 0;
+    state.debugLastSnapshotRequestReason = null;
+    state.debugLastSnapshotRequestFrame = null;
+    state.debugLastSnapshotRequestAtMs = null;
     state.lastAuthHashFrameSent = -1;
     state.pendingHostUpdates.clear();
     state.pendingPings.clear();
@@ -305,14 +349,31 @@ export class NetplayStateSyncController {
   }
 
   getSimHash() {
+    return this.getSimHashBreakdown().fullHash;
+  }
+
+  getSimHashBreakdown() {
+    const detHash = this.deps.game.getMultiplayerDeterminismHash() >>> 0;
     if (!this.deps.game.stageRuntime || !this.deps.game.world) {
-      return 0;
+      return {
+        ballsHash: 0,
+        worldsHash: 0,
+        stageHash: 0,
+        detHash,
+        fullHash: 0,
+      };
     }
     const players = this.deps.game.getPlayersSortedCached();
     const balls = players.map((player) => player.ball);
     const worlds = [this.deps.game.world, ...players.map((player) => player.world)];
-    const baseHash = hashSimState(balls, worlds, this.deps.game.stageRuntime);
-    return (baseHash ^ this.deps.game.getMultiplayerDeterminismHash()) >>> 0;
+    const base = hashSimStateBreakdown(balls, worlds, this.deps.game.stageRuntime);
+    return {
+      ballsHash: base.ballsHash >>> 0,
+      worldsHash: base.worldsHash >>> 0,
+      stageHash: base.stageHash >>> 0,
+      detHash,
+      fullHash: (base.combinedHash ^ detHash) >>> 0,
+    };
   }
 
   private getAuthoritativeFrame(state: any) {

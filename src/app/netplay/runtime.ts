@@ -37,6 +37,13 @@ type RuntimeDeps = {
   recordInputForFrame: (frame: number, playerId: number, input: QuantizedInput) => boolean;
   trimNetplayHistory: (frame: number) => void;
   getSimHash: () => number;
+  getSimHashBreakdown?: () => {
+    ballsHash: number;
+    worldsHash: number;
+    stageHash: number;
+    detHash: number;
+    fullHash: number;
+  };
   requestSnapshot: (reason: 'mismatch' | 'lag', frame?: number, force?: boolean) => void;
   hostApplyPendingRollback: () => void;
   sendSnapshotToClient: (playerId: number, frame?: number) => void;
@@ -60,11 +67,48 @@ function clamp(value: number, min: number, max: number) {
   return value;
 }
 
+function formatBandwidthBps(bytesPerSecond: number) {
+  const bps = Math.max(0, Math.trunc(bytesPerSecond));
+  const kbps = ((bps * 8) / 1000).toFixed(2);
+  return `${bps}B/s (${kbps}kbps)`;
+}
+
+function formatHash(value: unknown) {
+  if (!Number.isFinite(value)) {
+    return 'n/a';
+  }
+  return `0x${(Number(value) >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 export class NetplayRuntimeController {
   private readonly deps: RuntimeDeps;
 
   constructor(deps: RuntimeDeps) {
     this.deps = deps;
+  }
+
+  private recordHashMismatch(state: any, frame: number, expectedHash: number, localHash: number, nowMs: number) {
+    state.debugHashMismatchCount = (state.debugHashMismatchCount ?? 0) + 1;
+    state.debugLastMismatchFrame = frame;
+    state.debugLastMismatchExpectedHash = expectedHash >>> 0;
+    state.debugLastMismatchLocalHash = localHash >>> 0;
+    state.debugLastMismatchAtMs = nowMs;
+    const localParts = state.hashBreakdownHistory?.get?.(frame) ?? null;
+    const expectedParts = state.expectedHashProbeByFrame?.get?.(frame) ?? null;
+    if (!localParts || !expectedParts) {
+      state.debugLastMismatchParts = null;
+      return;
+    }
+    state.debugLastMismatchParts = {
+      ballsLocal: localParts.ballsHash >>> 0,
+      ballsHost: expectedParts.ballsHash >>> 0,
+      worldsLocal: localParts.worldsHash >>> 0,
+      worldsHost: expectedParts.worldsHash >>> 0,
+      stageLocal: localParts.stageHash >>> 0,
+      stageHost: expectedParts.stageHash >>> 0,
+      detLocal: localParts.detHash >>> 0,
+      detHost: expectedParts.detHash >>> 0,
+    };
   }
 
   private getNetplayTargetFrame(state: any, currentFrame: number) {
@@ -198,10 +242,25 @@ export class NetplayRuntimeController {
     session.advanceTo(frame, inputs);
     let hash: number | undefined;
     if (state.hashInterval > 0 && frame % state.hashInterval === 0) {
-      hash = this.deps.getSimHash();
+      const breakdown = this.deps.getSimHashBreakdown?.();
+      if (breakdown) {
+        hash = breakdown.fullHash >>> 0;
+        state.hashBreakdownHistory?.set?.(frame, {
+          ballsHash: breakdown.ballsHash >>> 0,
+          worldsHash: breakdown.worldsHash >>> 0,
+          stageHash: breakdown.stageHash >>> 0,
+          detHash: breakdown.detHash >>> 0,
+          fullHash: breakdown.fullHash >>> 0,
+        });
+      } else {
+        hash = this.deps.getSimHash();
+      }
       state.hashHistory.set(frame, hash);
       const expected = state.expectedHashes.get(frame);
-      if (expected !== undefined && expected !== hash) {
+      const canValidate = state.role !== 'client'
+        || frame <= (Number.isFinite(state.highestContiguousHostFrame) ? Math.floor(state.highestContiguousHostFrame) : -1);
+      if (canValidate && expected !== undefined && expected !== hash) {
+        this.recordHashMismatch(state, frame, expected, hash, performance.now());
         this.deps.requestSnapshot('mismatch', frame);
       }
     }
@@ -230,6 +289,19 @@ export class NetplayRuntimeController {
       if (hashFrame !== null && authHash !== undefined) {
         bundle.hashFrame = hashFrame;
         bundle.hash = authHash;
+        const probe = state.hashBreakdownHistory?.get?.(hashFrame);
+        if (probe) {
+          this.deps.getHostRelay()?.broadcast?.({
+            type: 'hash_probe',
+            stageSeq: state.stageSeq,
+            frame: hashFrame,
+            hash: authHash >>> 0,
+            ballsHash: probe.ballsHash >>> 0,
+            worldsHash: probe.worldsHash >>> 0,
+            stageHash: probe.stageHash >>> 0,
+            detHash: probe.detHash >>> 0,
+          });
+        }
       }
       state.hostFrameBuffer.set(frame, bundle);
       const minFrame = frame - Math.max(state.maxRollback, state.maxResend);
@@ -398,16 +470,58 @@ export class NetplayRuntimeController {
     lines.push(`frame=${sessionFrame} host=${state.lastReceivedHostFrame} ack=${state.lastAckedLocalFrame}`);
     lines.push(`drift=${drift.toFixed(2)} acc=${this.deps.getNetplayAccumulator().toFixed(3)}`);
     lines.push(`sync=${state.awaitingStageSync ? 1 : 0} ready=${state.awaitingStageReady ? 1 : 0} snap=${state.awaitingSnapshot ? 1 : 0}`);
+    const snapMismatch = state.debugSnapshotRequestsMismatch ?? 0;
+    const snapLag = state.debugSnapshotRequestsLag ?? 0;
+    const snapReason = state.debugLastSnapshotRequestReason ?? '-';
+    const snapFrame = Number.isFinite(state.debugLastSnapshotRequestFrame) ? state.debugLastSnapshotRequestFrame : '-';
+    lines.push(`snapReq m=${snapMismatch} l=${snapLag} last=${snapReason}@${snapFrame}`);
+    if (Number.isFinite(state.debugLastMismatchFrame)) {
+      lines.push(
+        `mismatch#${state.debugHashMismatchCount ?? 0}`
+        + ` f=${state.debugLastMismatchFrame}`
+        + ` local=${formatHash(state.debugLastMismatchLocalHash)}`
+        + ` host=${formatHash(state.debugLastMismatchExpectedHash)}`,
+      );
+      const mismatchParts = state.debugLastMismatchParts;
+      if (mismatchParts) {
+        lines.push(
+          `mismatchParts`
+          + ` balls ${formatHash(mismatchParts.ballsLocal)}/${formatHash(mismatchParts.ballsHost)}`
+          + ` worlds ${formatHash(mismatchParts.worldsLocal)}/${formatHash(mismatchParts.worldsHost)}`
+          + ` stage ${formatHash(mismatchParts.stageLocal)}/${formatHash(mismatchParts.stageHost)}`
+          + ` det ${formatHash(mismatchParts.detLocal)}/${formatHash(mismatchParts.detHost)}`,
+        );
+      }
+    }
     if (state.role === 'client') {
       const chanState = this.deps.getClientPeer()?.getChannelState?.() ?? 'none';
       const hostAge = state.lastHostFrameTimeMs === null ? 'n/a' : `${((nowMs - state.lastHostFrameTimeMs) / 1000).toFixed(1)}s`;
       lines.push(`peer=${chanState} hostAge=${hostAge}`);
+      if (Number.isFinite(state.highestContiguousHostFrame)) {
+        lines.push(`hostContig=${Math.floor(state.highestContiguousHostFrame)}`);
+      }
+      const bw = this.deps.getClientPeer()?.getBandwidthStats?.();
+      if (bw) {
+        lines.push(`bw up=${formatBandwidthBps(bw.upBps)} dn=${formatBandwidthBps(bw.downBps)}`);
+        lines.push(`bwTotal up=${bw.upTotalBytes}B dn=${bw.downTotalBytes}B`);
+      }
     } else {
       const peers = this.deps.getHostRelay()?.getChannelStates?.() ?? [];
       const peerText = peers.length
         ? peers.map((peer: any) => `${peer.playerId}:${peer.readyState}`).join(' ')
         : 'none';
       lines.push(`peers=${peerText}`);
+      const bw = this.deps.getHostRelay()?.getBandwidthStats?.();
+      if (bw) {
+        lines.push(`bw up=${formatBandwidthBps(bw.upBps)} dn=${formatBandwidthBps(bw.downBps)}`);
+        lines.push(`bwTotal up=${bw.upTotalBytes}B dn=${bw.downTotalBytes}B`);
+        if (bw.peers?.length > 0) {
+          const peerBw = bw.peers
+            .map((peer: any) => `${peer.playerId}:u${Math.trunc(peer.upBps)} d${Math.trunc(peer.downBps)}B/s`)
+            .join(' ');
+          lines.push(`bwPeer=${peerBw}`);
+        }
+      }
       if (state.clientStates.size > 0) {
         const currentFrame = state.session.getFrame();
         const behindParts: string[] = [];

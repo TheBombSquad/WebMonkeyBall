@@ -56,6 +56,7 @@ const HOST_TO_CLIENT_TYPES = new Set([
   'pong',
   'stage_sync',
   'frame',
+  'hash_probe',
   'snapshot',
   'start',
   'player_join',
@@ -90,6 +91,103 @@ type IngressWindow = {
   windowBytes: number;
 };
 
+type BandwidthStats = {
+  upBps: number;
+  downBps: number;
+  upTotalBytes: number;
+  downTotalBytes: number;
+};
+
+type HostPeerBandwidthStats = BandwidthStats & {
+  playerId: number;
+};
+
+type HostBandwidthStats = BandwidthStats & {
+  peers: HostPeerBandwidthStats[];
+};
+
+type ByteSample = {
+  timeMs: number;
+  bytes: number;
+};
+
+const BANDWIDTH_WINDOW_MS = 1000;
+const BANDWIDTH_COALESCE_MS = 5;
+
+class RollingBandwidthTracker {
+  private upSamples: ByteSample[] = [];
+  private downSamples: ByteSample[] = [];
+  private upWindowBytes = 0;
+  private downWindowBytes = 0;
+  private upTotalBytes = 0;
+  private downTotalBytes = 0;
+
+  private prune(nowMs: number) {
+    const cutoff = nowMs - BANDWIDTH_WINDOW_MS;
+    while (this.upSamples.length > 0 && this.upSamples[0].timeMs < cutoff) {
+      this.upWindowBytes -= this.upSamples[0].bytes;
+      this.upSamples.shift();
+    }
+    while (this.downSamples.length > 0 && this.downSamples[0].timeMs < cutoff) {
+      this.downWindowBytes -= this.downSamples[0].bytes;
+      this.downSamples.shift();
+    }
+  }
+
+  private pushSample(samples: ByteSample[], nowMs: number, bytes: number) {
+    const last = samples[samples.length - 1];
+    if (last && (nowMs - last.timeMs) <= BANDWIDTH_COALESCE_MS) {
+      last.bytes += bytes;
+      return;
+    }
+    samples.push({ timeMs: nowMs, bytes });
+  }
+
+  private record(direction: 'up' | 'down', bytes: number) {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return;
+    }
+    const nowMs = performance.now();
+    this.prune(nowMs);
+    if (direction === 'up') {
+      this.pushSample(this.upSamples, nowMs, bytes);
+      this.upWindowBytes += bytes;
+      this.upTotalBytes += bytes;
+      return;
+    }
+    this.pushSample(this.downSamples, nowMs, bytes);
+    this.downWindowBytes += bytes;
+    this.downTotalBytes += bytes;
+  }
+
+  recordUp(bytes: number) {
+    this.record('up', bytes);
+  }
+
+  recordDown(bytes: number) {
+    this.record('down', bytes);
+  }
+
+  snapshot(): BandwidthStats {
+    this.prune(performance.now());
+    return {
+      upBps: this.upWindowBytes,
+      downBps: this.downWindowBytes,
+      upTotalBytes: this.upTotalBytes,
+      downTotalBytes: this.downTotalBytes,
+    };
+  }
+
+  reset() {
+    this.upSamples = [];
+    this.downSamples = [];
+    this.upWindowBytes = 0;
+    this.downWindowBytes = 0;
+    this.upTotalBytes = 0;
+    this.downTotalBytes = 0;
+  }
+}
+
 function clampI8(value: number) {
   return Math.max(-127, Math.min(127, value | 0));
 }
@@ -102,6 +200,12 @@ function asArrayBuffer(data: unknown) {
     return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
   }
   return null;
+}
+
+function payloadByteSize(payload: string | ArrayBuffer) {
+  return typeof payload === 'string'
+    ? utf8Encoder.encode(payload).byteLength
+    : payload.byteLength;
 }
 
 function encodeInputBatchPacket(stageSeq: number, lastAck: number, entries: InputBatchEntry[]) {
@@ -499,9 +603,30 @@ export class HostRelay {
   private connected = new Set<number>();
   private pendingIce = new Map<number, RTCIceCandidateInit[]>();
   private ingressWindows = new Map<number, IngressWindow>();
+  private traffic = new RollingBandwidthTracker();
+  private peerTraffic = new Map<number, RollingBandwidthTracker>();
   private disconnecting = new Set<number>();
 
   constructor(private onMessage: (playerId: number, msg: ClientToHostMessage) => void) {}
+
+  private getPeerTraffic(playerId: number) {
+    let tracker = this.peerTraffic.get(playerId);
+    if (!tracker) {
+      tracker = new RollingBandwidthTracker();
+      this.peerTraffic.set(playerId, tracker);
+    }
+    return tracker;
+  }
+
+  private recordInbound(playerId: number, bytes: number) {
+    this.traffic.recordDown(bytes);
+    this.getPeerTraffic(playerId).recordDown(bytes);
+  }
+
+  private recordOutbound(playerId: number, bytes: number) {
+    this.traffic.recordUp(bytes);
+    this.getPeerTraffic(playerId).recordUp(bytes);
+  }
 
   private shouldAcceptIngress(playerId: number, size: number) {
     const now = performance.now();
@@ -559,6 +684,7 @@ export class HostRelay {
           return;
         }
         const size = binary.byteLength;
+        this.recordInbound(playerId, size);
         if (size > CLIENT_SIGNAL_MAX_MESSAGE_BYTES || !this.shouldAcceptIngress(playerId, size)) {
           this.disconnect(playerId);
           return;
@@ -587,6 +713,7 @@ export class HostRelay {
         return;
       }
       const size = utf8Encoder.encode(event.data).byteLength;
+      this.recordInbound(playerId, size);
       if (size > CLIENT_SIGNAL_MAX_MESSAGE_BYTES || !this.shouldAcceptIngress(playerId, size)) {
         this.disconnect(playerId);
         return;
@@ -639,8 +766,10 @@ export class HostRelay {
     if (!channel) {
       return false;
     }
+    const size = payloadByteSize(payload);
     try {
       channel.send(payload);
+      this.recordOutbound(playerId, size);
       return true;
     } catch {
       this.disconnect(playerId);
@@ -664,6 +793,17 @@ export class HostRelay {
       states.push({ playerId, readyState: `ctrl=${ctrl} fast=${fast}` });
     }
     return states;
+  }
+
+  getBandwidthStats(): HostBandwidthStats {
+    const totals = this.traffic.snapshot();
+    const peers = Array.from(this.peerTraffic.entries())
+      .map(([playerId, tracker]) => ({ playerId, ...tracker.snapshot() }))
+      .sort((a, b) => a.playerId - b.playerId);
+    return {
+      ...totals,
+      peers,
+    };
   }
 
   sendTo(playerId: number, msg: HostToClientMessage) {
@@ -702,6 +842,8 @@ export class HostRelay {
     this.connected.clear();
     this.pendingIce.clear();
     this.ingressWindows.clear();
+    this.traffic.reset();
+    this.peerTraffic.clear();
     this.disconnecting.clear();
   }
 
@@ -736,6 +878,7 @@ export class HostRelay {
       this.peers.delete(playerId);
       this.pendingIce.delete(playerId);
       this.ingressWindows.delete(playerId);
+      this.peerTraffic.delete(playerId);
       if (this.connected.has(playerId)) {
         this.connected.delete(playerId);
         this.onDisconnect?.(playerId);
@@ -773,6 +916,7 @@ export class ClientPeer {
     windowCount: 0,
     windowBytes: 0,
   };
+  private traffic = new RollingBandwidthTracker();
 
   constructor(private onMessage: (msg: HostToClientMessage) => void) {}
 
@@ -804,6 +948,7 @@ export class ClientPeer {
       const binary = asArrayBuffer(event.data);
       if (binary) {
         const size = binary.byteLength;
+        this.traffic.recordDown(size);
         if (size > HOST_SIGNAL_MAX_MESSAGE_BYTES || !this.shouldAcceptIngress(size)) {
           this.close();
           return;
@@ -821,6 +966,7 @@ export class ClientPeer {
         return;
       }
       const size = utf8Encoder.encode(event.data).byteLength;
+      this.traffic.recordDown(size);
       if (size > HOST_SIGNAL_MAX_MESSAGE_BYTES || !this.shouldAcceptIngress(size)) {
         this.close();
         return;
@@ -867,9 +1013,11 @@ export class ClientPeer {
   private sendPayload(payload: string | ArrayBuffer, preferFast: boolean) {
     const primary = preferFast ? this.fastChannel : this.ctrlChannel;
     const fallback = preferFast ? this.ctrlChannel : this.fastChannel;
+    const size = payloadByteSize(payload);
     if (isChannelWritable(primary)) {
       try {
         primary.send(payload);
+        this.traffic.recordUp(size);
         return;
       } catch {
         // Try fallback below.
@@ -878,6 +1026,7 @@ export class ClientPeer {
     if (isChannelWritable(fallback)) {
       try {
         fallback.send(payload);
+        this.traffic.recordUp(size);
       } catch {
         // Ignore send failures from a stale/closing channel.
       }
@@ -899,6 +1048,10 @@ export class ClientPeer {
     const ctrl = this.ctrlChannel?.readyState ?? 'none';
     const fast = this.fastChannel?.readyState ?? 'none';
     return `ctrl=${ctrl} fast=${fast}`;
+  }
+
+  getBandwidthStats(): BandwidthStats {
+    return this.traffic.snapshot();
   }
 
   close() {
@@ -926,6 +1079,7 @@ export class ClientPeer {
       windowCount: 0,
       windowBytes: 0,
     };
+    this.traffic.reset();
   }
 
   async handleSignal(payload: any) {

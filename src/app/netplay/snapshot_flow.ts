@@ -39,6 +39,14 @@ export class SnapshotFlowController {
     state.lastSnapshotRequestTimeMs = nowMs;
     state.awaitingSnapshot = true;
     const targetFrame = frame ?? state.session.getFrame();
+    if (reason === 'mismatch') {
+      state.debugSnapshotRequestsMismatch = (state.debugSnapshotRequestsMismatch ?? 0) + 1;
+    } else {
+      state.debugSnapshotRequestsLag = (state.debugSnapshotRequestsLag ?? 0) + 1;
+    }
+    state.debugLastSnapshotRequestReason = reason;
+    state.debugLastSnapshotRequestFrame = targetFrame;
+    state.debugLastSnapshotRequestAtMs = nowMs;
     clientPeer.send({
       type: 'snapshot_request',
       stageSeq: state.stageSeq,

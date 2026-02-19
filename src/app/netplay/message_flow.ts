@@ -73,6 +73,75 @@ export class NetplayMessageFlowController {
     this.deps = deps;
   }
 
+  private recordHashMismatch(state: any, frame: number, expectedHash: number, localHash: number, nowMs: number) {
+    state.debugHashMismatchCount = (state.debugHashMismatchCount ?? 0) + 1;
+    state.debugLastMismatchFrame = frame;
+    state.debugLastMismatchExpectedHash = expectedHash >>> 0;
+    state.debugLastMismatchLocalHash = localHash >>> 0;
+    state.debugLastMismatchAtMs = nowMs;
+    const localParts = state.hashBreakdownHistory?.get?.(frame) ?? null;
+    const expectedParts = state.expectedHashProbeByFrame?.get?.(frame) ?? null;
+    if (!localParts || !expectedParts) {
+      state.debugLastMismatchParts = null;
+      return;
+    }
+    state.debugLastMismatchParts = {
+      ballsLocal: localParts.ballsHash >>> 0,
+      ballsHost: expectedParts.ballsHash >>> 0,
+      worldsLocal: localParts.worldsHash >>> 0,
+      worldsHost: expectedParts.worldsHash >>> 0,
+      stageLocal: localParts.stageHash >>> 0,
+      stageHost: expectedParts.stageHash >>> 0,
+      detLocal: localParts.detHash >>> 0,
+      detHost: expectedParts.detHash >>> 0,
+    };
+  }
+
+  private markHostFrameReceived(state: any, frame: number) {
+    if (state.role !== 'client') {
+      return;
+    }
+    state.receivedHostFrames?.add?.(frame);
+    const pending = state.pendingHostFrameReceipts;
+    if (!pending?.add || !pending?.has || !pending?.delete) {
+      return;
+    }
+    pending.add(frame);
+    let contiguous = Number.isFinite(state.highestContiguousHostFrame)
+      ? Math.floor(state.highestContiguousHostFrame)
+      : -1;
+    while (pending.has(contiguous + 1)) {
+      contiguous += 1;
+      pending.delete(contiguous);
+    }
+    state.highestContiguousHostFrame = contiguous;
+  }
+
+  private canValidateHashFrame(state: any, frame: number) {
+    if (state.role !== 'client') {
+      return true;
+    }
+    const contiguous = Number.isFinite(state.highestContiguousHostFrame)
+      ? Math.floor(state.highestContiguousHostFrame)
+      : -1;
+    return frame <= contiguous;
+  }
+
+  private maybeValidateExpectedHashes(state: any, nowMs: number) {
+    for (const [frame, expected] of state.expectedHashes.entries()) {
+      if (!this.canValidateHashFrame(state, frame)) {
+        continue;
+      }
+      const localHash = state.hashHistory.get(frame);
+      if (localHash === undefined || localHash === expected) {
+        continue;
+      }
+      this.recordHashMismatch(state, frame, expected, localHash, nowMs);
+      this.deps.requestSnapshot('mismatch', frame);
+      return;
+    }
+  }
+
   applyIncomingProfile(
     playerId: number,
     incoming: PlayerProfile,
@@ -168,6 +237,25 @@ export class NetplayMessageFlowController {
       }
       return;
     }
+    if (msg.type === 'hash_probe') {
+      const frame = this.deps.coerceFrame(msg.frame);
+      if (frame === null || !Number.isFinite(msg.hash)) {
+        return;
+      }
+      const expected = Number(msg.hash) >>> 0;
+      state.expectedHashProbeByFrame?.set?.(frame, {
+        hash: expected,
+        ballsHash: Number(msg.ballsHash) >>> 0,
+        worldsHash: Number(msg.worldsHash) >>> 0,
+        stageHash: Number(msg.stageHash) >>> 0,
+        detHash: Number(msg.detHash) >>> 0,
+      });
+      const localHash = state.hashHistory.get(frame);
+      if (localHash !== undefined && localHash !== expected && this.canValidateHashFrame(state, frame)) {
+        this.recordHashMismatch(state, frame, expected, localHash, performance.now());
+      }
+      return;
+    }
     if (msg.type === 'frame') {
       if (state.awaitingStageSync) {
         return;
@@ -189,6 +277,7 @@ export class NetplayMessageFlowController {
       }
       state.lastReceivedHostFrame = Math.max(state.lastReceivedHostFrame, frame);
       state.lastHostFrameTimeMs = performance.now();
+      this.markHostFrameReceived(state, frame);
       let changed = false;
       for (const [id, input] of Object.entries(msg.inputs)) {
         const playerId = Number(id);
@@ -206,20 +295,19 @@ export class NetplayMessageFlowController {
       if (msg.hash !== undefined && msg.hashFrame !== undefined) {
         const hashFrame = this.deps.coerceFrame(msg.hashFrame);
         if (hashFrame !== null && Number.isFinite(msg.hash)) {
-          state.expectedHashes.set(hashFrame, msg.hash);
-          const localHash = state.hashHistory.get(hashFrame);
-          if (localHash !== undefined && localHash !== msg.hash) {
-            this.deps.requestSnapshot('mismatch', hashFrame);
-          }
+          state.expectedHashes.set(hashFrame, Number(msg.hash) >>> 0);
         }
       }
       const currentFrame = state.session.getFrame();
       if (changed && frame <= currentFrame) {
         if (!this.deps.rollbackAndResim(frame)) {
           this.deps.requestSnapshot('lag');
+          return;
         }
       }
-      if (state.lastReceivedHostFrame - currentFrame > state.maxRollback) {
+      this.maybeValidateExpectedHashes(state, performance.now());
+      const postFrame = state.session.getFrame();
+      if (state.lastReceivedHostFrame - postFrame > state.maxRollback) {
         this.deps.requestSnapshot('lag');
       }
       return;
@@ -307,6 +395,11 @@ export class NetplayMessageFlowController {
         currentState.awaitingSnapshot = false;
         currentState.expectedHashes.clear();
         currentState.hashHistory.clear();
+        currentState.hashBreakdownHistory?.clear?.();
+        currentState.expectedHashProbeByFrame?.clear?.();
+        currentState.receivedHostFrames?.clear?.();
+        currentState.pendingHostFrameReceipts?.clear?.();
+        currentState.highestContiguousHostFrame = -1;
       }
       if (msg.lateJoin && Number.isFinite(this.deps.game.localPlayerId) && this.deps.game.localPlayerId > 0) {
         this.deps.markPlayerPendingSpawn(this.deps.game.localPlayerId, msg.stageSeq);
