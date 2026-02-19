@@ -54,6 +54,11 @@ const OVERLAY_MODEL_HALF_SIZE = 5.0;
 const POT_PROXIMITY_OBJECT_NAMES = new Set(["POD_POD_A", "POD_KAMADO_A"]);
 const POT_PROXIMITY_OBJECT_PREFIX = "POD_";
 const POT_PROXIMITY_MODEL_NAMES = ["POD_POD_A", "POD_KAMADO_A", "POD_RENZ_FREA_A"];
+const WAT2_ROPE_MODEL_PREFIXES = ["WA2_ROPE_", "WA2_SHIP_HO_"];
+const WAT2_CAUSTICS_MODEL_PREFIXES = ["WA2_KAIMEN", "WA2_KAITEI", "WA2_IWAKABE_", "WA2_SUNA_", "WA2_SHIP"];
+const WAT2_CAUSTICS_ROT_X = 0x3800 * S16_TO_RADIANS;
+const WAT2_CAUSTICS_ROT_Y = 0x0800 * S16_TO_RADIANS;
+const WAT2_CAUSTICS_ROT_Z = 0x1000 * S16_TO_RADIANS;
 
 const LAVA_OVERLAY_MEGASTATE = makeMegaState(
     setAttachmentStateSimple(
@@ -358,12 +363,148 @@ type PotWindState = {
     baseDir: vec3;
 };
 
+type Wat2CausticsState = {
+    amp0: number;
+    amp0Step: number;
+    amp1: number;
+    amp1Step: number;
+    phase0: vec3;
+    phase0Step: vec3;
+    phase1: vec3;
+    phase1Step: vec3;
+    scalePhase0: vec3;
+    scalePhase0Step: vec3;
+    scalePhase1: vec3;
+    scalePhase1Step: vec3;
+    texMtx0: mat4;
+    texMtx1: mat4;
+};
+
+type Wat2RopeState = {
+    phase: number;
+    phaseStep: number;
+    swayPhase: number;
+    swayStep: number;
+    yawAmp: number;
+    pitchAmp: number;
+    rollAmp: number;
+    swayAmp: number;
+};
+
+type Wat2RopeObject = {
+    bgObject: BgObjectInst;
+    state: Wat2RopeState;
+};
+
 function randomRange(min: number, max: number): number {
     return min + Math.random() * (max - min);
 }
 
 function randomSign(): number {
     return Math.random() < 0.5 ? -1 : 1;
+}
+
+function randomWat2Phase(): number {
+    return ((Math.random() * 0x8000) | 0) * S16_TO_RADIANS;
+}
+
+function randomWat2PhaseStep(base: number): number {
+    return (Math.random() * 0.8 + 0.4) * base * S16_TO_RADIANS;
+}
+
+function isWat2RopeModel(name: string): boolean {
+    for (let i = 0; i < WAT2_ROPE_MODEL_PREFIXES.length; i++) {
+        if (name.startsWith(WAT2_ROPE_MODEL_PREFIXES[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function isWat2CausticsModel(name: string): boolean {
+    for (let i = 0; i < WAT2_CAUSTICS_MODEL_PREFIXES.length; i++) {
+        if (name.startsWith(WAT2_CAUSTICS_MODEL_PREFIXES[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function createWat2CausticsState(): Wat2CausticsState {
+    return {
+        amp0: Math.random() * 6.0,
+        amp0Step: (Math.random() + 1.0) * 0.0011111111,
+        amp1: Math.random() * 6.0,
+        amp1Step: (Math.random() + 1.0) * 0.0011111111,
+        phase0: vec3.fromValues(randomWat2Phase(), randomWat2Phase(), randomWat2Phase()),
+        phase0Step: vec3.fromValues(randomWat2PhaseStep(64.0), randomWat2PhaseStep(64.0), randomWat2PhaseStep(64.0)),
+        phase1: vec3.fromValues(randomWat2Phase(), randomWat2Phase(), randomWat2Phase()),
+        phase1Step: vec3.fromValues(randomWat2PhaseStep(48.0), randomWat2PhaseStep(48.0), randomWat2PhaseStep(48.0)),
+        scalePhase0: vec3.fromValues(randomWat2Phase(), randomWat2Phase(), randomWat2Phase()),
+        scalePhase0Step: vec3.fromValues(
+            randomWat2PhaseStep(64.0),
+            randomWat2PhaseStep(64.0),
+            randomWat2PhaseStep(64.0),
+        ),
+        scalePhase1: vec3.fromValues(randomWat2Phase(), randomWat2Phase(), randomWat2Phase()),
+        scalePhase1Step: vec3.fromValues(
+            randomWat2PhaseStep(48.0),
+            randomWat2PhaseStep(48.0),
+            randomWat2PhaseStep(48.0),
+        ),
+        texMtx0: mat4.create(),
+        texMtx1: mat4.create(),
+    };
+}
+
+function updateWat2CausticsState(state: Wat2CausticsState): void {
+    state.amp0 += state.amp0Step;
+    state.amp1 += state.amp1Step;
+
+    for (let i = 0; i < 3; i++) {
+        state.phase0[i] += state.phase0Step[i];
+        state.phase1[i] += state.phase1Step[i];
+        state.scalePhase0[i] += state.scalePhase0Step[i];
+        state.scalePhase1[i] += state.scalePhase1Step[i];
+    }
+
+    const scale0X = (Math.sin(state.scalePhase0[0]) * 0.2 + 0.9) * 0.11111111;
+    const scale0Y = (Math.sin(state.scalePhase0[1]) * 0.2 + 0.9) * 0.11111111;
+    const scale0Z = (Math.sin(state.scalePhase0[2]) * 0.2 + 0.9) * 0.11111111;
+    const trans0X = Math.sin(state.phase0[0]) * state.amp0;
+    const trans0Y = Math.sin(state.phase0[1]) * state.amp0;
+    const trans0Z = Math.sin(state.phase0[2]) * state.amp0;
+    mat4.identity(state.texMtx0);
+    mat4.scale(state.texMtx0, state.texMtx0, [scale0X, scale0Y, scale0Z]);
+    mat4.rotateY(state.texMtx0, state.texMtx0, WAT2_CAUSTICS_ROT_Y);
+    mat4.rotateX(state.texMtx0, state.texMtx0, WAT2_CAUSTICS_ROT_X);
+    mat4.translate(state.texMtx0, state.texMtx0, [trans0X, trans0Y, trans0Z]);
+
+    const scale1X = (Math.sin(state.scalePhase1[0]) * 0.2 + 0.9) * 0.078125;
+    const scale1Y = (Math.sin(state.scalePhase1[1]) * 0.2 + 0.9) * 0.078125;
+    const scale1Z = (Math.sin(state.scalePhase1[2]) * 0.2 + 0.9) * 0.078125;
+    const trans1X = Math.sin(state.phase1[0]) * state.amp1;
+    const trans1Y = Math.sin(state.phase1[1]) * state.amp1;
+    const trans1Z = Math.sin(state.phase1[2]) * state.amp1;
+    mat4.identity(state.texMtx1);
+    mat4.scale(state.texMtx1, state.texMtx1, [scale1X, scale1Y, scale1Z]);
+    mat4.rotateY(state.texMtx1, state.texMtx1, WAT2_CAUSTICS_ROT_Y);
+    mat4.rotateX(state.texMtx1, state.texMtx1, WAT2_CAUSTICS_ROT_X);
+    mat4.rotateZ(state.texMtx1, state.texMtx1, WAT2_CAUSTICS_ROT_Z);
+    mat4.translate(state.texMtx1, state.texMtx1, [trans1X, trans1Y, trans1Z]);
+}
+
+function createWat2RopeState(): Wat2RopeState {
+    return {
+        phase: Math.random() * Math.PI * 2.0,
+        phaseStep: randomRange(0.015, 0.03),
+        swayPhase: Math.random() * Math.PI * 2.0,
+        swayStep: randomRange(0.01, 0.02),
+        yawAmp: randomRange(0.015, 0.045),
+        pitchAmp: randomRange(0.01, 0.035),
+        rollAmp: randomRange(0.01, 0.035),
+        swayAmp: randomRange(0.05, 0.2),
+    };
 }
 
 function createLavaOverlayState(): LavaOverlayState {
@@ -541,6 +682,106 @@ export class BgWater implements Background {
     public prepareToRender(state: WorldState, ctx: RenderContext): void {
         for (let i = 0; i < this.bgObjects.length; i++) {
             this.bgObjects[i].prepareToRender(state, ctx);
+        }
+    }
+}
+
+const scratchWat2WorldFromModel = mat4.create();
+
+export class BgWat2 implements Background {
+    private defaultObjects: BgObjectInst[] = [];
+    private causticsObjects: BgObjectInst[] = [];
+    private ropeObjects: Wat2RopeObject[] = [];
+    private causticsState: Wat2CausticsState;
+    private lastTickFrame = -1;
+
+    constructor(state: WorldState, bgObjects: BgObjectInst[]) {
+        for (let i = 0; i < bgObjects.length; i++) {
+            const bgObject = bgObjects[i];
+            const name = bgObject.bgObjectData.modelName;
+            if (isWat2RopeModel(name)) {
+                this.ropeObjects.push({
+                    bgObject,
+                    state: createWat2RopeState(),
+                });
+                continue;
+            }
+            if (isWat2CausticsModel(name)) {
+                this.causticsObjects.push(bgObject);
+                continue;
+            }
+            this.defaultObjects.push(bgObject);
+        }
+
+        if (this.causticsObjects.length === 0) {
+            for (let i = 0; i < this.defaultObjects.length; i++) {
+                const bgObject = this.defaultObjects[i];
+                if (bgObject.bgObjectData.modelName.startsWith("WA2_")) {
+                    this.causticsObjects.push(bgObject);
+                }
+            }
+            if (this.causticsObjects.length > 0) {
+                this.defaultObjects = this.defaultObjects.filter((bgObject) => !this.causticsObjects.includes(bgObject));
+            }
+        }
+
+        this.causticsState = createWat2CausticsState();
+    }
+
+    private stepWat2Tick(state: WorldState): void {
+        const tickFrame = Math.floor(state.time.getAnimTimeFrames());
+        if (tickFrame === this.lastTickFrame) {
+            return;
+        }
+
+        updateWat2CausticsState(this.causticsState);
+        for (let i = 0; i < this.ropeObjects.length; i++) {
+            const ropeState = this.ropeObjects[i].state;
+            ropeState.phase += ropeState.phaseStep;
+            ropeState.swayPhase += ropeState.swayStep;
+        }
+        this.lastTickFrame = tickFrame;
+    }
+
+    public update(state: WorldState): void {
+        for (let i = 0; i < this.defaultObjects.length; i++) {
+            this.defaultObjects[i].update(state);
+        }
+        for (let i = 0; i < this.causticsObjects.length; i++) {
+            this.causticsObjects[i].update(state);
+        }
+        for (let i = 0; i < this.ropeObjects.length; i++) {
+            this.ropeObjects[i].bgObject.update(state);
+        }
+        this.stepWat2Tick(state);
+    }
+
+    public prepareToRender(state: WorldState, ctx: RenderContext): void {
+        this.stepWat2Tick(state);
+
+        for (let i = 0; i < this.defaultObjects.length; i++) {
+            this.defaultObjects[i].prepareToRender(state, ctx);
+        }
+
+        // Original SMB2 world-3 caustics are callback-driven and affect stage/ball paths,
+        // not broad BG object shading; keep BG objects on default material path.
+        for (let i = 0; i < this.causticsObjects.length; i++) {
+            this.causticsObjects[i].prepareToRender(state, ctx);
+        }
+
+        for (let i = 0; i < this.ropeObjects.length; i++) {
+            const rope = this.ropeObjects[i];
+            const ropeState = rope.state;
+            rope.bgObject.copyWorldFromModel(scratchWat2WorldFromModel);
+            const sway = Math.sin(ropeState.swayPhase) * ropeState.swayAmp;
+            const yaw = Math.sin(ropeState.phase) * ropeState.yawAmp;
+            const pitch = Math.sin(ropeState.phase * 1.37 + 0.7) * ropeState.pitchAmp;
+            const roll = Math.sin(ropeState.phase * 1.73 + 1.1) * ropeState.rollAmp;
+            mat4.translate(scratchWat2WorldFromModel, scratchWat2WorldFromModel, [sway * 0.15, 0.0, sway * 0.08]);
+            mat4.rotateY(scratchWat2WorldFromModel, scratchWat2WorldFromModel, yaw);
+            mat4.rotateX(scratchWat2WorldFromModel, scratchWat2WorldFromModel, pitch);
+            mat4.rotateZ(scratchWat2WorldFromModel, scratchWat2WorldFromModel, roll);
+            rope.bgObject.prepareToRenderWithWorldFromModel(state, ctx, scratchWat2WorldFromModel);
         }
     }
 }

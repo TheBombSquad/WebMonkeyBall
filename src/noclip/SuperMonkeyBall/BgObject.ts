@@ -101,23 +101,17 @@ export class BgObjectInst {
         mat4.copy(out, this.worldFromModel);
     }
 
-    public prepareToRender(state: WorldState, ctx: RenderContext, texMtx?: mat4) {
-        this.prepareToRenderWithViewMatrix(state, ctx, ctx.viewerInput.camera.viewMatrix, texMtx);
-    }
-
-    public prepareToRenderWithViewMatrix(state: WorldState, ctx: RenderContext, viewMatrix: mat4, texMtx?: mat4) {
-        if (!this.visible) return;
-        if (ctx.mirrorCapture && (this.bgObjectData.flags & (1 << 7))) {
-            return;
-        }
-
-        const renderParams = scratchRenderParams;
+    private setupRenderParams(state: WorldState, renderParams: RenderParams, texMtx?: mat4, texMtx2?: mat4): void {
         renderParams.reset();
         renderParams.alpha = 1 - this.translucency;
         renderParams.sort = this.translucency < EPSILON ? RenderSort.Translucent : RenderSort.All;
         if (texMtx !== undefined) {
             mat4.copy(renderParams.texMtx, texMtx);
         }
+        if (texMtx2 !== undefined) {
+            mat4.copy(renderParams.texMtx2, texMtx2);
+        }
+
         const textureScroll = this.bgObjectData.textureScroll;
         if (textureScroll) {
             const timeSeconds = state.time.getAnimTimeSeconds();
@@ -131,11 +125,48 @@ export class BgObjectInst {
             }
         }
 
-        mat4.mul(renderParams.viewFromModel, viewMatrix, this.worldFromModel);
-
         renderParams.lighting = state.lightingGroups.getForBgFlags(this.bgObjectData.flags);
         renderParams.depthOffset = 400;
+    }
 
+    public prepareToRender(state: WorldState, ctx: RenderContext, texMtx?: mat4, texMtx2?: mat4) {
+        this.prepareToRenderWithViewMatrix(state, ctx, ctx.viewerInput.camera.viewMatrix, texMtx, texMtx2);
+    }
+
+    public prepareToRenderWithViewMatrix(
+        state: WorldState,
+        ctx: RenderContext,
+        viewMatrix: mat4,
+        texMtx?: mat4,
+        texMtx2?: mat4,
+    ) {
+        if (!this.visible) return;
+        if (ctx.mirrorCapture && (this.bgObjectData.flags & (1 << 7))) {
+            return;
+        }
+
+        const renderParams = scratchRenderParams;
+        this.setupRenderParams(state, renderParams, texMtx, texMtx2);
+
+        mat4.mul(renderParams.viewFromModel, viewMatrix, this.worldFromModel);
+        this.model.prepareToRender(ctx, renderParams);
+    }
+
+    public prepareToRenderWithWorldFromModel(
+        state: WorldState,
+        ctx: RenderContext,
+        worldFromModel: mat4,
+        texMtx?: mat4,
+        texMtx2?: mat4,
+    ) {
+        if (!this.visible) return;
+        if (ctx.mirrorCapture && (this.bgObjectData.flags & (1 << 7))) {
+            return;
+        }
+
+        const renderParams = scratchRenderParams;
+        this.setupRenderParams(state, renderParams, texMtx, texMtx2);
+        mat4.mul(renderParams.viewFromModel, ctx.viewerInput.camera.viewMatrix, worldFromModel);
         this.model.prepareToRender(ctx, renderParams);
     }
 }

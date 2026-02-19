@@ -13,6 +13,7 @@ import {
     BgSpace,
     BgStorm,
     BgSunset,
+    BgWat2,
     BgWater,
 } from "./Background.js";
 
@@ -247,6 +248,15 @@ export namespace BgInfos {
         infLightColor: colorNewFromRGBA(0.6, 0.85, 1),
         infLightRotX: 8192,
         infLightRotY: 24576,
+    };
+    export const Water2: BgInfo = {
+        fileName: "bg_wat2",
+        clearColor: colorNewFromRGBA8(0x000000ff),
+        bgConstructor: BgWat2,
+        ambientColor: colorNewFromRGBA(0.3, 0.4, 0.6),
+        infLightColor: colorNewFromRGBA(0.48, 0.6, 1),
+        infLightRotX: 8576,
+        infLightRotY: 29952,
     };
     export const Night: BgInfo = {
         fileName: "bg_nig",
