@@ -27,6 +27,8 @@ const DEFAULT_STUN = [{ urls: 'stun:stun.l.google.com:19302' }];
 const FAST_MESSAGE_TYPES = new Set(['frame', 'input', 'ack', 'ping', 'pong']);
 const FAST_CHANNEL_MAX_BUFFERED = 256 * 1024;
 const CTRL_CHANNEL_MAX_BUFFERED = 1024 * 1024;
+const SIGNAL_PROTOCOL = 'wmb.v1';
+const SIGNAL_AUTH_PROTOCOL_PREFIX = 'auth.';
 const BINARY_PACKET_INPUT_BATCH = 1;
 const BINARY_PACKET_FRAME_BATCH = 2;
 
@@ -376,7 +378,8 @@ export class LobbyClient {
     onClose: () => void,
   ) {
     const ws = new WebSocket(
-      `${this.baseUrl.replace('http', 'ws')}/room/${roomId}?playerId=${playerId}&token=${encodeURIComponent(token)}`,
+      `${this.baseUrl.replace('http', 'ws')}/room/${roomId}?playerId=${playerId}`,
+      [SIGNAL_PROTOCOL, `${SIGNAL_AUTH_PROTOCOL_PREFIX}${token}`],
     );
     const pending: SignalMessage[] = [];
     ws.addEventListener('open', () => {
@@ -389,10 +392,25 @@ export class LobbyClient {
     });
     ws.addEventListener('message', (event) => {
       try {
-        const msg = JSON.parse(event.data) as SignalMessage;
-        if (msg?.type === 'signal') {
-          onMessage(msg);
+        const msg = JSON.parse(event.data) as Partial<SignalMessage>;
+        if (msg?.type !== 'signal' || !msg.payload || typeof msg.payload !== 'object') {
+          return;
         }
+        const from = Number(msg.from);
+        const toRaw = msg.to;
+        const to = toRaw === null ? null : Number(toRaw);
+        if (!Number.isFinite(from) || from <= 0) {
+          return;
+        }
+        if (to !== null && (!Number.isFinite(to) || to <= 0)) {
+          return;
+        }
+        onMessage({
+          type: 'signal',
+          from: Math.trunc(from),
+          to: to === null ? null : Math.trunc(to),
+          payload: msg.payload,
+        });
       } catch {
         // Ignore malformed.
       }

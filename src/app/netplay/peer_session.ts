@@ -216,15 +216,20 @@ export class PeerSessionController {
     this.deps.setLobbySignalReconnectFn(() => {
       this.deps.getLobbySignal()?.close();
       const signal = this.deps.lobbyClient.openSignal(room.roomId, room.hostId, playerToken, async (msg: any) => {
-        if (msg.to !== room.hostId) {
+        const from = Number(msg?.from);
+        if (!Number.isFinite(from) || from <= 0 || msg.to !== room.hostId || from === room.hostId) {
           return;
         }
+        if (!msg.payload || typeof msg.payload !== 'object') {
+          return;
+        }
+        const senderId = Math.trunc(from);
         if (msg.payload?.join) {
-          const offer = await createHostOffer(hostRelay, msg.from);
-          hostRelay.onSignal?.({ type: 'signal', from: room.hostId, to: msg.from, payload: { sdp: offer } });
+          const offer = await createHostOffer(hostRelay, senderId);
+          hostRelay.onSignal?.({ type: 'signal', from: room.hostId, to: senderId, payload: { sdp: offer } });
           return;
         }
-        await applyHostSignal(hostRelay, msg.from, msg.payload);
+        await applyHostSignal(hostRelay, senderId, msg.payload);
       }, () => {
         if (!this.deps.getLobbySignalShouldReconnect()) {
           return;
@@ -292,7 +297,10 @@ export class PeerSessionController {
     this.deps.setLobbySignalReconnectFn(() => {
       this.deps.getLobbySignal()?.close();
       const signal = this.deps.lobbyClient.openSignal(room.roomId, playerId, playerToken, async (msg: any) => {
-        if (msg.to !== playerId) {
+        if (msg.to !== playerId || msg.from !== room.hostId) {
+          return;
+        }
+        if (!msg.payload || typeof msg.payload !== 'object') {
           return;
         }
         await clientPeer.handleSignal(msg.payload);

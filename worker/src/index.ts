@@ -55,29 +55,50 @@ type LobbyState = {
 };
 
 const ROOM_TTL_MS = 1000 * 60 * 5;
-const PLAYER_JOIN_GRACE_MS = 1000 * 20;
+const PLAYER_JOIN_GRACE_MS = 1000 * 12;
 const PLAYER_CONNECTED_STALE_MS = 1000 * 35;
 const MAX_PLAYERS = 8;
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CREATE_RATE_LIMIT = { windowMs: 60_000, max: 10 };
 const JOIN_RATE_LIMIT = { windowMs: 60_000, max: 30 };
+const JOIN_PER_ROOM_RATE_LIMIT = { windowMs: 10_000, max: 8 };
+const MAX_PENDING_JOINERS_PER_ROOM = MAX_PLAYERS;
 const SIGNAL_MAX_MESSAGE_BYTES = 32 * 1024;
 const SIGNAL_RATE_WINDOW_MS = 1000;
 const SIGNAL_RATE_MAX_MESSAGES = 30;
 const SIGNAL_RATE_MAX_BYTES = 64 * 1024;
+const SIGNAL_PROTOCOL = "wmb.v1";
+const SIGNAL_AUTH_PROTOCOL_PREFIX = "auth.";
+const SMALL_JSON_BODY_MAX_BYTES = 16 * 1024;
+const MEDIUM_JSON_BODY_MAX_BYTES = 64 * 1024;
+const LARGE_JSON_BODY_MAX_BYTES = 512 * 1024;
+const utf8Encoder = new TextEncoder();
 
 type RateLimit = { count: number; resetAt: number };
 
-function getCorsOrigin(request: Request, env: Env): string | null {
-  const allowlist = env.ALLOWED_ORIGINS?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
-  if (allowlist.length === 0) {
-    return "*";
+function parseAllowedOrigins(env: Env): string[] {
+  return env.ALLOWED_ORIGINS?.split(",")
+    .map((entry) => entry.trim().replace(/\/+$/, ""))
+    .filter(Boolean) ?? [];
+}
+
+function isRequestOriginAllowed(request: Request, env: Env): boolean {
+  const allowlist = parseAllowedOrigins(env);
+  if (allowlist.length === 0 || allowlist.includes("*")) {
+    return true;
   }
   const origin = request.headers.get("origin");
   if (!origin) {
+    return true;
+  }
+  return allowlist.includes(origin);
+}
+
+function getCorsOrigin(request: Request, env: Env): string | null {
+  if (!isRequestOriginAllowed(request, env)) {
     return null;
   }
-  return allowlist.includes(origin) ? origin : null;
+  return request.headers.get("origin");
 }
 
 function jsonResponse(data: any, status = 200, origin: string | null = "*"): Response {
@@ -190,8 +211,31 @@ function parseAllowlistEnv(raw?: string | null): Array<{ packId: string; label: 
     });
 }
 
-function parseJson<T>(req: Request): Promise<T> {
-  return req.json() as Promise<T>;
+async function parseJson<T>(req: Request, maxBytes = MEDIUM_JSON_BODY_MAX_BYTES): Promise<T | null> {
+  const contentLengthRaw = req.headers.get("content-length");
+  if (contentLengthRaw) {
+    const contentLength = Number(contentLengthRaw);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      return null;
+    }
+  }
+  let raw = "";
+  try {
+    raw = await req.text();
+  } catch {
+    return null;
+  }
+  if (!raw.trim()) {
+    return {} as T;
+  }
+  if (utf8Encoder.encode(raw).byteLength > maxBytes) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
 }
 
 function randomCode(length = 6): string {
@@ -239,6 +283,50 @@ function randomPlayerId(existing: Set<number>): number {
 
 function playerKey(playerId: number): string {
   return String(playerId);
+}
+
+function hasOwnKey(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function getOwnRecordValue<T>(record: Record<string, T>, key: string): T | null {
+  if (!hasOwnKey(record as Record<string, unknown>, key)) {
+    return null;
+  }
+  return record[key];
+}
+
+function toNullProtoRecord<T>(input?: Record<string, T> | null): Record<string, T> {
+  const out = Object.create(null) as Record<string, T>;
+  if (!input || typeof input !== "object") {
+    return out;
+  }
+  for (const [key, value] of Object.entries(input)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function parseWebSocketProtocols(request: Request): string[] {
+  const raw = request.headers.get("sec-websocket-protocol") ?? "";
+  return raw.split(",").map((entry) => entry.trim()).filter(Boolean);
+}
+
+function extractSignalToken(request: Request, url: URL): string {
+  const protocols = parseWebSocketProtocols(request);
+  for (const protocol of protocols) {
+    if (!protocol.startsWith(SIGNAL_AUTH_PROTOCOL_PREFIX)) {
+      continue;
+    }
+    const token = protocol.slice(SIGNAL_AUTH_PROTOCOL_PREFIX.length);
+    if (/^[A-Za-z0-9_-]{16,256}$/.test(token)) {
+      return token;
+    }
+  }
+  return url.searchParams.get("token") ?? "";
 }
 
 async function ensureAllowlistSeed(db: D1Database, env: Env): Promise<void> {
@@ -318,6 +406,12 @@ function roomPlayerCount(room: RoomRecord, now = nowMs()): number {
   return Object.values(room.players ?? {}).filter((player) => playerOccupiesSlot(player, now)).length;
 }
 
+function roomPendingJoinCount(room: RoomRecord, now = nowMs()): number {
+  return Object.values(room.players ?? {}).filter((player) =>
+    !player.connected && (now - player.joinedAt) <= PLAYER_JOIN_GRACE_MS,
+  ).length;
+}
+
 function sanitizeSettings(input?: Partial<RoomSettings>): RoomSettings {
   const maxPlayers = clampInt(Number(input?.maxPlayers ?? MAX_PLAYERS), 1, MAX_PLAYERS);
   return {
@@ -389,7 +483,10 @@ function publicRoomInfo(room: RoomRecord) {
 export class Lobby implements DurableObject {
   private state: DurableObjectState;
   private env: Env;
-  private data: LobbyState = { rooms: {}, codes: {} };
+  private data: LobbyState = {
+    rooms: toNullProtoRecord<RoomRecord>(),
+    codes: toNullProtoRecord<string>(),
+  };
   private rateLimits = new Map<string, RateLimit>();
 
   constructor(state: DurableObjectState, env: Env) {
@@ -400,7 +497,12 @@ export class Lobby implements DurableObject {
   private async load(): Promise<void> {
     const stored = await this.state.storage.get<LobbyState>("lobby");
     if (stored) {
-      this.data = stored;
+      const rooms = toNullProtoRecord(stored.rooms);
+      const codes = toNullProtoRecord(stored.codes);
+      for (const room of Object.values(rooms)) {
+        room.players = toNullProtoRecord(room.players);
+      }
+      this.data = { rooms, codes };
     }
   }
 
@@ -479,6 +581,9 @@ export class Lobby implements DurableObject {
   }
 
   async fetch(request: Request): Promise<Response> {
+    if (!isRequestOriginAllowed(request, this.env)) {
+      return jsonResponse({ error: "forbidden" }, 403, null);
+    }
     await this.load();
     const origin = getCorsOrigin(request, this.env);
     const cleaned = this.cleanupExpired();
@@ -511,14 +616,17 @@ export class Lobby implements DurableObject {
       if (this.isRateLimited(`create:${ip}`, CREATE_RATE_LIMIT)) {
         return jsonResponse({ error: "rate_limited" }, 429, origin);
       }
-      const body = await parseJson<Partial<RoomRecord>>(request);
+      const body = await parseJson<Partial<RoomRecord>>(request, SMALL_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ error: "bad_request" }, 400, origin);
+      }
       const roomId = this.env.ROOM.newUniqueId().toString();
       const isPublic = !!body.isPublic;
       let roomCode: string | undefined;
       if (!isPublic) {
         for (let i = 0; i < 10; i += 1) {
           const code = randomCode(6);
-          if (!this.data.codes[code]) {
+          if (!hasOwnKey(this.data.codes, code)) {
             roomCode = code;
             this.data.codes[code] = roomId;
             break;
@@ -533,6 +641,14 @@ export class Lobby implements DurableObject {
       const hostToken = randomToken();
       const hostPlayerToken = randomToken();
       const createdAt = nowMs();
+      const players = toNullProtoRecord<PlayerRecord>();
+      players[playerKey(hostId)] = {
+        playerId: hostId,
+        token: hostPlayerToken,
+        joinedAt: createdAt,
+        lastActiveAt: createdAt,
+        connected: false,
+      };
       const record: RoomRecord = {
         roomId,
         roomCode,
@@ -550,15 +666,7 @@ export class Lobby implements DurableObject {
         }),
         createdAt,
         lastActiveAt: createdAt,
-        players: {
-          [playerKey(hostId)]: {
-            playerId: hostId,
-            token: hostPlayerToken,
-            joinedAt: createdAt,
-            lastActiveAt: createdAt,
-            connected: false,
-          },
-        },
+        players,
       };
       this.data.rooms[roomId] = record;
       await this.save();
@@ -580,14 +688,21 @@ export class Lobby implements DurableObject {
         roomId?: string;
         playerId?: number;
         token?: string;
-      }>(request);
+      }>(request, SMALL_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ error: "bad_request" }, 400, origin);
+      }
       const roomCode = body.roomCode ? body.roomCode.trim().toUpperCase() : null;
-      const roomId = body.roomId ?? (roomCode ? this.data.codes[roomCode] : null);
-      if (!roomId || !this.data.rooms[roomId]) {
+      const roomIdFromCode = roomCode ? getOwnRecordValue(this.data.codes, roomCode) : null;
+      const roomId = typeof body.roomId === "string" ? body.roomId : roomIdFromCode;
+      const room = roomId ? getOwnRecordValue(this.data.rooms, roomId) : null;
+      if (!roomId || !room) {
         return jsonResponse({ error: "room_not_found" }, 404, origin);
       }
-      const room = this.data.rooms[roomId];
-      room.players = room.players ?? {};
+      if (this.isRateLimited(`join_room:${roomId}:${ip}`, JOIN_PER_ROOM_RATE_LIMIT)) {
+        return jsonResponse({ error: "rate_limited" }, 429, origin);
+      }
+      room.players = toNullProtoRecord(room.players);
       room.settings = sanitizeSettings(room.settings);
       const requestedPlayerId = Number(body.playerId ?? 0);
       const requestedToken = typeof body.token === "string" ? body.token : null;
@@ -613,14 +728,18 @@ export class Lobby implements DurableObject {
       if (room.settings.locked) {
         return jsonResponse({ error: "room_locked" }, 403, origin);
       }
-      const playerCount = roomPlayerCount(room);
+      const now = nowMs();
+      if (roomPendingJoinCount(room, now) >= MAX_PENDING_JOINERS_PER_ROOM) {
+        return jsonResponse({ error: "room_busy" }, 429, origin);
+      }
+      const playerCount = roomPlayerCount(room, now);
       if (playerCount >= room.settings.maxPlayers) {
         return jsonResponse({ error: "room_full" }, 409, origin);
       }
       const existingIds = new Set<number>(Object.keys(room.players ?? {}).map((id) => Number(id)));
       const playerId = randomPlayerId(existingIds);
       const playerToken = randomToken();
-      const joinedAt = nowMs();
+      const joinedAt = now;
       const joinKey = playerKey(playerId);
       room.players[joinKey] = {
         playerId,
@@ -629,7 +748,7 @@ export class Lobby implements DurableObject {
         lastActiveAt: joinedAt,
         connected: false,
       };
-      room.lastActiveAt = nowMs();
+      room.lastActiveAt = now;
       this.data.rooms[roomId] = room;
       await this.save();
       return jsonResponse({ room: publicRoomInfo(room), playerId, playerToken }, 200, origin);
@@ -642,13 +761,16 @@ export class Lobby implements DurableObject {
         token?: string;
         meta?: Partial<RoomMeta>;
         settings?: Partial<RoomSettings>;
-      }>(request);
+      }>(request, SMALL_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ ok: false, error: "bad_request" }, 400, origin);
+      }
       const roomId = body.roomId ?? null;
-      if (!roomId || !this.data.rooms[roomId]) {
+      const room = roomId ? getOwnRecordValue(this.data.rooms, roomId) : null;
+      if (!roomId || !room) {
         return jsonResponse({ ok: false, error: "room_not_found" }, 404, origin);
       }
-      const room = this.data.rooms[roomId];
-      room.players = room.players ?? {};
+      room.players = toNullProtoRecord(room.players);
       const playerId = Number(body.playerId ?? 0);
       const token = body.token ?? "";
       const player = room.players?.[playerKey(playerId)];
@@ -674,13 +796,16 @@ export class Lobby implements DurableObject {
     }
 
     if (request.method === "POST" && url.pathname === "/rooms/close") {
-      const body = await parseJson<{ roomId?: string; hostToken?: string }>(request);
+      const body = await parseJson<{ roomId?: string; hostToken?: string }>(request, SMALL_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ ok: false, error: "bad_request" }, 400, origin);
+      }
       const roomId = body.roomId ?? null;
-      if (!roomId || !this.data.rooms[roomId]) {
+      const room = roomId ? getOwnRecordValue(this.data.rooms, roomId) : null;
+      if (!roomId || !room) {
         return jsonResponse({ ok: false, error: "room_not_found" }, 404, origin);
       }
-      const room = this.data.rooms[roomId];
-      room.players = room.players ?? {};
+      room.players = toNullProtoRecord(room.players);
       if (body.hostToken !== room.hostToken) {
         return jsonResponse({ ok: false, error: "unauthorized" }, 401, origin);
       }
@@ -693,13 +818,16 @@ export class Lobby implements DurableObject {
     }
 
     if (request.method === "POST" && url.pathname === "/rooms/verify") {
-      const body = await parseJson<{ roomId?: string; playerId?: number; token?: string }>(request);
+      const body = await parseJson<{ roomId?: string; playerId?: number; token?: string }>(request, SMALL_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ ok: false, error: "bad_request" }, 400, origin);
+      }
       const roomId = body.roomId ?? null;
-      if (!roomId || !this.data.rooms[roomId]) {
+      const room = roomId ? getOwnRecordValue(this.data.rooms, roomId) : null;
+      if (!roomId || !room) {
         return jsonResponse({ ok: false, error: "room_not_found" }, 404, origin);
       }
-      const room = this.data.rooms[roomId];
-      room.players = room.players ?? {};
+      room.players = toNullProtoRecord(room.players);
       const playerId = Number(body.playerId ?? 0);
       const token = body.token ?? "";
       const player = room.players?.[playerKey(playerId)];
@@ -717,13 +845,16 @@ export class Lobby implements DurableObject {
     }
 
     if (request.method === "POST" && url.pathname === "/rooms/kick") {
-      const body = await parseJson<{ roomId?: string; hostToken?: string; playerId?: number }>(request);
+      const body = await parseJson<{ roomId?: string; hostToken?: string; playerId?: number }>(request, SMALL_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ ok: false, error: "bad_request" }, 400, origin);
+      }
       const roomId = body.roomId ?? null;
-      if (!roomId || !this.data.rooms[roomId]) {
+      const room = roomId ? getOwnRecordValue(this.data.rooms, roomId) : null;
+      if (!roomId || !room) {
         return jsonResponse({ ok: false, error: "room_not_found" }, 404, origin);
       }
-      const room = this.data.rooms[roomId];
-      room.players = room.players ?? {};
+      room.players = toNullProtoRecord(room.players);
       if (body.hostToken !== room.hostToken) {
         return jsonResponse({ ok: false, error: "unauthorized" }, 401, origin);
       }
@@ -745,13 +876,16 @@ export class Lobby implements DurableObject {
     }
 
     if (request.method === "POST" && url.pathname === "/rooms/leave") {
-      const body = await parseJson<{ roomId?: string; playerId?: number; token?: string }>(request);
+      const body = await parseJson<{ roomId?: string; playerId?: number; token?: string }>(request, SMALL_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ ok: false, error: "bad_request" }, 400, origin);
+      }
       const roomId = body.roomId ?? null;
-      if (!roomId || !this.data.rooms[roomId]) {
+      const room = roomId ? getOwnRecordValue(this.data.rooms, roomId) : null;
+      if (!roomId || !room) {
         return jsonResponse({ ok: false, error: "room_not_found" }, 404, origin);
       }
-      const room = this.data.rooms[roomId];
-      room.players = room.players ?? {};
+      room.players = toNullProtoRecord(room.players);
       const playerId = Number(body.playerId ?? 0);
       const token = body.token ?? "";
       const player = room.players?.[playerKey(playerId)];
@@ -773,13 +907,16 @@ export class Lobby implements DurableObject {
     }
 
     if (request.method === "POST" && url.pathname === "/rooms/disconnect") {
-      const body = await parseJson<{ roomId?: string; playerId?: number; token?: string }>(request);
+      const body = await parseJson<{ roomId?: string; playerId?: number; token?: string }>(request, SMALL_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ ok: false, error: "bad_request" }, 400, origin);
+      }
       const roomId = body.roomId ?? null;
-      if (!roomId || !this.data.rooms[roomId]) {
+      const room = roomId ? getOwnRecordValue(this.data.rooms, roomId) : null;
+      if (!roomId || !room) {
         return jsonResponse({ ok: false, error: "room_not_found" }, 404, origin);
       }
-      const room = this.data.rooms[roomId];
-      room.players = room.players ?? {};
+      room.players = toNullProtoRecord(room.players);
       const playerId = Number(body.playerId ?? 0);
       const token = body.token ?? "";
       const player = room.players?.[playerKey(playerId)];
@@ -893,20 +1030,30 @@ export class Room implements DurableObject {
     return true;
   }
 
+  private closeExistingConnectionsForPlayer(playerId: number): void {
+    for (const [connId, conn] of this.connections.entries()) {
+      if (conn.playerId !== playerId) {
+        continue;
+      }
+      this.connections.delete(connId);
+      try {
+        conn.socket.close(1000, "Replaced");
+      } catch {
+        // Ignore.
+      }
+    }
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.headers.get("upgrade") !== "websocket") {
       return new Response("Expected websocket", { status: 400 });
     }
-    const allowlist = this.env.ALLOWED_ORIGINS?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
-    if (allowlist.length > 0) {
-      const origin = request.headers.get("origin");
-      if (!origin || !allowlist.includes(origin)) {
-        return new Response("Forbidden", { status: 403 });
-      }
+    if (!isRequestOriginAllowed(request, this.env)) {
+      return new Response("Forbidden", { status: 403 });
     }
     const playerId = Number(url.searchParams.get("playerId") ?? "0");
-    const token = url.searchParams.get("token") ?? "";
+    const token = extractSignalToken(request, url);
     if (!Number.isFinite(playerId) || playerId <= 0 || !token) {
       return new Response("Unauthorized", { status: 401 });
     }
@@ -919,6 +1066,7 @@ export class Room implements DurableObject {
     server.accept();
 
     const connId = crypto.randomUUID();
+    this.closeExistingConnectionsForPlayer(playerId);
     this.connections.set(connId, {
       socket: server,
       playerId,
@@ -930,15 +1078,11 @@ export class Room implements DurableObject {
 
     server.addEventListener("message", (event) => {
       const payload = event.data;
-      let size = 0;
-      if (typeof payload === "string") {
-        size = payload.length;
-      } else if (payload instanceof ArrayBuffer) {
-        size = payload.byteLength;
-      } else {
+      if (typeof payload !== "string") {
         server.close(1003, "Unsupported payload");
         return;
       }
+      const size = payload.length;
       if (size > SIGNAL_MAX_MESSAGE_BYTES) {
         server.close(1009, "Message too large");
         return;
@@ -948,12 +1092,39 @@ export class Room implements DurableObject {
         server.close(1011, "Rate limit");
         return;
       }
+      let parsed: { type?: string; to?: number | null; payload?: unknown } | null = null;
+      try {
+        parsed = JSON.parse(payload) as { type?: string; to?: number | null; payload?: unknown };
+      } catch {
+        server.close(1003, "Malformed payload");
+        return;
+      }
+      if (!parsed || parsed.type !== "signal") {
+        return;
+      }
+      if (!parsed.payload || typeof parsed.payload !== "object") {
+        return;
+      }
+      const candidate = Number(parsed.to);
+      if (!Number.isFinite(candidate) || candidate <= 0) {
+        return;
+      }
+      const to = Math.trunc(candidate);
+      const outbound = JSON.stringify({
+        type: "signal",
+        from: sender.playerId,
+        to,
+        payload: parsed.payload,
+      });
       for (const [id, conn] of this.connections.entries()) {
         if (id === connId) {
           continue;
         }
+        if (conn.playerId !== to) {
+          continue;
+        }
         try {
-          conn.socket.send(payload);
+          conn.socket.send(outbound);
         } catch {
           // Ignore.
         }
@@ -971,7 +1142,11 @@ export class Room implements DurableObject {
       }
     });
 
-    return new Response(null, { status: 101, webSocket: client });
+    const offeredProtocols = parseWebSocketProtocols(request);
+    const headers = offeredProtocols.includes(SIGNAL_PROTOCOL)
+      ? { "sec-websocket-protocol": SIGNAL_PROTOCOL }
+      : undefined;
+    return new Response(null, { status: 101, webSocket: client, headers });
   }
 }
 
@@ -1019,6 +1194,9 @@ async function logAdminAction(
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    if (!isRequestOriginAllowed(request, env)) {
+      return jsonResponse({ error: "forbidden" }, 403, null);
+    }
     const url = new URL(request.url);
     const origin = getCorsOrigin(request, env);
 
@@ -1041,7 +1219,10 @@ export default {
     }
 
     if (url.pathname === "/leaderboards/submit" && request.method === "POST") {
-      const body = await parseJson<any>(request);
+      const body = await parseJson<any>(request, LARGE_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ error: "bad_request" }, 400, origin);
+      }
       const type = body?.type === "course" ? "course" : "stage";
       const playerId = typeof body?.playerId === "string" ? body.playerId.slice(0, 64) : "";
       const displayName = normalizeName(body?.displayName);
@@ -1202,7 +1383,10 @@ export default {
       if (!secret || !hash) {
         return jsonResponse({ error: "admin_unconfigured" }, 500, origin);
       }
-      const body = await parseJson<any>(request);
+      const body = await parseJson<any>(request, SMALL_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ error: "bad_request" }, 400, origin);
+      }
       const password = typeof body?.password === "string" ? body.password : "";
       const candidateHash = await sha256Hex(password);
       if (candidateHash !== hash) {
@@ -1249,7 +1433,10 @@ export default {
     }
 
     if (url.pathname === "/admin/allowlist" && request.method === "PUT") {
-      const body = await parseJson<any>(request);
+      const body = await parseJson<any>(request, MEDIUM_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ error: "bad_request" }, 400, origin);
+      }
       const packs = Array.isArray(body?.packs) ? body.packs : [];
       const normalized = packs
         .map((entry) => ({
@@ -1319,7 +1506,10 @@ export default {
       if (!submissionId || (action !== "verify" && action !== "reject")) {
         return jsonResponse({ error: "invalid_request" }, 400, origin);
       }
-      const body = await parseJson<any>(request);
+      const body = await parseJson<any>(request, MEDIUM_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ error: "bad_request" }, 400, origin);
+      }
       const now = nowMs();
       if (action === "reject") {
         await env.LEADERBOARDS_DB.prepare(
