@@ -580,6 +580,23 @@ export class Lobby implements DurableObject {
     return false;
   }
 
+  private async revokeRoomPlayerSignal(roomId: string, player: PlayerRecord): Promise<void> {
+    if (!roomId || !player?.playerId || !player?.token) {
+      return;
+    }
+    try {
+      const roomObjId = this.env.ROOM.idFromString(roomId);
+      const stub = this.env.ROOM.get(roomObjId);
+      await stub.fetch("https://room.internal/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ playerId: player.playerId, token: player.token }),
+      });
+    } catch {
+      // Ignore revocation failures; lobby state remains authoritative.
+    }
+  }
+
   async fetch(request: Request): Promise<Response> {
     if (!isRequestOriginAllowed(request, this.env)) {
       return jsonResponse({ error: "forbidden" }, 403, null);
@@ -865,13 +882,15 @@ export class Lobby implements DurableObject {
       if (playerId === room.hostId) {
         return jsonResponse({ ok: false, error: "cannot_kick_host" }, 400, origin);
       }
-      if (!room.players?.[playerKey(playerId)]) {
+      const kickedPlayer = room.players?.[playerKey(playerId)];
+      if (!kickedPlayer) {
         return jsonResponse({ ok: false, error: "player_not_found" }, 404, origin);
       }
       delete room.players[playerKey(playerId)];
       room.lastActiveAt = nowMs();
       this.data.rooms[roomId] = room;
       await this.save();
+      await this.revokeRoomPlayerSignal(roomId, kickedPlayer);
       return jsonResponse({ ok: true }, 200, origin);
     }
 
@@ -1046,6 +1065,29 @@ export class Room implements DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/revoke") {
+      const body = await parseJson<{ playerId?: number; token?: string }>(request, SMALL_JSON_BODY_MAX_BYTES);
+      if (!body) {
+        return jsonResponse({ ok: false, error: "bad_request" }, 400, null);
+      }
+      const playerId = Number(body.playerId ?? 0);
+      const token = typeof body.token === "string" ? body.token : "";
+      if (!Number.isFinite(playerId) || playerId <= 0 || !token) {
+        return jsonResponse({ ok: false, error: "bad_request" }, 400, null);
+      }
+      for (const [connId, conn] of this.connections.entries()) {
+        if (conn.playerId !== Math.trunc(playerId) || conn.token !== token) {
+          continue;
+        }
+        this.connections.delete(connId);
+        try {
+          conn.socket.close(4001, "Revoked");
+        } catch {
+          // Ignore.
+        }
+      }
+      return jsonResponse({ ok: true }, 200, null);
+    }
     if (request.headers.get("upgrade") !== "websocket") {
       return new Response("Expected websocket", { status: 400 });
     }

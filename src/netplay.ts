@@ -29,8 +29,44 @@ const FAST_CHANNEL_MAX_BUFFERED = 256 * 1024;
 const CTRL_CHANNEL_MAX_BUFFERED = 1024 * 1024;
 const SIGNAL_PROTOCOL = 'wmb.v1';
 const SIGNAL_AUTH_PROTOCOL_PREFIX = 'auth.';
+const CLIENT_SIGNAL_MAX_MESSAGE_BYTES = 256 * 1024;
+const CLIENT_SIGNAL_RATE_WINDOW_MS = 1000;
+const CLIENT_SIGNAL_RATE_MAX_MESSAGES = 180;
+const CLIENT_SIGNAL_RATE_MAX_BYTES = 512 * 1024;
+const HOST_SIGNAL_MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
+const HOST_SIGNAL_RATE_WINDOW_MS = 1000;
+const HOST_SIGNAL_RATE_MAX_MESSAGES = 240;
+const HOST_SIGNAL_RATE_MAX_BYTES = 4 * 1024 * 1024;
 const BINARY_PACKET_INPUT_BATCH = 1;
 const BINARY_PACKET_FRAME_BATCH = 2;
+const CLIENT_TO_HOST_TYPES = new Set([
+  'input',
+  'ack',
+  'ping',
+  'stage_ready',
+  'snapshot_request',
+  'player_join',
+  'player_leave',
+  'player_profile',
+  'chat',
+]);
+const HOST_TO_CLIENT_TYPES = new Set([
+  'input',
+  'ack',
+  'pong',
+  'stage_sync',
+  'frame',
+  'snapshot',
+  'start',
+  'player_join',
+  'player_leave',
+  'room_update',
+  'player_profile',
+  'chat',
+  'kick',
+  'match_end',
+]);
+const utf8Encoder = new TextEncoder();
 
 type InputBatchEntry = {
   frame: number;
@@ -46,6 +82,12 @@ type DecodedInputBatch = {
   stageSeq: number;
   lastAck: number;
   entries: InputBatchEntry[];
+};
+
+type IngressWindow = {
+  windowStart: number;
+  windowCount: number;
+  windowBytes: number;
 };
 
 function clampI8(value: number) {
@@ -267,6 +309,27 @@ function isFastMessage(msg: { type: string }) {
   return FAST_MESSAGE_TYPES.has(msg.type);
 }
 
+function updateIngressWindow(
+  window: IngressWindow,
+  now: number,
+  size: number,
+  windowMs: number,
+  maxMessages: number,
+  maxBytes: number,
+) {
+  if ((now - window.windowStart) >= windowMs) {
+    window.windowStart = now;
+    window.windowCount = 0;
+    window.windowBytes = 0;
+  }
+  window.windowCount += 1;
+  window.windowBytes += size;
+  if (window.windowCount > maxMessages || window.windowBytes > maxBytes) {
+    return false;
+  }
+  return true;
+}
+
 function getChannelRole(label: string) {
   return label === 'fast' ? 'fast' : 'ctrl';
 }
@@ -435,8 +498,29 @@ export class HostRelay {
   private channels = new Map<number, { ctrl?: RTCDataChannel; fast?: RTCDataChannel }>();
   private connected = new Set<number>();
   private pendingIce = new Map<number, RTCIceCandidateInit[]>();
+  private ingressWindows = new Map<number, IngressWindow>();
+  private disconnecting = new Set<number>();
 
   constructor(private onMessage: (playerId: number, msg: ClientToHostMessage) => void) {}
+
+  private shouldAcceptIngress(playerId: number, size: number) {
+    const now = performance.now();
+    const window = this.ingressWindows.get(playerId) ?? {
+      windowStart: now,
+      windowCount: 0,
+      windowBytes: 0,
+    };
+    const accepted = updateIngressWindow(
+      window,
+      now,
+      size,
+      CLIENT_SIGNAL_RATE_WINDOW_MS,
+      CLIENT_SIGNAL_RATE_MAX_MESSAGES,
+      CLIENT_SIGNAL_RATE_MAX_BYTES,
+    );
+    this.ingressWindows.set(playerId, window);
+    return accepted;
+  }
 
   getPeer(playerId: number): RTCPeerConnection {
     const existing = this.peers.get(playerId);
@@ -471,6 +555,14 @@ export class HostRelay {
     channel.addEventListener('message', (event) => {
       const binary = asArrayBuffer(event.data);
       if (binary) {
+        if (role === 'fast' && !this.connected.has(playerId)) {
+          return;
+        }
+        const size = binary.byteLength;
+        if (size > CLIENT_SIGNAL_MAX_MESSAGE_BYTES || !this.shouldAcceptIngress(playerId, size)) {
+          this.disconnect(playerId);
+          return;
+        }
         const packet = decodeInputBatchPacket(binary);
         if (!packet) {
           return;
@@ -491,9 +583,22 @@ export class HostRelay {
       if (typeof event.data !== 'string') {
         return;
       }
+      if (role === 'fast' && !this.connected.has(playerId)) {
+        return;
+      }
+      const size = utf8Encoder.encode(event.data).byteLength;
+      if (size > CLIENT_SIGNAL_MAX_MESSAGE_BYTES || !this.shouldAcceptIngress(playerId, size)) {
+        this.disconnect(playerId);
+        return;
+      }
       try {
         const msg = JSON.parse(event.data) as ClientToHostMessage;
-        if (msg?.type) {
+        if (
+          msg
+          && typeof msg === 'object'
+          && typeof (msg as { type?: unknown }).type === 'string'
+          && CLIENT_TO_HOST_TYPES.has((msg as { type: string }).type)
+        ) {
           this.onMessage(playerId, msg);
         }
       } catch {
@@ -508,10 +613,7 @@ export class HostRelay {
       }
       const ctrl = current?.ctrl;
       if (role === 'ctrl' || !ctrl || ctrl.readyState === 'closed' || ctrl.readyState === 'closing') {
-        if (this.connected.has(playerId)) {
-          this.connected.delete(playerId);
-          this.onDisconnect?.(playerId);
-        }
+        this.disconnect(playerId);
       }
     });
   }
@@ -598,36 +700,48 @@ export class HostRelay {
     this.channels.clear();
     this.peers.clear();
     this.connected.clear();
+    this.pendingIce.clear();
+    this.ingressWindows.clear();
+    this.disconnecting.clear();
   }
 
   disconnect(playerId: number) {
+    if (this.disconnecting.has(playerId)) {
+      return;
+    }
+    this.disconnecting.add(playerId);
     const entry = this.channels.get(playerId);
-    if (entry) {
-      for (const channel of [entry.ctrl, entry.fast]) {
-        if (!channel) {
-          continue;
+    try {
+      if (entry) {
+        for (const channel of [entry.ctrl, entry.fast]) {
+          if (!channel) {
+            continue;
+          }
+          try {
+            channel.close();
+          } catch {
+            // Ignore.
+          }
         }
+      }
+      const peer = this.peers.get(playerId);
+      if (peer) {
         try {
-          channel.close();
+          peer.close();
         } catch {
           // Ignore.
         }
       }
-    }
-    const peer = this.peers.get(playerId);
-    if (peer) {
-      try {
-        peer.close();
-      } catch {
-        // Ignore.
+      this.channels.delete(playerId);
+      this.peers.delete(playerId);
+      this.pendingIce.delete(playerId);
+      this.ingressWindows.delete(playerId);
+      if (this.connected.has(playerId)) {
+        this.connected.delete(playerId);
+        this.onDisconnect?.(playerId);
       }
-    }
-    this.channels.delete(playerId);
-    this.peers.delete(playerId);
-    this.pendingIce.delete(playerId);
-    if (this.connected.has(playerId)) {
-      this.connected.delete(playerId);
-      this.onDisconnect?.(playerId);
+    } finally {
+      this.disconnecting.delete(playerId);
     }
   }
 
@@ -654,8 +768,24 @@ export class ClientPeer {
   private ctrlChannel: RTCDataChannel | null = null;
   private fastChannel: RTCDataChannel | null = null;
   private pendingIce: RTCIceCandidateInit[] = [];
+  private ingressWindow: IngressWindow = {
+    windowStart: performance.now(),
+    windowCount: 0,
+    windowBytes: 0,
+  };
 
   constructor(private onMessage: (msg: HostToClientMessage) => void) {}
+
+  private shouldAcceptIngress(size: number) {
+    return updateIngressWindow(
+      this.ingressWindow,
+      performance.now(),
+      size,
+      HOST_SIGNAL_RATE_WINDOW_MS,
+      HOST_SIGNAL_RATE_MAX_MESSAGES,
+      HOST_SIGNAL_RATE_MAX_BYTES,
+    );
+  }
 
   private attachChannel(channel: RTCDataChannel) {
     const role = getChannelRole(channel.label);
@@ -673,6 +803,11 @@ export class ClientPeer {
     channel.addEventListener('message', (event) => {
       const binary = asArrayBuffer(event.data);
       if (binary) {
+        const size = binary.byteLength;
+        if (size > HOST_SIGNAL_MAX_MESSAGE_BYTES || !this.shouldAcceptIngress(size)) {
+          this.close();
+          return;
+        }
         const frames = decodeFrameBatchPacket(binary);
         if (!frames) {
           return;
@@ -685,9 +820,21 @@ export class ClientPeer {
       if (typeof event.data !== 'string') {
         return;
       }
+      const size = utf8Encoder.encode(event.data).byteLength;
+      if (size > HOST_SIGNAL_MAX_MESSAGE_BYTES || !this.shouldAcceptIngress(size)) {
+        this.close();
+        return;
+      }
       try {
         const msg = JSON.parse(event.data) as HostToClientMessage;
-        this.onMessage(msg);
+        if (
+          msg
+          && typeof msg === 'object'
+          && typeof (msg as { type?: unknown }).type === 'string'
+          && HOST_TO_CLIENT_TYPES.has((msg as { type: string }).type)
+        ) {
+          this.onMessage(msg);
+        }
       } catch {
         // Ignore malformed.
       }
@@ -774,6 +921,11 @@ export class ClientPeer {
     this.fastChannel = null;
     this.pc = null;
     this.pendingIce = [];
+    this.ingressWindow = {
+      windowStart: performance.now(),
+      windowCount: 0,
+      windowBytes: 0,
+    };
   }
 
   async handleSignal(payload: any) {
