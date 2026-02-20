@@ -23,6 +23,7 @@ type RuntimeConstants = {
   snapshotCooldownMs: number;
   hostSnapshotBehindFrames: number;
   hostSnapshotCooldownMs: number;
+  clientInactivityTimeoutMs: number;
 };
 
 type RuntimeDeps = {
@@ -47,6 +48,7 @@ type RuntimeDeps = {
   requestSnapshot: (reason: 'mismatch' | 'lag', frame?: number, force?: boolean) => void;
   hostApplyPendingRollback: () => void;
   sendSnapshotToClient: (playerId: number, frame?: number) => void;
+  rejectHostConnection: (playerId: number, reason?: string) => void;
   maybeResendStageReady: (nowMs: number) => void;
   maybeForceStageSync: (nowMs: number) => void;
   getAuthoritativeHashFrame: (state: any) => number | null;
@@ -186,6 +188,30 @@ export class NetplayRuntimeController {
       }
       clientState.lastSnapshotMs = nowMs;
       this.deps.sendSnapshotToClient(playerId, currentFrame);
+    }
+  }
+
+  private hostDisconnectInactiveClients(nowMs: number) {
+    const state = this.deps.getNetplayState();
+    if (!state || state.role !== 'host') {
+      return;
+    }
+    const timeoutMs = this.deps.constants.clientInactivityTimeoutMs;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return;
+    }
+    for (const [playerId, clientState] of state.clientStates.entries()) {
+      if (clientState.timeoutKickSentMs !== null && clientState.timeoutKickSentMs !== undefined) {
+        continue;
+      }
+      if (!Number.isFinite(clientState.lastInboundMessageMs)) {
+        clientState.lastInboundMessageMs = nowMs;
+      }
+      if ((nowMs - clientState.lastInboundMessageMs) < timeoutMs) {
+        continue;
+      }
+      clientState.timeoutKickSentMs = nowMs;
+      this.deps.rejectHostConnection(playerId, `Disconnected: timed out (${Math.round(timeoutMs / 1000)}s no messages)`);
     }
   }
 
@@ -329,6 +355,9 @@ export class NetplayRuntimeController {
       return;
     }
     const nowMs = performance.now();
+    if (state.role === 'host') {
+      this.hostDisconnectInactiveClients(nowMs);
+    }
     if (state.role === 'client' && state.awaitingStageSync) {
       this.deps.maybeResendStageReady(nowMs);
       this.deps.game.accumulator = 0;

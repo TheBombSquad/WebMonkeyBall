@@ -141,6 +141,7 @@ export function createMainControllerGraph(args: any) {
     NETPLAY_LAG_FUSE_FRAMES,
     NETPLAY_LAG_FUSE_MS,
     NETPLAY_HOST_SNAPSHOT_BEHIND_FRAMES,
+    NETPLAY_CLIENT_INACTIVITY_TIMEOUT_MS,
     NETPLAY_CLIENT_MAX_EXTRA_LEAD,
     NETPLAY_STAGE_READY_RESEND_MS,
     NETPLAY_STAGE_READY_TIMEOUT_MS,
@@ -799,6 +800,9 @@ netplayRuntime = new NetplayRuntimeController({
   sendSnapshotToClient: (playerId, frame) => {
     snapshotFlow?.sendSnapshotToClient(playerId, frame);
   },
+  rejectHostConnection: (playerId, reason) => {
+    peerSession.rejectHostConnection(playerId, reason);
+  },
   maybeResendStageReady: (nowMs) => {
     netplaySync?.maybeResendStageReady(nowMs);
   },
@@ -832,6 +836,7 @@ netplayRuntime = new NetplayRuntimeController({
     snapshotCooldownMs: NETPLAY_SNAPSHOT_COOLDOWN_MS,
     hostSnapshotBehindFrames: NETPLAY_HOST_SNAPSHOT_BEHIND_FRAMES,
     hostSnapshotCooldownMs: NETPLAY_HOST_SNAPSHOT_COOLDOWN_MS,
+    clientInactivityTimeoutMs: NETPLAY_CLIENT_INACTIVITY_TIMEOUT_MS,
   },
 });
 stageFlow = new StageFlowController({

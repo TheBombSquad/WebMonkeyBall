@@ -72,6 +72,7 @@ export const netplayConstants = {
   hostStallMs: 3000,
   hostSnapshotBehindFrames: 120,
   hostSnapshotCooldownMs: 1500,
+  clientInactivityTimeoutMs: 8000,
   snapshotMismatchCooldownMs: 250,
   maxInputAhead: 60,
   maxInputBehind: 60,

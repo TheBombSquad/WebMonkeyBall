@@ -918,6 +918,7 @@ export function runMainApp() {
         NETPLAY_LAG_FUSE_FRAMES: netplayConstants.lagFuseFrames,
         NETPLAY_LAG_FUSE_MS: netplayConstants.lagFuseMs,
         NETPLAY_HOST_SNAPSHOT_BEHIND_FRAMES: netplayConstants.hostSnapshotBehindFrames,
+        NETPLAY_CLIENT_INACTIVITY_TIMEOUT_MS: netplayConstants.clientInactivityTimeoutMs,
         NETPLAY_CLIENT_MAX_EXTRA_LEAD: netplayConstants.clientMaxExtraLead,
         NETPLAY_STAGE_READY_RESEND_MS: netplayConstants.stageReadyResendMs,
         NETPLAY_STAGE_READY_TIMEOUT_MS: netplayConstants.stageReadyTimeoutMs,
@@ -953,6 +954,8 @@ export function runMainApp() {
     lastAckedClientInput: number;
     lastSnapshotMs: number | null;
     lastSnapshotRequestMs: number | null;
+    lastInboundMessageMs: number;
+    timeoutKickSentMs: number | null;
   };
   type NetplayState = {
     role: NetplayRole;

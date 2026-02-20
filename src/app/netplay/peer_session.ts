@@ -17,6 +17,8 @@ type NetplayState = {
     lastAckedClientInput: number;
     lastSnapshotMs: number | null;
     lastSnapshotRequestMs: number | null;
+    lastInboundMessageMs: number;
+    timeoutKickSentMs: number | null;
   }>;
   currentCourse: any;
   currentGameSource: GameSource | null;
@@ -142,6 +144,8 @@ export class PeerSessionController {
           lastAckedClientInput: -1,
           lastSnapshotMs: null,
           lastSnapshotRequestMs: null,
+          lastInboundMessageMs: performance.now(),
+          timeoutKickSentMs: null,
         });
       }
       const joinAsSpectator = this.deps.shouldJoinAsSpectator();

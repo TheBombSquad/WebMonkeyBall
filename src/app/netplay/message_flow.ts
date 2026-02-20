@@ -421,10 +421,7 @@ export class NetplayMessageFlowController {
     if (!state) {
       return;
     }
-    const msgStageSeq = (msg as { stageSeq?: number }).stageSeq;
-    if (msgStageSeq !== undefined && msgStageSeq !== state.stageSeq) {
-      return;
-    }
+    const nowMs = performance.now();
     let clientState = state.clientStates.get(playerId);
     if (!clientState) {
       clientState = {
@@ -432,8 +429,21 @@ export class NetplayMessageFlowController {
         lastAckedClientInput: -1,
         lastSnapshotMs: null,
         lastSnapshotRequestMs: null,
+        lastInboundMessageMs: nowMs,
+        timeoutKickSentMs: null,
       };
       state.clientStates.set(playerId, clientState);
+    }
+    if (!Number.isFinite(clientState.lastInboundMessageMs)) {
+      clientState.lastInboundMessageMs = nowMs;
+    }
+    if (clientState.timeoutKickSentMs === undefined) {
+      clientState.timeoutKickSentMs = null;
+    }
+    clientState.lastInboundMessageMs = nowMs;
+    const msgStageSeq = (msg as { stageSeq?: number }).stageSeq;
+    if (msgStageSeq !== undefined && msgStageSeq !== state.stageSeq) {
+      return;
     }
     if (!this.deps.game.players.some((player) => player.id === playerId)) {
       if (this.deps.game.players.length >= this.deps.game.maxPlayers) {
