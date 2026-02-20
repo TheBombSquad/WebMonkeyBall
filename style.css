@@ -6,6 +6,9 @@
   --muted: #b7b7c2;
   --accent: #ff9f1c;
   --panel: rgba(12, 12, 18, 0.85);
+  --pause-text-dim: #8a861d;
+  --pause-text-hot: #ffe84d;
+  --pause-text-shadow: #242100;
 }
 
 * {
@@ -148,6 +151,15 @@ body.gameplay-active {
   display: none;
 }
 
+.overlay.pause-menu-active {
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(2px);
+}
+
+.overlay.pause-menu-active .menu-actions {
+  display: none;
+}
+
 .modal {
   position: fixed;
   inset: 0;
@@ -225,6 +237,97 @@ body.gameplay-active {
 .panel p {
   margin: 0 0 16px;
   color: var(--muted);
+}
+
+.pause-menu-panel {
+  width: min(440px, 92vw);
+  max-height: calc(100vh - 32px);
+  padding: 12px;
+  border-radius: 0;
+  border: 2px solid rgba(255, 233, 120, 0.68);
+  background:
+    linear-gradient(180deg, rgba(24, 22, 12, 0.94), rgba(14, 12, 5, 0.96)),
+    radial-gradient(240px 120px at 20% 0%, rgba(255, 224, 96, 0.2), rgba(255, 224, 96, 0));
+  box-shadow:
+    0 0 0 2px rgba(84, 70, 20, 0.75) inset,
+    0 16px 42px rgba(0, 0, 0, 0.62);
+  animation: smb1-pause-enter 180ms ease-out;
+}
+
+.pause-menu-frame {
+  border: 1px solid rgba(255, 236, 142, 0.45);
+  padding: 16px 18px 18px;
+  background: rgba(6, 6, 4, 0.34);
+}
+
+.pause-menu-title {
+  margin: 0 0 12px;
+  text-align: center;
+  letter-spacing: 3px;
+  font-family: "Trebuchet MS", "Segoe UI", "Arial Black", sans-serif;
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--pause-text-hot);
+  text-shadow:
+    0 2px 0 #443900,
+    0 0 12px rgba(255, 234, 124, 0.45);
+}
+
+.pause-menu-list {
+  display: grid;
+  gap: 6px;
+}
+
+.pause-menu-item {
+  flex: none;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+  color: var(--pause-text-dim);
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-align: left;
+  text-shadow: 2px 2px 0 var(--pause-text-shadow);
+  transition: color 100ms linear;
+}
+
+.pause-menu-item:hover,
+.pause-menu-item:focus-visible,
+.pause-menu-item.is-selected {
+  color: var(--pause-text-hot);
+  outline: none;
+  animation: smb1-pause-blink 420ms steps(2, end) infinite;
+}
+
+@keyframes smb1-pause-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes smb1-pause-blink {
+  0% {
+    filter: brightness(1.35);
+  }
+  49% {
+    filter: brightness(1.35);
+  }
+  50% {
+    filter: brightness(0.96);
+  }
+  100% {
+    filter: brightness(0.96);
+  }
 }
 
 .field {

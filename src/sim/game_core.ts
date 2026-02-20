@@ -15,6 +15,7 @@ import {
   type GameSource,
 } from '../shared/constants/index.js';
 import {
+  activateSwitchFromCameraAim,
   intersectsMovingSpheres,
   tfPhysballToAnimGroupSpace,
 } from '../collision.js';
@@ -397,6 +398,10 @@ export class GameCore {
   public goalReplayStartArmed: boolean;
   public hudGoalEventTick: number;
   public hudRingoutEventTick: number;
+  public stageStartRollbackState: any | null;
+  public stageViewRollbackState: any | null;
+  public singleplayerStageViewActive: boolean;
+  private singleplayerStageViewActionDown: boolean;
   public ruleset: Ruleset;
   public session: SessionController;
   public modHooks: ModHooks[];
@@ -535,6 +540,10 @@ export class GameCore {
     this.goalReplayStartArmed = false;
     this.hudGoalEventTick = -1;
     this.hudRingoutEventTick = -1;
+    this.stageStartRollbackState = null;
+    this.stageViewRollbackState = null;
+    this.singleplayerStageViewActive = false;
+    this.singleplayerStageViewActionDown = false;
   }
 
   setGameSource(source: GameSource) {
@@ -560,7 +569,14 @@ export class GameCore {
   }
 
   isInfiniteTimeActive() {
+    if (this.singleplayerStageViewActive && this.session.isSinglePlayer(this)) {
+      return true;
+    }
     return this.infiniteTimeEnabled && this.session.isMultiplayer(this);
+  }
+
+  shouldHideGameplayHud() {
+    return this.singleplayerStageViewActive;
   }
 
   setInputFeed(feed: QuantizedStick[] | null) {
@@ -2290,6 +2306,70 @@ export class GameCore {
     this.onResumed?.();
   }
 
+  loadStageStartRollbackState() {
+    if (!this.stageStartRollbackState || !this.stageRuntime) {
+      return false;
+    }
+    this.loadRollbackState(this.stageStartRollbackState);
+    return true;
+  }
+
+  loadStageViewRollbackState() {
+    if (this.stageViewRollbackState && this.stageRuntime) {
+      this.loadRollbackState(this.stageViewRollbackState);
+      return true;
+    }
+    return this.loadStageStartRollbackState();
+  }
+
+  setSingleplayerStageViewActive(active: boolean) {
+    this.singleplayerStageViewActive = !!active;
+    if (!this.singleplayerStageViewActive) {
+      this.singleplayerStageViewActionDown = false;
+    }
+  }
+
+  enterSingleplayerStageView() {
+    const localPlayer = this.getLocalPlayer();
+    if (!localPlayer || !this.stageRuntime) {
+      return false;
+    }
+    this.captureSpectatorStartPose(localPlayer.camera);
+    localPlayer.isSpectator = true;
+    localPlayer.pendingSpawn = false;
+    localPlayer.finished = false;
+    localPlayer.goalType = null;
+    localPlayer.goalTimerFrames = 0;
+    localPlayer.goalSkipTimerFrames = 0;
+    localPlayer.goalInfo = null;
+    localPlayer.spectateTimerFrames = 0;
+    localPlayer.respawnTimerFrames = 0;
+    localPlayer.ringoutTimerFrames = 0;
+    localPlayer.ringoutSkipTimerFrames = 0;
+    this.hidePlayerBall(localPlayer);
+    this.enterFreeFlyCamera(localPlayer);
+    this.singleplayerStageViewActive = true;
+    this.singleplayerStageViewActionDown = false;
+    return true;
+  }
+
+  private handleSingleplayerStageViewSwitchInput(localPlayer: PlayerState, cameraPaused: boolean) {
+    if (!this.singleplayerStageViewActive || !this.stageRuntime || cameraPaused || !localPlayer.freeFly) {
+      this.singleplayerStageViewActionDown = false;
+      return;
+    }
+    const actionDown = !!(
+      this.input?.isPrimaryActionDown?.()
+      || this.input?.isMousePrimaryDown?.()
+    );
+    const pressed = actionDown && !this.singleplayerStageViewActionDown;
+    this.singleplayerStageViewActionDown = actionDown;
+    if (!pressed) {
+      return;
+    }
+    activateSwitchFromCameraAim(this.stageRuntime, localPlayer.camera);
+  }
+
   getCurrentStageId(): number | null {
     return this.course?.currentStageId ?? null;
   }
@@ -2975,6 +3055,10 @@ export class GameCore {
     this.resultReplayNeedsRestart = false;
     this.goalReplayStartArmed = false;
     this.resultReplayHistory.length = 0;
+    this.singleplayerStageViewActive = false;
+    this.singleplayerStageViewActionDown = false;
+    this.stageStartRollbackState = null;
+    this.stageViewRollbackState = null;
     this.loadingStage = true;
     this.accumulator = 0;
     this.input?.clearPressed();
@@ -3083,6 +3167,8 @@ export class GameCore {
         this.replayAutoFastForward = true;
         this.setFixedTickMode(true, 1);
       }
+      this.stageStartRollbackState = this.saveRollbackState(this.stageStartRollbackState);
+      this.captureStageViewRollbackState();
 
       void this.audio?.playMusicForStage(stageId, this.gameSource);
       this.statusText = '';
@@ -3101,7 +3187,43 @@ export class GameCore {
     }
   }
 
-  resetBallForStage({ withIntro = false }: { withIntro?: boolean } = {}) {
+  private captureStageViewRollbackState() {
+    if (!this.stageRuntime) {
+      this.stageViewRollbackState = null;
+      return;
+    }
+    const restoreState = this.saveRollbackState();
+    if (!restoreState) {
+      this.stageViewRollbackState = null;
+      return;
+    }
+    const prevSuppressAudioEffects = this.suppressAudioEffects;
+    const savedSpectatorStartPose = this.spectatorStartPose
+      ? {
+        eye: {
+          x: this.spectatorStartPose.eye.x,
+          y: this.spectatorStartPose.eye.y,
+          z: this.spectatorStartPose.eye.z,
+        },
+        lookAt: {
+          x: this.spectatorStartPose.lookAt.x,
+          y: this.spectatorStartPose.lookAt.y,
+          z: this.spectatorStartPose.lookAt.z,
+        },
+        rotX: this.spectatorStartPose.rotX,
+        rotY: this.spectatorStartPose.rotY,
+        rotZ: this.spectatorStartPose.rotZ,
+      }
+      : null;
+    this.suppressAudioEffects = true;
+    this.resetBallForStage({ withIntro: true, forceRetryIntro: true });
+    this.stageViewRollbackState = this.saveRollbackState(this.stageViewRollbackState);
+    this.loadRollbackState(restoreState);
+    this.suppressAudioEffects = prevSuppressAudioEffects;
+    this.spectatorStartPose = savedSpectatorStartPose;
+  }
+
+  resetBallForStage({ withIntro = false, forceRetryIntro = false }: { withIntro?: boolean; forceRetryIntro?: boolean } = {}) {
     if (!this.stage) {
       return;
     }
@@ -3168,7 +3290,7 @@ export class GameCore {
       this.markNoCollideForPlayer(player.id);
     }
     if (withIntro) {
-      const isFirstAttempt = this.stageAttempts <= 1;
+      const isFirstAttempt = !forceRetryIntro && this.stageAttempts <= 1;
       const introFrames = isFirstAttempt ? 360 : 120;
       const flyInFrames = isFirstAttempt ? 350 : 90;
       this.introTotalFrames = introFrames;
@@ -3637,22 +3759,27 @@ export class GameCore {
       return;
     }
     if (this.input.wasPressed('KeyR')) {
-      if (this.course) {
-        if (!this.rollbackSession?.suppressVisuals && this.stage) {
-          this.onStageFail?.({
-            stageId: this.stage.stageId,
-            reason: 'manual_reset',
-            timerFrames: this.stageTimerFrames,
-            score: this.score,
-            isBonusStage: this.isBonusStageActive(),
-          });
-        }
-        void this.loadStage(this.course.currentStageId);
-      }
+      this.retryStage();
     }
     if (this.input.wasPressed('KeyN')) {
       this.skipStage();
     }
+  }
+
+  retryStage() {
+    if (!this.allowCourseAdvance || !this.course) {
+      return;
+    }
+    if (!this.rollbackSession?.suppressVisuals && this.stage) {
+      this.onStageFail?.({
+        stageId: this.stage.stageId,
+        reason: 'manual_reset',
+        timerFrames: this.stageTimerFrames,
+        score: this.score,
+        isBonusStage: this.isBonusStageActive(),
+      });
+    }
+    void this.loadStage(this.course.currentStageId);
   }
 
   skipStage() {
@@ -3957,6 +4084,11 @@ export class GameCore {
         const localInputEnabled = stageInputEnabled
           && localPlayer.goalTimerFrames <= 0
           && !ringoutActive
+          && !localPlayer.finished
+          && !this.singleplayerStageViewActive;
+        const singleplayerTimerEnabled = stageInputEnabled
+          && localPlayer.goalTimerFrames <= 0
+          && !ringoutActive
           && !localPlayer.finished;
         const switchesEnabled = isSinglePlayer
           ? (localPlayer.goalTimerFrames <= 0 && !ringoutActive && !timeoverActive)
@@ -3964,6 +4096,7 @@ export class GameCore {
         const isBonusStage = this.isBonusStageActive();
         this.input?.setGyroTapMode?.(localInputEnabled ? 'recalibrate' : 'action');
         const fastForwardIntro = isSinglePlayer
+          && !this.singleplayerStageViewActive
           && this.stageAttempts === 1
           && this.introTimerFrames > 120
           && this.input?.isPrimaryActionDown?.();
@@ -4210,7 +4343,7 @@ export class GameCore {
           void this.audio.consumeBallEvents(localBall, this.gameSource);
         }
         const timerShouldRun = isSinglePlayer
-          ? (!resultReplayActive && localInputEnabled && !this.paused && localPlayer.ringoutTimerFrames <= 0 && !timeoverActive)
+          ? (!resultReplayActive && singleplayerTimerEnabled && !this.paused)
           : (!this.paused && stageInputEnabled);
         if (timerShouldRun) {
           this.stageTimerFrames += 1;
@@ -4401,6 +4534,7 @@ export class GameCore {
                   this.captureCameraPose(cameraPoses.curr);
                 }
               }
+              this.handleSingleplayerStageViewSwitchInput(player, cameraPaused);
               continue;
             }
             if (player.isSpectator || player.pendingSpawn) {

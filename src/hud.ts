@@ -1393,6 +1393,13 @@ export class HudRenderer {
     this.offsetY = (height - HUD_HEIGHT * scale) / 2;
   }
 
+  clear() {
+    if (!this.ctx) {
+      return;
+    }
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+
   private beginBanner(state: BannerState) {
     state.timer = state.duration;
   }

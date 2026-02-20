@@ -111,9 +111,11 @@ export class AudioManager {
   private musicLoopSource: AudioBufferSourceNode | null = null;
   private currentMusicKey: string | null = null;
   private musicToken = 0;
+  private masterVolumeScale = 1;
   private musicVolume = 0.5;
   private sfxVolume = 0.3;
   private announcerVolume = 0.3;
+  private announcerVolumeScale = 1;
 
   async resume() {
     const ctx = await this.ensureContext();
@@ -384,9 +386,9 @@ export class AudioManager {
       this.sfxGain = this.ctx.createGain();
       this.announcerGain = this.ctx.createGain();
       this.musicGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.9;
+      this.masterGain.gain.value = 0.9 * this.masterVolumeScale;
       this.sfxGain.gain.value = this.sfxVolume;
-      this.announcerGain.gain.value = this.announcerVolume;
+      this.announcerGain.gain.value = this.announcerVolume * this.announcerVolumeScale;
       this.musicGain.gain.value = this.musicVolume;
       this.sfxGain.connect(this.masterGain);
       this.announcerGain.connect(this.masterGain);
@@ -412,8 +414,24 @@ export class AudioManager {
 
   setAnnouncerVolume(value: number) {
     this.announcerVolume = this.clampVolume(value);
+    this.updateAnnouncerGain();
+  }
+
+  setAnnouncerVolumeScale(value: number) {
+    this.announcerVolumeScale = this.clampVolume(value);
+    this.updateAnnouncerGain();
+  }
+
+  setMasterVolumeScale(value: number) {
+    this.masterVolumeScale = this.clampVolume(value);
+    if (this.masterGain) {
+      this.masterGain.gain.value = 0.9 * this.masterVolumeScale;
+    }
+  }
+
+  private updateAnnouncerGain() {
     if (this.announcerGain) {
-      this.announcerGain.gain.value = this.announcerVolume;
+      this.announcerGain.gain.value = this.announcerVolume * this.announcerVolumeScale;
     }
   }
 

@@ -30,6 +30,8 @@ export class Input {
       lastY: 0,
       suppressUntil: 0,
     };
+    this.mousePrimaryDown = false;
+    this.gamepadStartDown = false;
 
     this.gyro = {
       baselineSet: false,
@@ -228,6 +230,10 @@ export class Input {
         }
       },
       mousedown: (event) => {
+        if (event.button === 0) {
+          this.mousePrimaryDown = true;
+          return;
+        }
         if (event.button !== 2) {
           return;
         }
@@ -237,6 +243,10 @@ export class Input {
         event.preventDefault();
       },
       mouseup: (event) => {
+        if (event.button === 0) {
+          this.mousePrimaryDown = false;
+          return;
+        }
         if (event.button !== 2) {
           return;
         }
@@ -566,6 +576,26 @@ export class Input {
     }
     const button = pad.buttons[0];
     return !!button && (button.pressed || button.value > 0.5);
+  }
+
+  isStartDown() {
+    const pad = this.getActiveGamepad();
+    if (!pad?.buttons?.length) {
+      return false;
+    }
+    const button = pad.buttons[9];
+    return !!button && (button.pressed || button.value > 0.5);
+  }
+
+  wasStartPressed() {
+    const down = this.isStartDown();
+    const pressed = down && !this.gamepadStartDown;
+    this.gamepadStartDown = down;
+    return pressed;
+  }
+
+  isMousePrimaryDown() {
+    return this.mousePrimaryDown;
   }
 
   getButtonsBitmask() {

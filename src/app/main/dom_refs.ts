@@ -5,6 +5,7 @@ export function collectMainDomRefs() {
   const hudCanvas = document.getElementById('hud-canvas') as HTMLCanvasElement;
   const overlay = document.getElementById('overlay') as HTMLElement;
   const mainMenuPanel = document.getElementById('main-menu') as HTMLElement | null;
+  const pauseMenuPanel = document.getElementById('pause-menu') as HTMLElement | null;
   const multiplayerMenuPanel = document.getElementById('multiplayer-menu') as HTMLElement | null;
   const multiplayerIngameMenuPanel = document.getElementById('multiplayer-ingame-menu') as HTMLElement | null;
   const settingsMenuPanel = document.getElementById('settings-menu') as HTMLElement | null;
@@ -42,6 +43,11 @@ export function collectMainDomRefs() {
   const ingameResumeButton = document.getElementById('ingame-resume') as HTMLButtonElement | null;
   const ingameLeaveButton = document.getElementById('ingame-leave') as HTMLButtonElement | null;
   const ingameReturnLobbyButton = document.getElementById('ingame-return-lobby') as HTMLButtonElement | null;
+  const pauseResumeButton = document.getElementById('pause-resume') as HTMLButtonElement | null;
+  const pauseRetryButton = document.getElementById('pause-retry') as HTMLButtonElement | null;
+  const pauseSaveReplayButton = document.getElementById('pause-save-replay') as HTMLButtonElement | null;
+  const pauseViewStageButton = document.getElementById('pause-view-stage') as HTMLButtonElement | null;
+  const pauseReturnMainMenuButton = document.getElementById('pause-return-main-menu') as HTMLButtonElement | null;
   const startButton = document.getElementById('start') as HTMLButtonElement;
   const resumeButton = document.getElementById('resume') as HTMLButtonElement;
   const difficultySelect = document.getElementById('difficulty') as HTMLSelectElement;
@@ -150,6 +156,7 @@ export function collectMainDomRefs() {
     hudCanvas,
     overlay,
     mainMenuPanel,
+    pauseMenuPanel,
     multiplayerMenuPanel,
     multiplayerIngameMenuPanel,
     settingsMenuPanel,
@@ -187,6 +194,11 @@ export function collectMainDomRefs() {
     ingameResumeButton,
     ingameLeaveButton,
     ingameReturnLobbyButton,
+    pauseResumeButton,
+    pauseRetryButton,
+    pauseSaveReplayButton,
+    pauseViewStageButton,
+    pauseReturnMainMenuButton,
     startButton,
     resumeButton,
     difficultySelect,

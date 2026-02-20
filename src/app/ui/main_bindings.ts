@@ -11,6 +11,7 @@ type BindMainUiDeps = {
   controlModeSelect: HTMLSelectElement | null;
   fullscreenButton: HTMLButtonElement | null;
   mainMenuPanel: HTMLElement | null;
+  pauseMenuPanel: HTMLElement | null;
   multiplayerMenuPanel: HTMLElement | null;
   multiplayerIngameMenuPanel: HTMLElement | null;
   settingsMenuPanel: HTMLElement | null;
@@ -112,6 +113,7 @@ export function bindMainUiControls(deps: BindMainUiDeps) {
 
   for (const panel of [
     deps.mainMenuPanel,
+    deps.pauseMenuPanel,
     deps.multiplayerMenuPanel,
     deps.multiplayerIngameMenuPanel,
     deps.settingsMenuPanel,

@@ -95,6 +95,7 @@ import { InputControlsController, bindRangeControl, bindVolumeControl } from './
 import { bindMainUiControls } from './app/ui/main_bindings.js';
 import { MenuFlowController, type MenuPanel } from './app/ui/menu_flow.js';
 import { createOverlayController } from './app/ui/overlay_controller.js';
+import { SingleplayerPauseController } from './app/ui/singleplayer_pause.js';
 import { SettingsTabsController, type SettingsTab } from './app/ui/settings_tabs.js';
 import {
   fetchPackSlice,
@@ -119,6 +120,7 @@ export function runMainApp() {
     hudCanvas,
     overlay,
     mainMenuPanel,
+    pauseMenuPanel,
     multiplayerMenuPanel,
     multiplayerIngameMenuPanel,
     settingsMenuPanel,
@@ -156,6 +158,11 @@ export function runMainApp() {
     ingameResumeButton,
     ingameLeaveButton,
     ingameReturnLobbyButton,
+    pauseResumeButton,
+    pauseRetryButton,
+    pauseSaveReplayButton,
+    pauseViewStageButton,
+    pauseReturnMainMenuButton,
     startButton,
     resumeButton,
     difficultySelect,
@@ -485,6 +492,7 @@ export function runMainApp() {
   let netplayConnectionState: NetplayConnectionStateController | null = null;
   let lobbyHeartbeat: LobbyHeartbeatController | null = null;
   let matchStartFlow: MatchStartFlowController | null = null;
+  let singleplayerPauseController: SingleplayerPauseController | null = null;
   
   let running = false;
   let paused = false;
@@ -1189,6 +1197,7 @@ export function runMainApp() {
   
   const menuFlow = new MenuFlowController({
     mainMenuPanel,
+    pauseMenuPanel,
     multiplayerLayout,
     multiplayerMenuPanel,
     multiplayerIngameMenuPanel,
@@ -1218,12 +1227,72 @@ export function runMainApp() {
     isRunning: () => running,
     isNetplayEnabled: () => netplayEnabled,
     onPauseSingleplayer: () => {
+      if (singleplayerPauseController) {
+        singleplayerPauseController.handlePauseRequest();
+        return;
+      }
       paused = true;
       game.pause();
     },
     onResumeSingleplayer: () => {
+      if (singleplayerPauseController) {
+        singleplayerPauseController.handleResumeRequest();
+        return;
+      }
       paused = false;
       game.resume();
+    },
+  });
+
+  function saveReplayFromPauseMenu() {
+    if (!game || !game.stage) {
+      replayController.setReplayStatus('Replay: no stage active');
+      return;
+    }
+    const replay = game.exportReplay();
+    if (!replay) {
+      replayController.setReplayStatus('Replay: no inputs recorded');
+      return;
+    }
+    replayController.downloadReplay(replay);
+    replayController.setReplayStatus(`Replay saved (stage ${replay.stageId})`);
+  }
+
+  singleplayerPauseController = new SingleplayerPauseController({
+    game,
+    audio,
+    overlay,
+    pauseMenuPanel,
+    pauseResumeButton,
+    pauseRetryButton,
+    pauseSaveReplayButton,
+    pauseViewStageButton,
+    pauseReturnMainMenuButton,
+    isRunning: () => running,
+    isNetplayEnabled: () => netplayEnabled,
+    getActiveMenu: () => menuFlow.getActiveMenu(),
+    openPauseMenu: () => {
+      menuFlow.openMenuOverlay('pause');
+    },
+    pauseGame: () => {
+      paused = true;
+      game.pause();
+    },
+    resumeGame: () => {
+      paused = false;
+      game.resume();
+    },
+    closeMenuOverlay: () => {
+      menuFlow.closeMenuOverlay();
+    },
+    onRetry: () => {
+      game.retryStage();
+    },
+    onSaveReplay: () => {
+      saveReplayFromPauseMenu();
+    },
+    onReturnMainMenu: () => {
+      matchFlow?.endMatchToMenu?.();
     },
   });
   
@@ -1386,6 +1455,9 @@ export function runMainApp() {
     if (settingsMenuPanel && !settingsMenuPanel.classList.contains('hidden')) {
       return settingsMenuPanel;
     }
+    if (pauseMenuPanel && !pauseMenuPanel.classList.contains('hidden')) {
+      return pauseMenuPanel;
+    }
     if (multiplayerIngameMenuPanel && !multiplayerIngameMenuPanel.classList.contains('hidden')) {
       return multiplayerIngameMenuPanel;
     }
@@ -1487,6 +1559,7 @@ export function runMainApp() {
     controlModeSelect,
     fullscreenButton,
     mainMenuPanel,
+    pauseMenuPanel,
     multiplayerMenuPanel,
     multiplayerIngameMenuPanel,
     settingsMenuPanel,
@@ -1771,6 +1844,7 @@ export function runMainApp() {
       inputControls?.maybeUpdateControlModeSettings(now);
       inputControls?.updateInputPreview();
       inputControls?.updateGamepadCalibration();
+      singleplayerPauseController?.tick(now);
     },
   });
 }

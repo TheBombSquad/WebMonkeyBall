@@ -51,7 +51,7 @@ export function bindUiEventHandlers(options: UiEventBindingsOptions) {
     if (options.isNetplayEnabled()) {
       options.onOpenMenuOverlay();
     } else {
-      options.onOpenMenuOverlay('main');
+      options.onOpenMenuOverlay('pause');
     }
   });
 
@@ -69,7 +69,7 @@ export function bindUiEventHandlers(options: UiEventBindingsOptions) {
       }
       if (options.isRunning()) {
         event.preventDefault();
-        options.onOpenMenuOverlay(options.isNetplayEnabled() ? 'multiplayer-ingame' : 'main');
+        options.onOpenMenuOverlay(options.isNetplayEnabled() ? 'multiplayer-ingame' : 'pause');
       }
       return;
     }

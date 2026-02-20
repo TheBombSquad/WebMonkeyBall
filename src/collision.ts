@@ -26,6 +26,8 @@ const BONUS_WAVE_LIMIT = 10.01;
 const SWITCH_COOLDOWN_FRAMES = 15;
 const SWITCH_TRIGGER_RADIUS = 1.2;
 const SWITCH_COLI_HEIGHT = 0.3;
+const SWITCH_AIM_MAX_DISTANCE = 180.0;
+const SWITCH_AIM_RADIUS_PAD = 0.35;
 const BONUS_WAVE_AMPLITUDE_BASE = 0.5;
 const BONUS_WAVE_AMPLITUDE_SLOPE = -0.030833333333333333;
 const BONUS_WAVE_ANGLE_SPEED = -1092.0;
@@ -129,6 +131,12 @@ const switchCylinderScratch = {
   radius: SWITCH_TRIGGER_RADIUS,
 };
 const switchLocalNormalScratch = { x: 0, y: 0, z: 0 };
+const switchAimDir = { x: 0, y: 0, z: 0 };
+const switchAimTo = { x: 0, y: 0, z: 0 };
+const switchAimModelBounds = {
+  center: null as { x: number; y: number; z: number } | null,
+  radius: 0,
+};
 const bumperTempPos = { x: 0, y: 0, z: 0 };
 const bumperNormal = { x: 0, y: 0, z: 0 };
 const cylinderTmpVec = { x: 0, y: 0, z: 0 };
@@ -241,6 +249,84 @@ function computeSwitchCylinder(stageSwitch, modelBounds, cylinder) {
   cylinder.height = SWITCH_COLI_HEIGHT;
   const radiusSq = (boundRadius * boundRadius) - (SWITCH_COLI_HEIGHT * SWITCH_COLI_HEIGHT);
   cylinder.radius = radiusSq > 0 ? sqrt(radiusSq) : boundRadius;
+}
+
+export function activateSwitchFromCameraAim(stageRuntime, camera, maxDistance = SWITCH_AIM_MAX_DISTANCE) {
+  if (!stageRuntime || !camera || stageRuntime.switchesEnabled === false) {
+    return false;
+  }
+  const switches = stageRuntime.switches;
+  if (!switches || switches.length === 0) {
+    return false;
+  }
+  switchAimDir.x = camera.lookAt.x - camera.eye.x;
+  switchAimDir.y = camera.lookAt.y - camera.eye.y;
+  switchAimDir.z = camera.lookAt.z - camera.eye.z;
+  const dirLenSq = (switchAimDir.x * switchAimDir.x) + (switchAimDir.y * switchAimDir.y) + (switchAimDir.z * switchAimDir.z);
+  if (dirLenSq <= FLT_EPSILON) {
+    return false;
+  }
+  const invDirLen = 1.0 / sqrt(dirLenSq);
+  switchAimDir.x *= invDirLen;
+  switchAimDir.y *= invDirLen;
+  switchAimDir.z *= invDirLen;
+  const maxDist = maxDistance > 0 ? maxDistance : SWITCH_AIM_MAX_DISTANCE;
+  let bestSwitch = null;
+  let bestScore = Infinity;
+  for (const stageSwitch of switches) {
+    if (stageRuntime.format !== 'smb2' && stageSwitch.cooldown > 0) {
+      continue;
+    }
+    let centerX = stageSwitch.pos.x;
+    let centerY = stageSwitch.pos.y;
+    let centerZ = stageSwitch.pos.z;
+    let radius = SWITCH_TRIGGER_RADIUS;
+    let modelBounds = stageRuntime.switchModelBounds?.[stageSwitch.type & 7] ?? null;
+    if (stageSwitch.modelBoundCenter && stageSwitch.modelBoundRadius) {
+      switchAimModelBounds.center = stageSwitch.modelBoundCenter;
+      switchAimModelBounds.radius = stageSwitch.modelBoundRadius;
+      modelBounds = switchAimModelBounds;
+    }
+    if (modelBounds) {
+      computeSwitchCylinder(stageSwitch, modelBounds, switchCylinderScratch);
+      centerX = switchCylinderScratch.pos.x;
+      centerY = switchCylinderScratch.pos.y;
+      centerZ = switchCylinderScratch.pos.z;
+      radius = switchCylinderScratch.radius;
+    }
+    switchAimTo.x = centerX - camera.eye.x;
+    switchAimTo.y = centerY - camera.eye.y;
+    switchAimTo.z = centerZ - camera.eye.z;
+    const forwardDist = (switchAimTo.x * switchAimDir.x) + (switchAimTo.y * switchAimDir.y) + (switchAimTo.z * switchAimDir.z);
+    if (forwardDist <= 0 || forwardDist > maxDist) {
+      continue;
+    }
+    const rejectX = switchAimTo.x - switchAimDir.x * forwardDist;
+    const rejectY = switchAimTo.y - switchAimDir.y * forwardDist;
+    const rejectZ = switchAimTo.z - switchAimDir.z * forwardDist;
+    const lateralDistSq = (rejectX * rejectX) + (rejectY * rejectY) + (rejectZ * rejectZ);
+    const hitRadius = radius + SWITCH_AIM_RADIUS_PAD;
+    if (lateralDistSq > hitRadius * hitRadius) {
+      continue;
+    }
+    const score = forwardDist + lateralDistSq * 0.1;
+    if (score < bestScore) {
+      bestScore = score;
+      bestSwitch = stageSwitch;
+    }
+  }
+  if (!bestSwitch) {
+    return false;
+  }
+  if (bestSwitch.localVel.y > -0.08) {
+    bestSwitch.localVel.y = -0.08;
+  }
+  bestSwitch.pressImpulse = true;
+  if (stageRuntime.format !== 'smb2') {
+    stageRuntime.applySwitchPlayback(bestSwitch, true);
+    bestSwitch.cooldown = SWITCH_COOLDOWN_FRAMES;
+  }
+  return true;
 }
 
 function dumbDot(x1, y1, x2, y2) {

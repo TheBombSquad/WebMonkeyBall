@@ -1,7 +1,8 @@
-export type MenuPanel = 'main' | 'multiplayer' | 'multiplayer-ingame' | 'settings' | 'level-select' | 'leaderboards';
+export type MenuPanel = 'main' | 'pause' | 'multiplayer' | 'multiplayer-ingame' | 'settings' | 'level-select' | 'leaderboards';
 
 type MenuFlowOptions = {
   mainMenuPanel: HTMLElement | null;
+  pauseMenuPanel: HTMLElement | null;
   multiplayerLayout: HTMLElement | null;
   multiplayerMenuPanel: HTMLElement | null;
   multiplayerIngameMenuPanel: HTMLElement | null;
@@ -38,6 +39,7 @@ export class MenuFlowController {
     }
     this.activeMenu = menu;
     this.options.mainMenuPanel?.classList.toggle('hidden', menu !== 'main');
+    this.options.pauseMenuPanel?.classList.toggle('hidden', menu !== 'pause');
     this.options.multiplayerLayout?.classList.toggle('hidden', menu !== 'multiplayer');
     this.options.multiplayerMenuPanel?.classList.toggle('hidden', menu !== 'multiplayer');
     this.options.multiplayerIngameMenuPanel?.classList.toggle('hidden', menu !== 'multiplayer-ingame');
@@ -68,7 +70,7 @@ export class MenuFlowController {
       this.options.setOverlayVisible(true);
       return;
     }
-    this.setActiveMenu(preferredMenu ?? 'main');
+    this.setActiveMenu(preferredMenu ?? 'pause');
     this.options.onPauseSingleplayer();
   }
 

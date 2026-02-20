@@ -162,8 +162,14 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     resizeCanvasToDisplaySize(deps.canvas);
     resizeCanvasToDisplaySize(deps.hudCanvas);
     deps.hudRenderer.resize(deps.hudCanvas.width, deps.hudCanvas.height);
+    const hideGameplayHud = !!deps.game.shouldHideGameplayHud?.();
 
     if (deps.game.loadingStage) {
+      if (hideGameplayHud) {
+        deps.setLastHudTime(now);
+        deps.hudRenderer.clear();
+        return;
+      }
       const hudDelta = now - deps.getLastHudTime();
       deps.setLastHudTime(now);
       const hudDtFrames = deps.game.paused ? 0 : (hudDelta / 1000) * 60;
@@ -201,10 +207,14 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     deps.applyGameCamera(interpolationAlpha);
     deps.updateNameplates(interpolationAlpha);
 
-    const hudDelta = now - deps.getLastHudTime();
-    deps.setLastHudTime(now);
-    const hudDtFrames = deps.game.paused ? 0 : (hudDelta / 1000) * 60;
-    deps.hudRenderer.update(deps.game, hudDtFrames);
+    if (hideGameplayHud) {
+      deps.setLastHudTime(now);
+    } else {
+      const hudDelta = now - deps.getLastHudTime();
+      deps.setLastHudTime(now);
+      const hudDtFrames = deps.game.paused ? 0 : (hudDelta / 1000) * 60;
+      deps.hudRenderer.update(deps.game, hudDtFrames);
+    }
 
     swapChain.configureSwapChain(deps.canvas.width, deps.canvas.height);
     gfxDevice.beginFrame();
@@ -213,6 +223,10 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     renderer.render(gfxDevice, viewerInput);
 
     gfxDevice.endFrame();
+    if (hideGameplayHud) {
+      deps.hudRenderer.clear();
+      return;
+    }
     deps.hudRenderer.render(deps.game, dtSeconds);
   };
 
