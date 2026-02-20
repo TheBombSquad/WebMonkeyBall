@@ -141,6 +141,7 @@ export class BallPreviewController {
   private gfxDevice: GfxDevice | null = null;
   private swapChain: ReturnType<typeof createSwapChainForWebGL2> | null = null;
   private viewerInput: ViewerInputState | null = null;
+  private cachedStageData: StageData | null = null;
 
   constructor(options: BallPreviewOptions) {
     this.options = options;
@@ -188,6 +189,7 @@ export class BallPreviewController {
       return;
     }
     this.stopLoop();
+    this.destroyRendererOnly();
   }
 
   destroy(): void {
@@ -196,14 +198,19 @@ export class BallPreviewController {
     }
     this.destroyed = true;
     this.stopLoop();
+    this.destroyRendererOnly();
+    this.gfxDevice = null;
+    this.swapChain = null;
+    this.viewerInput = null;
+    this.cachedStageData = null;
+    this.initPromise = null;
+  }
+
+  private destroyRendererOnly(): void {
     if (this.renderer && this.gfxDevice) {
       this.renderer.destroy(this.gfxDevice);
     }
     this.renderer = null;
-    this.gfxDevice = null;
-    this.swapChain = null;
-    this.viewerInput = null;
-    this.initPromise = null;
   }
 
   private startLoop(): void {
@@ -246,17 +253,20 @@ export class BallPreviewController {
       return;
     }
     this.initPromise = (async () => {
-      let stageData: StageData | null = null;
       try {
-        const { swapChain, gfxDevice, viewerInput } = initRendererGfx(this.options.canvas!);
-        stageData = await this.options.loadPreviewStageData(StageId.St001_Plain);
-        if (this.destroyed) {
+        if (!this.gfxDevice || !this.swapChain || !this.viewerInput) {
+          const { swapChain, gfxDevice, viewerInput } = initRendererGfx(this.options.canvas!);
+          this.swapChain = swapChain;
+          this.gfxDevice = gfxDevice;
+          this.viewerInput = viewerInput;
+        }
+        if (!this.cachedStageData) {
+          this.cachedStageData = await this.options.loadPreviewStageData(StageId.St001_Plain);
+        }
+        if (this.destroyed || !this.visible || !this.gfxDevice || !this.cachedStageData) {
           return;
         }
-        this.swapChain = swapChain;
-        this.gfxDevice = gfxDevice;
-        this.viewerInput = viewerInput;
-        this.renderer = new Renderer(gfxDevice, stageData);
+        this.renderer = new Renderer(this.gfxDevice, this.cachedStageData);
         this.renderer.setSceneOverrides(PREVIEW_SCENE_OVERRIDES);
       } catch (error) {
         this.initFailed = true;

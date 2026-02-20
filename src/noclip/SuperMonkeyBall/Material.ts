@@ -43,13 +43,17 @@ type MaterialBuildOptions = {
 
 const WORLD_SPECULAR_TEX_WIDTH = 16;
 const WORLD_SPECULAR_TEX_HEIGHT = 4;
-let worldSpecularTexture: GfxTexture | null = null;
-let worldSpecularSampler: GfxSampler | null = null;
+type WorldSpecularResources = {
+    texture: GfxTexture;
+    sampler: GfxSampler;
+};
+const worldSpecularResourcesByRenderCache = new WeakMap<GfxRenderCache, WorldSpecularResources>();
 
 function fillWorldSpecularMapping(renderCache: GfxRenderCache, mapping: MaterialParams["m_TextureMapping"][0]): void {
-    if (worldSpecularTexture === null || worldSpecularSampler === null) {
+    let resources = worldSpecularResourcesByRenderCache.get(renderCache);
+    if (!resources) {
         const device = renderCache.device;
-        worldSpecularTexture = device.createTexture(
+        const texture = device.createTexture(
             makeTextureDescriptor2D(GfxFormat.U8_RGBA_NORM, WORLD_SPECULAR_TEX_WIDTH, WORLD_SPECULAR_TEX_HEIGHT, 1)
         );
         const data = new Uint8Array(WORLD_SPECULAR_TEX_WIDTH * WORLD_SPECULAR_TEX_HEIGHT * 4);
@@ -63,8 +67,8 @@ function fillWorldSpecularMapping(renderCache: GfxRenderCache, mapping: Material
                 data[idx + 3] = 0xff;
             }
         }
-        device.uploadTextureData(worldSpecularTexture, 0, [data]);
-        worldSpecularSampler = device.createSampler({
+        device.uploadTextureData(texture, 0, [data]);
+        const sampler = device.createSampler({
             wrapS: GfxWrapMode.Clamp,
             wrapT: GfxWrapMode.Clamp,
             minFilter: GfxTexFilterMode.Bilinear,
@@ -73,10 +77,12 @@ function fillWorldSpecularMapping(renderCache: GfxRenderCache, mapping: Material
             minLOD: 0,
             maxLOD: 0,
         });
+        resources = { texture, sampler };
+        worldSpecularResourcesByRenderCache.set(renderCache, resources);
     }
 
-    mapping.gfxTexture = worldSpecularTexture;
-    mapping.gfxSampler = worldSpecularSampler;
+    mapping.gfxTexture = resources.texture;
+    mapping.gfxSampler = resources.sampler;
     mapping.width = WORLD_SPECULAR_TEX_WIDTH;
     mapping.height = WORLD_SPECULAR_TEX_HEIGHT;
 }
