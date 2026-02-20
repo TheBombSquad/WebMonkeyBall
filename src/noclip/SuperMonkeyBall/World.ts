@@ -187,6 +187,11 @@ const WORMHOLE_NEAR_FADE_INNER_RADIUS_SCALE = 0.8;
 const WORMHOLE_NEAR_FADE_OUTER_RADIUS_SCALE = 2.0;
 const OVERLAY_RAYCAST_EPSILON = 1.1920928955078125e-7;
 const OVERLAY_RAYCAST_EDGE_EPSILON = 0.01;
+const SMB2_REVOLUTION_STAGE_ID = 348;
+const REVOLUTION_WALL_THRESHOLD = 40.0;
+const REVOLUTION_FLOOR_LOW_Y = -8.0;
+const REVOLUTION_FLOOR_MID_Y = 0.0;
+const REVOLUTION_FLOOR_HIGH_Y = 8.0;
 const scratchOverlayRayAgFromWorld = mat4.create();
 const scratchOverlayRayTriFromAg = mat4.create();
 const scratchOverlayRayAgFromTri = mat4.create();
@@ -196,6 +201,10 @@ const scratchOverlayRayDirTri = vec3.create();
 const scratchOverlayRayHitTri = vec3.create();
 const scratchOverlayRayHitAg = vec3.create();
 const scratchOverlayRayHitWorld = vec3.create();
+const scratchRevolutionAgFromWorld = mat4.create();
+const scratchRevolutionCameraWorld = vec3.create();
+const scratchRevolutionCameraLocal = vec3.create();
+const scratchRevolutionBallLocal = vec3.create();
 
 function coligridLookupStagedef(animGroup: SD.AnimGroup, x: number, z: number): number[] | null {
     const stepX = animGroup.gridStepX;
@@ -224,6 +233,14 @@ type WormholeRenderInfo = {
     animGroupIndex: number;
     pos: vec3;
     rot: vec3;
+};
+
+type RevolutionStageModels = {
+    floor1: ModelInst | null;
+    floor2: ModelInst | null;
+    floor3: ModelInst | null;
+    wallLeft: ModelInst | null;
+    wallRight: ModelInst | null;
 };
 
 function getNlModelInst(
@@ -1015,6 +1032,7 @@ export class World {
     private wormholeSurfaceModel: ModelInst | null = null;
     private wormholeInfos: WormholeRenderInfo[] = [];
     private wormholeInfoById = new Map<number, WormholeRenderInfo>();
+    private revolutionModels: RevolutionStageModels | null = null;
     private mirrorFlatMegaState = makeMegaState(
         setAttachmentStateSimple({ depthWrite: false }, {
             blendMode: GfxBlendMode.Add,
@@ -1341,6 +1359,15 @@ export class World {
                     this.bonusWaveModel.setForceCullMode(GfxCullMode.None);
                 }
             }
+        }
+        if (stageData.stageInfo.id === SMB2_REVOLUTION_STAGE_ID) {
+            this.revolutionModels = {
+                floor1: this.worldState.modelCache.getModel(3, GmaSrc.Stage),
+                floor2: this.worldState.modelCache.getModel(4, GmaSrc.Stage),
+                floor3: this.worldState.modelCache.getModel(5, GmaSrc.Stage),
+                wallLeft: this.worldState.modelCache.getModel(6, GmaSrc.Stage),
+                wallRight: this.worldState.modelCache.getModel(7, GmaSrc.Stage),
+            };
         }
         this.animGroups = stageData.stagedef.animGroups.map(
             (_, i) =>
@@ -1675,6 +1702,7 @@ export class World {
                 skipModelNames
             );
         }
+        this.drawRevolutionSpecialStageModels(stageCtx, viewFromWorldTilted);
         if (this.bonusWaveModel && !ctx.mirrorCapture) {
             const rp = scratchRenderParams;
             rp.reset();
@@ -1701,6 +1729,114 @@ export class World {
         for (let i = 0; i < this.balls.length; i++) {
             this.balls[i].prepareToRender(this.worldState, ballCtx);
         }
+    }
+
+    private shouldDrawRevolutionSlice(cameraValue: number, ballValue: number, threshold: number, inclusive: boolean): boolean {
+        if (cameraValue <= threshold) {
+            return inclusive ? ballValue <= threshold : ballValue > threshold;
+        }
+        return inclusive ? ballValue >= threshold : ballValue < threshold;
+    }
+
+    private drawRevolutionFloors(
+        ctx: RenderContext,
+        rp: RenderParams,
+        cameraY: number,
+        ballY: number,
+        inclusive: boolean
+    ): void {
+        const models = this.revolutionModels;
+        if (!models) {
+            return;
+        }
+        if (models.floor1 && this.shouldDrawRevolutionSlice(cameraY, ballY, REVOLUTION_FLOOR_LOW_Y, inclusive)) {
+            models.floor1.prepareToRender(ctx, rp);
+        }
+        if (models.floor2 && this.shouldDrawRevolutionSlice(cameraY, ballY, REVOLUTION_FLOOR_MID_Y, inclusive)) {
+            models.floor2.prepareToRender(ctx, rp);
+        }
+        if (models.floor3 && this.shouldDrawRevolutionSlice(cameraY, ballY, REVOLUTION_FLOOR_HIGH_Y, inclusive)) {
+            models.floor3.prepareToRender(ctx, rp);
+        }
+    }
+
+    private drawRevolutionWallsAndFloors(
+        ctx: RenderContext,
+        rp: RenderParams,
+        cameraX: number,
+        cameraY: number,
+        ballX: number,
+        ballY: number,
+        inclusive: boolean
+    ): void {
+        const models = this.revolutionModels;
+        if (!models) {
+            return;
+        }
+        const leftThreshold = -REVOLUTION_WALL_THRESHOLD;
+        const rightThreshold = REVOLUTION_WALL_THRESHOLD;
+        if (cameraX <= leftThreshold) {
+            if (models.wallRight && this.shouldDrawRevolutionSlice(cameraX, ballX, rightThreshold, inclusive)) {
+                models.wallRight.prepareToRender(ctx, rp);
+            }
+            this.drawRevolutionFloors(ctx, rp, cameraY, ballY, inclusive);
+            if (models.wallLeft && this.shouldDrawRevolutionSlice(cameraX, ballX, leftThreshold, inclusive)) {
+                models.wallLeft.prepareToRender(ctx, rp);
+            }
+            return;
+        }
+        if (cameraX <= rightThreshold) {
+            models.wallLeft?.prepareToRender(ctx, rp);
+            models.wallRight?.prepareToRender(ctx, rp);
+            this.drawRevolutionFloors(ctx, rp, cameraY, ballY, inclusive);
+            return;
+        }
+        if (models.wallLeft && this.shouldDrawRevolutionSlice(cameraX, ballX, leftThreshold, inclusive)) {
+            models.wallLeft.prepareToRender(ctx, rp);
+        }
+        this.drawRevolutionFloors(ctx, rp, cameraY, ballY, inclusive);
+        if (models.wallRight && this.shouldDrawRevolutionSlice(cameraX, ballX, rightThreshold, inclusive)) {
+            models.wallRight.prepareToRender(ctx, rp);
+        }
+    }
+
+    private drawRevolutionSpecialStageModels(ctx: RenderContext, viewFromWorld: mat4): void {
+        const models = this.revolutionModels;
+        const revolutionAg = this.animGroups[1];
+        if (!models || !revolutionAg) {
+            return;
+        }
+        const worldFromAg = revolutionAg.getWorldFromAg();
+        if (!mat4.invert(scratchRevolutionAgFromWorld, worldFromAg)) {
+            return;
+        }
+        mat4.getTranslation(scratchRevolutionCameraWorld, ctx.viewerInput.camera.worldMatrix);
+        transformVec3Mat4w1(scratchRevolutionCameraLocal, scratchRevolutionAgFromWorld, scratchRevolutionCameraWorld);
+        transformVec3Mat4w1(scratchRevolutionBallLocal, scratchRevolutionAgFromWorld, this.ballPos);
+
+        const rp = scratchRenderParams;
+        rp.reset();
+        rp.sort = RenderSort.None;
+        rp.lighting = this.worldState.lighting;
+        mat4.mul(rp.viewFromModel, viewFromWorld, worldFromAg);
+        this.drawRevolutionWallsAndFloors(
+            ctx,
+            rp,
+            scratchRevolutionCameraLocal[0],
+            scratchRevolutionCameraLocal[1],
+            scratchRevolutionBallLocal[0],
+            scratchRevolutionBallLocal[1],
+            true
+        );
+        this.drawRevolutionWallsAndFloors(
+            ctx,
+            rp,
+            scratchRevolutionCameraLocal[0],
+            scratchRevolutionCameraLocal[1],
+            scratchRevolutionBallLocal[0],
+            scratchRevolutionBallLocal[1],
+            false
+        );
     }
 
     private raycastStageDown(pos: vec3): number | null {
