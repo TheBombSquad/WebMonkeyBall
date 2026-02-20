@@ -1004,6 +1004,10 @@ body.gameplay-active {
   color: #ffb3b3;
 }
 
+.lobby-max-players-warning {
+  color: #ffd36c;
+}
+
 .response-curve {
   width: 100%;
   max-width: 220px;

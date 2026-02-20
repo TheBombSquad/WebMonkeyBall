@@ -31,6 +31,8 @@ type LobbyStateDeps = {
   getLobbySelectedGameMode: () => any;
   getDefaultGameModeOptions: (mode: any) => RoomGameModeOptions;
   readLobbyGameModeOptionsFromInputs: (mode: any, fallbackRaw: unknown) => RoomGameModeOptions;
+  lobbyDefaultPlayers: number;
+  chainedDefaultPlayers: number;
   chainedMaxPlayers: number;
   lobbyMaxPlayers: number;
   broadcastRoomUpdate: () => void;
@@ -156,8 +158,11 @@ export class LobbyStateController {
       return;
     }
     const mode = this.deps.getLobbySelectedGameMode();
+    const currentPlayers = this.deps.game.players.length;
     const maxPlayersCap = mode === 'chained_together' ? this.deps.chainedMaxPlayers : this.deps.lobbyMaxPlayers;
-    const nextMax = this.deps.clampInt(Math.min(lobbyRoom.settings.maxPlayers, maxPlayersCap), 2, maxPlayersCap);
+    const minPlayers = Math.min(maxPlayersCap, Math.max(2, currentPlayers));
+    const defaultMax = mode === 'chained_together' ? this.deps.chainedDefaultPlayers : this.deps.lobbyDefaultPlayers;
+    const nextMax = this.deps.clampInt(defaultMax, minPlayers, maxPlayersCap);
     lobbyRoom.settings = {
       ...lobbyRoom.settings,
       maxPlayers: nextMax,

@@ -28,7 +28,9 @@ export const chatTiming = {
 };
 
 export const multiplayerLimits = {
-  lobbyMaxPlayers: 8,
+  lobbyDefaultPlayers: 4,
+  chainedDefaultPlayers: 2,
+  lobbyMaxPlayers: 16,
   chainedMaxPlayers: 4,
 };
 

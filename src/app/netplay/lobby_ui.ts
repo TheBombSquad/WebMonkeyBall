@@ -21,6 +21,7 @@ type LobbyUiDeps = {
   lobbyRoomNameInput: HTMLInputElement | null;
   lobbyGameModeSelect: HTMLSelectElement | null;
   lobbyMaxPlayersSelect: HTMLSelectElement | null;
+  lobbyMaxPlayersWarning: HTMLElement | null;
   lobbyCollisionToggle: HTMLInputElement | null;
   lobbyInfiniteTimeToggle: HTMLInputElement | null;
   lobbyLockToggle: HTMLInputElement | null;
@@ -35,6 +36,8 @@ type LobbyUiDeps = {
   lobbyStageChooseButton: HTMLButtonElement | null;
   modeStandard: MultiplayerGameMode;
   modeChained: MultiplayerGameMode;
+  lobbyDefaultPlayers: number;
+  chainedDefaultPlayers: number;
   chainedMaxPlayers: number;
   getLobbyRoomGameMode: () => MultiplayerGameMode;
   formatRoomInfoLabel: (room: RoomInfo) => string;
@@ -58,7 +61,13 @@ export class LobbyUiController {
   }
 
   private getActiveLobbyPlayerCount() {
-    return this.deps.game.players.filter((player) => !player.isSpectator && !player.pendingSpawn).length;
+    return this.deps.game.players.filter((player) => !player.isSpectator).length;
+  }
+
+  private getDefaultMaxPlayersForMode(mode: MultiplayerGameMode) {
+    return mode === this.deps.modeChained
+      ? this.deps.chainedDefaultPlayers
+      : this.deps.lobbyDefaultPlayers;
   }
 
   getLobbyStartDisabledReason(isHost: boolean, mode: MultiplayerGameMode) {
@@ -73,7 +82,7 @@ export class LobbyUiController {
       return 'Need at least 2 active players';
     }
     if (activePlayers > this.deps.chainedMaxPlayers) {
-      return 'Chained Together supports up to 4 players';
+      return `Chained Together supports up to ${this.deps.chainedMaxPlayers} players`;
     }
     return '';
   }
@@ -182,6 +191,9 @@ export class LobbyUiController {
         this.deps.lobbyGameModeSelect.value = this.deps.modeStandard;
         this.deps.lobbyGameModeSelect.disabled = true;
       }
+      if (this.deps.lobbyMaxPlayersWarning) {
+        this.deps.lobbyMaxPlayersWarning.classList.add('hidden');
+      }
       this.deps.renderLobbyGameModeOptions(this.deps.modeStandard, null, true);
       if (this.deps.lobbyLockToggle) {
         this.deps.lobbyLockToggle.checked = false;
@@ -227,6 +239,11 @@ export class LobbyUiController {
     }
     if (this.deps.lobbyRoomStatus) {
       this.deps.lobbyRoomStatus.textContent = `${statusLabel} • ${playerCount}/${maxPlayers} players • ${this.deps.formatMultiplayerGameModeLabel(gameMode)}`;
+    }
+    if (this.deps.lobbyMaxPlayersWarning) {
+      const defaultPlayers = this.getDefaultMaxPlayersForMode(gameMode);
+      const showWarning = isHost && maxPlayers > defaultPlayers;
+      this.deps.lobbyMaxPlayersWarning.classList.toggle('hidden', !showWarning);
     }
 
     const inMatch = lobbyRoom.meta?.status === 'in_game' || this.deps.netplayHasCurrentCourse();

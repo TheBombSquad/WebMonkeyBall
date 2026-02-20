@@ -45,6 +45,7 @@ export function createMainControllerGraph(args: any) {
     profileUi,
     sanitizeProfile,
     lobbyMaxPlayersSelect,
+    lobbyMaxPlayersWarning,
     lobbyCollisionToggle,
     lobbyInfiniteTimeToggle,
     lobbyLockToggle,
@@ -105,6 +106,8 @@ export function createMainControllerGraph(args: any) {
   } = args;
 
   const {
+    LOBBY_DEFAULT_PLAYERS,
+    CHAINED_DEFAULT_PLAYERS,
     CHAINED_MAX_PLAYERS,
     PROFILE_BROADCAST_COOLDOWN_MS,
     LOBBY_NAME_UPDATE_COOLDOWN_MS,
@@ -184,6 +187,8 @@ const lobbyBrowser = new LobbyBrowserController({
   },
   getNetplayRole: () => state.netplayState?.role ?? null,
   getLobbySelectedGameMode: () => roomMeta.getLobbySelectedGameMode(),
+  lobbyDefaultPlayers: LOBBY_DEFAULT_PLAYERS,
+  chainedDefaultPlayers: CHAINED_DEFAULT_PLAYERS,
   getRoomGameMode: (room) => roomMeta.getRoomGameMode(room),
   formatMultiplayerGameModeLabel,
   formatGameSourceLabel,
@@ -217,6 +222,7 @@ const peerSession = new PeerSessionController({
   lobbyStatus,
   game,
   chainedMaxPlayers: CHAINED_MAX_PLAYERS,
+  lobbyMaxPlayers: LOBBY_MAX_PLAYERS,
   getLobbyRoom: () => state.lobbyRoom,
   getLobbyHostToken: () => state.lobbyHostToken,
   getLobbySignalShouldReconnect: () => state.lobbySignalShouldReconnect,
@@ -405,6 +411,8 @@ const lobbyState = new LobbyStateController({
   getLobbySelectedGameMode: () => roomMeta.getLobbySelectedGameMode(),
   getDefaultGameModeOptions: (mode) => gamemodeOptions.getDefaultOptions(mode),
   readLobbyGameModeOptionsFromInputs: (mode, fallbackRaw) => gamemodeOptions.readOptionsFromInputs(mode, fallbackRaw),
+  lobbyDefaultPlayers: LOBBY_DEFAULT_PLAYERS,
+  chainedDefaultPlayers: CHAINED_DEFAULT_PLAYERS,
   chainedMaxPlayers: CHAINED_MAX_PLAYERS,
   lobbyMaxPlayers: LOBBY_MAX_PLAYERS,
   broadcastRoomUpdate: () => {
@@ -631,6 +639,7 @@ lobbyUiController = new LobbyUiController({
   lobbyRoomStatus,
   lobbyRoomNameInput,
   lobbyGameModeSelect,
+  lobbyMaxPlayersWarning,
   renderLobbyGameModeOptions: (mode, raw, disabled) => {
     gamemodeOptions.render(mode, raw, disabled);
   },
@@ -649,6 +658,8 @@ lobbyUiController = new LobbyUiController({
   lobbyStageChooseButton,
   modeStandard: MULTIPLAYER_MODE_STANDARD,
   modeChained: MULTIPLAYER_MODE_CHAINED,
+  lobbyDefaultPlayers: LOBBY_DEFAULT_PLAYERS,
+  chainedDefaultPlayers: CHAINED_DEFAULT_PLAYERS,
   chainedMaxPlayers: CHAINED_MAX_PLAYERS,
   getLobbyRoomGameMode: () => roomMeta.getLobbyRoomGameMode(),
   formatRoomInfoLabel,
@@ -732,6 +743,7 @@ netplayMessageFlow = new NetplayMessageFlowController({
   getRoomGameModeOptions: (room, mode) => gamemodeOptions.getRoomMetaOptions(room?.meta, mode),
   applyGameModeOptionsToGame: (mode, raw) => gamemodeOptions.applyOptionsToGame(game, mode, raw),
   modeChained: MULTIPLAYER_MODE_CHAINED,
+  lobbyMaxPlayers: LOBBY_MAX_PLAYERS,
   chainedMaxPlayers: CHAINED_MAX_PLAYERS,
   normalizeMultiplayerGameMode,
   setLobbyRoom: (room) => {

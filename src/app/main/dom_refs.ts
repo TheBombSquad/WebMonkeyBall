@@ -138,6 +138,7 @@ export function collectMainDomRefs() {
   const lobbyPlayerList = document.getElementById('lobby-player-list') as HTMLElement | null;
   const lobbyGameModeSelect = document.getElementById('lobby-gamemode') as HTMLSelectElement | null;
   const lobbyMaxPlayersSelect = document.getElementById('lobby-max-players') as HTMLSelectElement | null;
+  const lobbyMaxPlayersWarning = document.getElementById('lobby-max-players-warning') as HTMLElement | null;
   const lobbyCollisionToggle = document.getElementById('lobby-collision') as HTMLInputElement | null;
   const lobbyInfiniteTimeToggle = document.getElementById('lobby-infinite-time') as HTMLInputElement | null;
   const lobbyLockToggle = document.getElementById('lobby-locked') as HTMLInputElement | null;
@@ -304,6 +305,7 @@ export function collectMainDomRefs() {
     lobbyPlayerList,
     lobbyGameModeSelect,
     lobbyMaxPlayersSelect,
+    lobbyMaxPlayersWarning,
     lobbyCollisionToggle,
     lobbyInfiniteTimeToggle,
     lobbyLockToggle,

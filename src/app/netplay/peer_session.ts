@@ -32,6 +32,7 @@ type PeerSessionDeps = {
   lobbyStatus: HTMLElement | null;
   game: Game;
   chainedMaxPlayers: number;
+  lobbyMaxPlayers: number;
   getLobbyRoom: () => LobbyRoom | null;
   getLobbyHostToken: () => string | null;
   getLobbySignalShouldReconnect: () => boolean;
@@ -80,6 +81,11 @@ export class PeerSessionController {
     this.deps = deps;
   }
 
+  private capRoomMaxPlayers(mode: MultiplayerGameMode, requestedMaxPlayers: number) {
+    const cap = mode === 'chained_together' ? this.deps.chainedMaxPlayers : this.deps.lobbyMaxPlayers;
+    return Math.max(1, Math.min(requestedMaxPlayers, cap));
+  }
+
   rejectHostConnection(playerId: number, reason = 'Room is full') {
     this.deps.getHostRelay()?.sendTo(playerId, { type: 'kick', reason });
     window.setTimeout(() => {
@@ -111,9 +117,7 @@ export class PeerSessionController {
     state.currentGameMode = roomMode;
     this.deps.game.setLocalPlayerId(room.hostId);
     this.deps.applyLocalProfileToSession();
-    const cappedMaxPlayers = roomMode === 'chained_together'
-      ? Math.min(room.settings.maxPlayers, this.deps.chainedMaxPlayers)
-      : room.settings.maxPlayers;
+    const cappedMaxPlayers = this.capRoomMaxPlayers(roomMode, room.settings.maxPlayers);
     room.settings.maxPlayers = cappedMaxPlayers;
     this.deps.game.maxPlayers = cappedMaxPlayers;
     this.deps.game.playerCollisionEnabled = room.settings.collisionEnabled;
@@ -273,9 +277,7 @@ export class PeerSessionController {
     state.currentGameMode = roomMode;
     this.deps.game.setLocalPlayerId(playerId);
     this.deps.applyLocalProfileToSession();
-    const cappedMaxPlayers = roomMode === 'chained_together'
-      ? Math.min(room.settings.maxPlayers, this.deps.chainedMaxPlayers)
-      : room.settings.maxPlayers;
+    const cappedMaxPlayers = this.capRoomMaxPlayers(roomMode, room.settings.maxPlayers);
     room.settings.maxPlayers = cappedMaxPlayers;
     this.deps.game.maxPlayers = cappedMaxPlayers;
     this.deps.game.playerCollisionEnabled = room.settings.collisionEnabled;

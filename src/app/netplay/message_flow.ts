@@ -39,6 +39,7 @@ type MessageFlowDeps = {
   getRoomGameModeOptions: (room: RoomInfo | null | undefined, mode: MultiplayerGameMode) => RoomGameModeOptions;
   applyGameModeOptionsToGame: (mode: MultiplayerGameMode, raw: unknown) => RoomGameModeOptions;
   modeChained: MultiplayerGameMode;
+  lobbyMaxPlayers: number;
   chainedMaxPlayers: number;
   normalizeMultiplayerGameMode: (mode: unknown) => MultiplayerGameMode;
   setLobbyRoom: (room: RoomInfo) => void;
@@ -365,9 +366,10 @@ export class NetplayMessageFlowController {
     if (msg.type === 'room_update') {
       const mode = this.deps.getRoomGameMode(msg.room);
       const modeOptions = this.deps.getRoomGameModeOptions(msg.room, mode);
-      const cappedMaxPlayers = mode === this.deps.modeChained
-        ? Math.min(msg.room.settings.maxPlayers, this.deps.chainedMaxPlayers)
-        : msg.room.settings.maxPlayers;
+      const maxPlayersCap = mode === this.deps.modeChained
+        ? this.deps.chainedMaxPlayers
+        : this.deps.lobbyMaxPlayers;
+      const cappedMaxPlayers = Math.min(msg.room.settings.maxPlayers, maxPlayersCap);
       msg.room.settings.maxPlayers = cappedMaxPlayers;
       this.deps.game.maxPlayers = cappedMaxPlayers;
       this.deps.game.playerCollisionEnabled = msg.room.settings.collisionEnabled;

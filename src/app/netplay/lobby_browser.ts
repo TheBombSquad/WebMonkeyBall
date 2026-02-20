@@ -21,6 +21,8 @@ type LobbyBrowserDeps = {
   getLobbyHostToken: () => string | null;
   getNetplayRole: () => 'host' | 'client' | null;
   getLobbySelectedGameMode: () => MultiplayerGameMode;
+  lobbyDefaultPlayers: number;
+  chainedDefaultPlayers: number;
   getRoomGameMode: (room: RoomInfo | null | undefined) => MultiplayerGameMode;
   formatMultiplayerGameModeLabel: (mode: MultiplayerGameMode) => string;
   formatGameSourceLabel: (source: unknown) => string;
@@ -73,7 +75,7 @@ export class LobbyBrowserController {
         meta.className = 'lobby-item-meta';
         const status = room.meta?.status === 'in_game' ? 'In Game' : 'Waiting';
         const playerCount = room.playerCount ?? 0;
-        const maxPlayers = room.settings?.maxPlayers ?? 8;
+        const maxPlayers = room.settings?.maxPlayers ?? this.deps.lobbyDefaultPlayers;
         const locked = !!room.settings?.locked;
         const lockLabel = locked ? ' • Locked' : '';
         meta.textContent = `${status} • ${playerCount}/${maxPlayers} players${lockLabel}`;
@@ -108,7 +110,9 @@ export class LobbyBrowserController {
     }
     const isPublic = this.deps.lobbyPublicCheckbox?.checked ?? true;
     const mode = this.deps.getLobbySelectedGameMode();
-    const defaultMaxPlayers = mode === 'chained_together' ? 4 : 8;
+    const defaultMaxPlayers = mode === 'chained_together'
+      ? this.deps.chainedDefaultPlayers
+      : this.deps.lobbyDefaultPlayers;
     lobbyStatus.textContent = 'Lobby: creating...';
     try {
       const result = await lobbyClient.createRoom({
