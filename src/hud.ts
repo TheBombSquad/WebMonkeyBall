@@ -1448,8 +1448,13 @@ export class HudRenderer {
     const replayActive = Boolean(game.activeResultReplay);
     const replayJustEnded = this.lastResultReplayActive && !replayActive;
     const suppressResultReplayEventStart = replayActive || replayJustEnded;
-    const goalEventTick = Number.isFinite(game.hudGoalEventTick) ? game.hudGoalEventTick : null;
-    const ringoutEventTick = Number.isFinite(game.hudRingoutEventTick) ? game.hudRingoutEventTick : null;
+    const useSharedEventTicks = !(game.session?.isMultiplayer?.(game) ?? false);
+    const goalEventTick = useSharedEventTicks && Number.isFinite(game.hudGoalEventTick)
+      ? game.hudGoalEventTick
+      : null;
+    const ringoutEventTick = useSharedEventTicks && Number.isFinite(game.hudRingoutEventTick)
+      ? game.hudRingoutEventTick
+      : null;
     const goalEventTriggered = goalEventTick !== null && goalEventTick >= 0 && goalEventTick !== this.lastGoalEventTick;
     const ringoutEventTriggered = ringoutEventTick !== null
       && ringoutEventTick >= 0

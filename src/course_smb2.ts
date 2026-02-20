@@ -25,6 +25,17 @@ export const SMB2_CHALLENGE_ORDER = {
   'master-extra': [331, 332, 333, 334, 335, 336, 337, 338, 339, 340],
 } as const;
 
+const SMB2_CHALLENGE_BONUS_FLOORS = {
+  'beginner': [5],
+  'advanced': [5, 10, 20],
+  'expert': [5, 10, 20, 30, 40],
+  'beginner-extra': [],
+  'advanced-extra': [],
+  'expert-extra': [],
+  'master': [],
+  'master-extra': [],
+} as const;
+
 export const SMB2_STORY_ORDER = [
   [201, 202, 203, 204, 1, 2, 3, 4, 5, 6],
   [7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
@@ -62,19 +73,24 @@ function resolveStageEntry(entry: StageEntry): StageEntry {
 
 export type Smb2ChallengeDifficulty = keyof typeof SMB2_CHALLENGE_ORDER | string;
 
+function buildChallengeBonusFlags(list: readonly number[], bonusFloors: readonly number[]) {
+  const flags = list.map(() => false);
+  for (let i = 0; i < bonusFloors.length; i += 1) {
+    const floorIndex = bonusFloors[i] - 1;
+    if (floorIndex >= 0 && floorIndex < flags.length) {
+      flags[floorIndex] = true;
+    }
+  }
+  return flags;
+}
+
 export const SMB2_CHALLENGE_BONUS = Object.fromEntries(
   Object.entries(SMB2_CHALLENGE_ORDER).map(([key, list]) => [
     key,
-    list.map((_id, index) => {
-      const stageNumber = index + 1;
-      if (stageNumber === 5) {
-        return true;
-      }
-      if (stageNumber % 10 === 0) {
-        return stageNumber !== list.length;
-      }
-      return false;
-    }),
+    buildChallengeBonusFlags(
+      list,
+      SMB2_CHALLENGE_BONUS_FLOORS[key as keyof typeof SMB2_CHALLENGE_BONUS_FLOORS] ?? []
+    ),
   ])
 ) as Record<Smb2ChallengeDifficulty, boolean[]>;
 
@@ -90,26 +106,14 @@ export type Smb2CourseConfig =
       stageIndex: number;
     };
 
-function computeChallengeBonusFlags(list: StageEntry[]) {
-  return list.map((_id, index) => {
-    const stageNumber = index + 1;
-    if (stageNumber === 5) {
-      return true;
-    }
-    if (stageNumber % 10 === 0) {
-      return stageNumber !== list.length;
-    }
-    return false;
-  });
-}
-
 function normalizeBonusFlags(list: StageEntry[], flags: boolean[] | null | undefined) {
+  const normalized = list.map(() => false);
   if (!flags || flags.length === 0) {
-    return computeChallengeBonusFlags(list);
+    return normalized;
   }
-  const normalized = flags.slice(0, list.length);
-  while (normalized.length < list.length) {
-    normalized.push(false);
+  const count = Math.min(flags.length, normalized.length);
+  for (let i = 0; i < count; i += 1) {
+    normalized[i] = Boolean(flags[i]);
   }
   return normalized;
 }
