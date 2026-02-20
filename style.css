@@ -226,6 +226,10 @@ body.gameplay-active {
   width: min(1024px, 96vw);
 }
 
+#settings-menu {
+  width: min(760px, 96vw);
+}
+
 .panel h1 {
   margin: 0 0 8px;
   font-size: 28px;
@@ -508,6 +512,31 @@ body.gameplay-active {
 .profile-ball-texture-row .field {
   display: grid;
   gap: 6px;
+}
+
+.profile-ball-preview-row {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.profile-ball-preview-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.profile-ball-preview-window {
+  width: min(360px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: #111419;
+  overflow: hidden;
+}
+
+.profile-ball-preview-window canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 11;
 }
 
 .color-input {

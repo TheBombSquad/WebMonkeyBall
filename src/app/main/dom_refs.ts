@@ -167,6 +167,7 @@ export function collectMainDomRefs() {
   const profileBallHemi2TextureInput = document.getElementById('profile-ball-hemi2-texture-input') as HTMLInputElement | null;
   const profileBallHemi1TextureClearButton = document.getElementById('profile-ball-hemi1-texture-clear') as HTMLButtonElement | null;
   const profileBallHemi2TextureClearButton = document.getElementById('profile-ball-hemi2-texture-clear') as HTMLButtonElement | null;
+  const profileBallPreviewCanvas = document.getElementById('profile-ball-preview') as HTMLCanvasElement | null;
   const profileBallTextureError = document.getElementById('profile-ball-texture-error') as HTMLElement | null;
   const hidePlayerNamesToggle = document.getElementById('hide-player-names') as HTMLInputElement | null;
   const hideLobbyNamesToggle = document.getElementById('hide-lobby-names') as HTMLInputElement | null;
@@ -342,6 +343,7 @@ export function collectMainDomRefs() {
     profileBallHemi2TextureInput,
     profileBallHemi1TextureClearButton,
     profileBallHemi2TextureClearButton,
+    profileBallPreviewCanvas,
     profileBallTextureError,
     hidePlayerNamesToggle,
     hideLobbyNamesToggle,

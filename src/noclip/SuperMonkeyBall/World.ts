@@ -1743,6 +1743,8 @@ export class World {
     public prepareToRender(ctx: RenderContext): void {
         const bgOpaqueInstList = ctx.bgOpaqueInstList ?? ctx.opaqueInstList;
         const bgTranslucentInstList = ctx.bgTranslucentInstList ?? ctx.translucentInstList;
+        const skipStageGeometry = !!ctx.skipStageGeometry;
+        const skipBackground = !!ctx.skipBackground;
         const stageCtx = ctx.forceAlphaWrite
             ? ctx
             : {
@@ -1793,44 +1795,50 @@ export class World {
                 skipModelNames = new Set<string>([BONUS_WAVE_MODEL_NAME]);
             }
         }
-        for (let i = 0; i < this.animGroups.length; i++) {
-            this.animGroups[i].prepareToRender(
-                this.worldState,
-                stageCtx,
-                bananasByGroup?.[i],
-                jamabarsByGroup?.[i],
-                goalBagsByGroup?.[i],
-                goalTapesByGroup?.[i],
-                switchesByGroup?.[i],
-                viewFromWorldTilted,
-                viewFromWorld,
-                tiltParams,
-                skipModelNames
-            );
+        if (!skipStageGeometry) {
+            for (let i = 0; i < this.animGroups.length; i++) {
+                this.animGroups[i].prepareToRender(
+                    this.worldState,
+                    stageCtx,
+                    bananasByGroup?.[i],
+                    jamabarsByGroup?.[i],
+                    goalBagsByGroup?.[i],
+                    goalTapesByGroup?.[i],
+                    switchesByGroup?.[i],
+                    viewFromWorldTilted,
+                    viewFromWorld,
+                    tiltParams,
+                    skipModelNames
+                );
+            }
+            this.drawRevolutionSpecialStageModels(stageCtx, viewFromWorldTilted);
+            if (this.bonusWaveModel && !ctx.mirrorCapture) {
+                const rp = scratchRenderParams;
+                rp.reset();
+                rp.lighting = this.worldState.lighting;
+                mat4.copy(rp.viewFromModel, viewFromWorldTilted);
+                this.bonusWaveModel.prepareToRender(stageCtx, rp);
+            }
+            this.drawProjectedShadow(stageCtx, viewFromWorldTilted);
         }
-        this.drawRevolutionSpecialStageModels(stageCtx, viewFromWorldTilted);
-        if (this.bonusWaveModel && !ctx.mirrorCapture) {
-            const rp = scratchRenderParams;
-            rp.reset();
-            rp.lighting = this.worldState.lighting;
-            mat4.copy(rp.viewFromModel, viewFromWorldTilted);
-            this.bonusWaveModel.prepareToRender(stageCtx, rp);
-        }
-        this.drawProjectedShadow(stageCtx, viewFromWorldTilted);
         this.drawConfetti(stageCtx, viewFromWorldTilted);
         this.drawModPrimitives(stageCtx, viewFromWorldTilted);
-        if (!ctx.mirrorCapture && !ctx.wormholeCapture) {
+        if (!skipStageGeometry && !ctx.mirrorCapture && !ctx.wormholeCapture) {
             this.drawEffects(stageCtx, viewFromWorldTilted, viewFromWorldPrev, viewFromWorld);
         }
-        for (let i = 0; i < this.fgObjects.length; i++) {
-            this.fgObjects[i].prepareToRenderWithViewMatrix(this.worldState, stageCtx, viewFromWorldTilted);
+        if (!skipStageGeometry) {
+            for (let i = 0; i < this.fgObjects.length; i++) {
+                this.fgObjects[i].prepareToRenderWithViewMatrix(this.worldState, stageCtx, viewFromWorldTilted);
+            }
         }
-        this.background.prepareToRender(this.worldState, {
-            ...bgCtx,
-            viewFromWorld: viewFromWorldTilted,
-            viewFromWorldPrev,
-            viewFromWorldNoTilt: viewFromWorld,
-        });
+        if (!skipBackground) {
+            this.background.prepareToRender(this.worldState, {
+                ...bgCtx,
+                viewFromWorld: viewFromWorldTilted,
+                viewFromWorldPrev,
+                viewFromWorldNoTilt: viewFromWorld,
+            });
+        }
         const ballCtx = ctx.skipStageTilt ? stageCtx : { ...stageCtx, viewFromWorld: viewFromWorldTilted };
         for (let i = 0; i < this.balls.length; i++) {
             this.balls[i].prepareToRender(this.worldState, ballCtx);
@@ -2852,8 +2860,146 @@ export class World {
             }
             return Math.min(1, Math.max(0, value));
         };
+        const submitPrimitive = (
+            textureName: string | undefined,
+            additiveBlend: boolean,
+            depthTest: boolean,
+            useAlphaClip: boolean,
+            vertexData: ArrayBuffer,
+            vertexCount: number,
+            translucentSortDistance: number,
+        ): void => {
+            const vbuf = ctx.renderInstManager.gfxRenderCache.dynamicBufferCache.allocateData(
+                GfxBufferUsage.Vertex,
+                new Uint8Array(vertexData),
+            );
+            const renderInst = ctx.renderInstManager.newRenderInst();
+            renderInst.setBindingLayouts(gxBindingLayouts);
+            fillSceneParamsDataOnTemplate(renderInst, ctx.viewerInput, 0, this.worldState.time.getAnimTimeFrames());
+            renderInst.setGfxProgram(useAlphaClip ? this.streakCutoutProgram : this.streakProgram);
+            renderInst.setPrimitiveTopology(GfxPrimitiveTopology.Triangles);
+            if (useAlphaClip) {
+                renderInst.setMegaStateFlags(this.ribbonCutoutMegaState);
+            } else {
+                renderInst.setMegaStateFlags(getRibbonMegaState(additiveBlend, depthTest));
+            }
+            renderInst.setVertexInput(this.streakInputLayout, [vbuf], null);
+            renderInst.setDrawCount(vertexCount);
+            renderInst.setSamplerBindingsFromTextureMappings([this.getStreakTextureMapping(textureName)]);
+            renderInst.setAllowSkippingIfPipelineNotReady(false);
+            if (useAlphaClip) {
+                ctx.opaqueInstList.submitRenderInst(renderInst);
+            } else {
+                renderInst.sortKey = -translucentSortDistance;
+                ctx.translucentInstList.submitRenderInst(renderInst);
+            }
+        };
 
         for (const primitive of this.modPrimitives) {
+            if (primitive.kind === "quad") {
+                const corners = primitive.corners;
+                if (!corners || corners.length !== 4) {
+                    continue;
+                }
+                const alpha = clamp01(primitive.alpha, 1);
+                if (alpha <= 0) {
+                    continue;
+                }
+                const baseR = clamp01(primitive.colorR ?? 1, 1);
+                const baseG = clamp01(primitive.colorG ?? 1, 1);
+                const baseB = clamp01(primitive.colorB ?? 1, 1);
+                const r = Math.round(baseR * 255);
+                const g = Math.round(baseG * 255);
+                const b = Math.round(baseB * 255);
+                const a = Math.round(alpha * 255);
+                if (a <= 0) {
+                    continue;
+                }
+                const useAlphaClip = primitive.alphaClip === true
+                    && primitive.additiveBlend !== true
+                    && primitive.depthTest !== false;
+                const uMinRaw = primitive.uMin ?? 0;
+                const uMaxRaw = primitive.uMax ?? 1;
+                const vMinRaw = primitive.vMin ?? 0;
+                const vMaxRaw = primitive.vMax ?? 1;
+                const uMin = Number.isFinite(uMinRaw) ? uMinRaw : 0;
+                const uMax = Number.isFinite(uMaxRaw) ? uMaxRaw : 1;
+                const vMin = Number.isFinite(vMinRaw) ? vMinRaw : 0;
+                const vMax = Number.isFinite(vMaxRaw) ? vMaxRaw : 1;
+                const c0 = corners[0];
+                const c1 = corners[1];
+                const c2 = corners[2];
+                const c3 = corners[3];
+                scratchVec3a[0] = c0.x;
+                scratchVec3a[1] = c0.y;
+                scratchVec3a[2] = c0.z;
+                transformVec3Mat4w1(scratchVec3b, viewFromWorld, scratchVec3a);
+                const x0 = scratchVec3b[0];
+                const y0 = scratchVec3b[1];
+                const z0 = scratchVec3b[2];
+                scratchVec3a[0] = c1.x;
+                scratchVec3a[1] = c1.y;
+                scratchVec3a[2] = c1.z;
+                transformVec3Mat4w1(scratchVec3b, viewFromWorld, scratchVec3a);
+                const x1 = scratchVec3b[0];
+                const y1 = scratchVec3b[1];
+                const z1 = scratchVec3b[2];
+                scratchVec3a[0] = c2.x;
+                scratchVec3a[1] = c2.y;
+                scratchVec3a[2] = c2.z;
+                transformVec3Mat4w1(scratchVec3b, viewFromWorld, scratchVec3a);
+                const x2 = scratchVec3b[0];
+                const y2 = scratchVec3b[1];
+                const z2 = scratchVec3b[2];
+                scratchVec3a[0] = c3.x;
+                scratchVec3a[1] = c3.y;
+                scratchVec3a[2] = c3.z;
+                transformVec3Mat4w1(scratchVec3b, viewFromWorld, scratchVec3a);
+                const x3 = scratchVec3b[0];
+                const y3 = scratchVec3b[1];
+                const z3 = scratchVec3b[2];
+                const centerX = (x0 + x1 + x2 + x3) * 0.25;
+                const centerY = (y0 + y1 + y2 + y3) * 0.25;
+                const centerZ = (z0 + z1 + z2 + z3) * 0.25;
+                const vertexCount = 6;
+                const vertexData = new ArrayBuffer(STREAK_VERTEX_SIZE * vertexCount);
+                const view = new DataView(vertexData);
+                let baseOffset = 0;
+                const writeCorner = (x: number, y: number, z: number, u: number, v: number): void => {
+                    writeVertex(
+                        view,
+                        baseOffset,
+                        x,
+                        y,
+                        z,
+                        r,
+                        g,
+                        b,
+                        a,
+                        u,
+                        v,
+                    );
+                    baseOffset += STREAK_VERTEX_SIZE;
+                };
+                // Triangle 1
+                writeCorner(x0, y0, z0, uMin, vMin);
+                writeCorner(x1, y1, z1, uMax, vMin);
+                writeCorner(x2, y2, z2, uMax, vMax);
+                // Triangle 2
+                writeCorner(x0, y0, z0, uMin, vMin);
+                writeCorner(x2, y2, z2, uMax, vMax);
+                writeCorner(x3, y3, z3, uMin, vMax);
+                submitPrimitive(
+                    primitive.textureName,
+                    primitive.additiveBlend === true,
+                    primitive.depthTest !== false,
+                    useAlphaClip,
+                    vertexData,
+                    vertexCount,
+                    Math.hypot(centerX, centerY, centerZ),
+                );
+                continue;
+            }
             if (primitive.kind !== "ribbon") {
                 continue;
             }
@@ -3128,31 +3274,16 @@ export class World {
                 baseOffset += STREAK_VERTEX_SIZE;
             }
 
-            const vbuf = ctx.renderInstManager.gfxRenderCache.dynamicBufferCache.allocateData(
-                GfxBufferUsage.Vertex,
-                new Uint8Array(vertexData),
+            const invPoints = 1 / points.length;
+            submitPrimitive(
+                primitive.textureName,
+                primitive.additiveBlend === true,
+                primitive.depthTest !== false,
+                useAlphaClip,
+                vertexData,
+                vertexCount,
+                Math.hypot(centerX * invPoints, centerY * invPoints, centerZ * invPoints),
             );
-            const renderInst = ctx.renderInstManager.newRenderInst();
-            renderInst.setBindingLayouts(gxBindingLayouts);
-            fillSceneParamsDataOnTemplate(renderInst, ctx.viewerInput, 0, this.worldState.time.getAnimTimeFrames());
-            renderInst.setGfxProgram(useAlphaClip ? this.streakCutoutProgram : this.streakProgram);
-            renderInst.setPrimitiveTopology(GfxPrimitiveTopology.Triangles);
-            if (useAlphaClip) {
-                renderInst.setMegaStateFlags(this.ribbonCutoutMegaState);
-            } else {
-                renderInst.setMegaStateFlags(getRibbonMegaState(primitive.additiveBlend === true, primitive.depthTest !== false));
-            }
-            renderInst.setVertexInput(this.streakInputLayout, [vbuf], null);
-            renderInst.setDrawCount(vertexCount);
-            renderInst.setSamplerBindingsFromTextureMappings([this.getStreakTextureMapping(primitive.textureName)]);
-            renderInst.setAllowSkippingIfPipelineNotReady(false);
-            if (useAlphaClip) {
-                ctx.opaqueInstList.submitRenderInst(renderInst);
-            } else {
-                const invPoints = 1 / points.length;
-                renderInst.sortKey = -Math.hypot(centerX * invPoints, centerY * invPoints, centerZ * invPoints);
-                ctx.translucentInstList.submitRenderInst(renderInst);
-            }
         }
     }
 

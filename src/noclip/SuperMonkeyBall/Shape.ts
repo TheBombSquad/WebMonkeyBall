@@ -29,9 +29,23 @@ import { assert } from "../util.js";
 
 const BALL_UV_REMAP_EPSILON = 1e-6;
 const BALL_UV_EDGE_RELIEF = 1.0;
+const BALL_UV_CENTER_BLEND_START = 0.04;
+const BALL_UV_CENTER_BLEND_END = 0.18;
+const VERTEX_DATA_LITTLE_ENDIAN = true;
 
 function isBallHemisphereModelName(modelName: string): boolean {
     return /_HEMI_(INSIDE|OUTSIDE)(?:_L[23])?$/.test(modelName);
+}
+
+function clamp01(value: number): number {
+    if (value <= 0) return 0;
+    if (value >= 1) return 1;
+    return value;
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+    const t = clamp01((x - edge0) / (edge1 - edge0));
+    return t * t * (3 - 2 * t);
 }
 
 function remapBallHemisphereTex0(loadedVertexDatas: LoadedVertexData[], loadedVertexLayout: LoadedVertexLayout): void {
@@ -40,6 +54,10 @@ function remapBallHemisphereTex0(loadedVertexDatas: LoadedVertexData[], loadedVe
         return;
     }
     const stride = loadedVertexLayout.vertexBufferStrides[0];
+    let minU = Number.POSITIVE_INFINITY;
+    let maxU = Number.NEGATIVE_INFINITY;
+    let minV = Number.POSITIVE_INFINITY;
+    let maxV = Number.NEGATIVE_INFINITY;
     for (let i = 0; i < loadedVertexDatas.length; i++) {
         const loadedVertexData = loadedVertexDatas[i];
         const vertexBuffer = loadedVertexData.vertexBuffers[0];
@@ -47,30 +65,34 @@ function remapBallHemisphereTex0(loadedVertexDatas: LoadedVertexData[], loadedVe
             continue;
         }
         const view = new DataView(vertexBuffer);
-        let minU = Number.POSITIVE_INFINITY;
-        let maxU = Number.NEGATIVE_INFINITY;
-        let minV = Number.POSITIVE_INFINITY;
-        let maxV = Number.NEGATIVE_INFINITY;
         for (let vtx = 0; vtx < loadedVertexData.totalVertexCount; vtx++) {
             const baseOffs = vtx * stride + tex0Offset;
-            const u = view.getFloat32(baseOffs + 0x00, false);
-            const v = view.getFloat32(baseOffs + 0x04, false);
+            const u = view.getFloat32(baseOffs + 0x00, VERTEX_DATA_LITTLE_ENDIAN);
+            const v = view.getFloat32(baseOffs + 0x04, VERTEX_DATA_LITTLE_ENDIAN);
             if (u < minU) minU = u;
             if (u > maxU) maxU = u;
             if (v < minV) minV = v;
             if (v > maxV) maxV = v;
         }
-        const centerU = (minU + maxU) * 0.5;
-        const centerV = (minV + maxV) * 0.5;
-        const radiusU = (maxU - minU) * 0.5;
-        const radiusV = (maxV - minV) * 0.5;
-        if (radiusU <= BALL_UV_REMAP_EPSILON || radiusV <= BALL_UV_REMAP_EPSILON) {
+    }
+    const centerU = (minU + maxU) * 0.5;
+    const centerV = (minV + maxV) * 0.5;
+    const radiusU = (maxU - minU) * 0.5;
+    const radiusV = (maxV - minV) * 0.5;
+    if (radiusU <= BALL_UV_REMAP_EPSILON || radiusV <= BALL_UV_REMAP_EPSILON) {
+        return;
+    }
+    for (let i = 0; i < loadedVertexDatas.length; i++) {
+        const loadedVertexData = loadedVertexDatas[i];
+        const vertexBuffer = loadedVertexData.vertexBuffers[0];
+        if (!(vertexBuffer instanceof ArrayBuffer)) {
             continue;
         }
+        const view = new DataView(vertexBuffer);
         for (let vtx = 0; vtx < loadedVertexData.totalVertexCount; vtx++) {
             const baseOffs = vtx * stride + tex0Offset;
-            const u = view.getFloat32(baseOffs + 0x00, false);
-            const v = view.getFloat32(baseOffs + 0x04, false);
+            const u = view.getFloat32(baseOffs + 0x00, VERTEX_DATA_LITTLE_ENDIAN);
+            const v = view.getFloat32(baseOffs + 0x04, VERTEX_DATA_LITTLE_ENDIAN);
             const dx = (u - centerU) / radiusU;
             const dy = (v - centerV) / radiusV;
             const radius = Math.hypot(dx, dy);
@@ -81,13 +103,19 @@ function remapBallHemisphereTex0(loadedVertexDatas: LoadedVertexData[], loadedVe
             const equalAreaRadius = Math.sqrt(
                 1 - Math.sqrt(Math.max(0, 1 - clampedRadius * clampedRadius))
             );
+            const centerBlend = smoothstep(
+                BALL_UV_CENTER_BLEND_START,
+                BALL_UV_CENTER_BLEND_END,
+                clampedRadius
+            );
+            const localRelief = BALL_UV_EDGE_RELIEF * centerBlend;
             const remappedRadius =
-                clampedRadius + (equalAreaRadius - clampedRadius) * BALL_UV_EDGE_RELIEF;
+                clampedRadius + (equalAreaRadius - clampedRadius) * localRelief;
             const scale = remappedRadius / radius;
             const remappedU = centerU + dx * scale * radiusU;
             const remappedV = centerV + dy * scale * radiusV;
-            view.setFloat32(baseOffs + 0x00, remappedU, false);
-            view.setFloat32(baseOffs + 0x04, remappedV, false);
+            view.setFloat32(baseOffs + 0x00, remappedU, VERTEX_DATA_LITTLE_ENDIAN);
+            view.setFloat32(baseOffs + 0x04, remappedV, VERTEX_DATA_LITTLE_ENDIAN);
         }
     }
 }

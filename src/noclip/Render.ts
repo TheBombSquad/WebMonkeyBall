@@ -2,6 +2,7 @@ import { Camera, CameraController } from './Camera.js';
 import { mat4, vec3 } from 'gl-matrix';
 import type { BallAppearanceProfile } from '../shared/ball_appearance.js';
 import { transformVec3Mat4w0, transformVec3Mat4w1 } from './MathHelpers.js';
+import type { Color } from './Color.js';
 import {
   makeAttachmentClearDescriptor,
   makeBackbufferDescSimple,
@@ -55,6 +56,14 @@ export type RenderContext = {
   skipWormholeSurfaces?: boolean;
   skipWormholeIds?: Set<number>;
   wormholeCapture?: boolean;
+  skipStageGeometry?: boolean;
+  skipBackground?: boolean;
+};
+
+export type SceneRenderOverrides = {
+  skipStageGeometry?: boolean;
+  skipBackground?: boolean;
+  clearColor?: Color | null;
 };
 
 export type BallRenderState = {
@@ -279,6 +288,7 @@ export class Renderer {
   private activeWormholeSourceId: number | null = null;
   private activeWormholeDestId: number | null = null;
   private lastExternalTimeFrames: number | null = null;
+  private sceneOverrides: SceneRenderOverrides | null = null;
 
   constructor(device: GfxDevice, private stageData: StageData) {
     this.renderHelper = new GXRenderHelperGfx(device);
@@ -544,6 +554,8 @@ export class Renderer {
       viewerInput,
       opaqueInstList,
       translucentInstList,
+      skipStageGeometry: this.sceneOverrides?.skipStageGeometry,
+      skipBackground: this.sceneOverrides?.skipBackground,
     };
     this.world.prepareToRender(renderCtx);
     this.renderHelper.prepareToRender();
@@ -552,10 +564,11 @@ export class Renderer {
 
   public render(device: GfxDevice, viewerInput: RenderContext['viewerInput']) {
     this.prepareToRender(device, viewerInput, this.opaqueInstList, this.translucentInstList);
+    const clearColor = this.sceneOverrides?.clearColor ?? this.world.getClearColor();
     const mainColorDesc = makeBackbufferDescSimple(
       GfxrAttachmentSlot.Color0,
       viewerInput,
-      makeAttachmentClearDescriptor(this.world.getClearColor())
+      makeAttachmentClearDescriptor(clearColor)
     );
     const mainDepthDesc = makeBackbufferDescSimple(
       GfxrAttachmentSlot.DepthStencil,
@@ -727,6 +740,10 @@ export class Renderer {
     builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
     this.renderHelper.renderGraph.execute(builder);
+  }
+
+  public setSceneOverrides(overrides: SceneRenderOverrides | null): void {
+    this.sceneOverrides = overrides;
   }
 
   public prewarmConfetti(device: GfxDevice, viewerInput: RenderContext['viewerInput']): void {

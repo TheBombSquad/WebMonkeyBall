@@ -34,4 +34,6 @@ export type RenderContext = {
   skipWormholeSurfaces?: boolean;
   skipWormholeIds?: Set<number>;
   wormholeCapture?: boolean;
+  skipStageGeometry?: boolean;
+  skipBackground?: boolean;
 };

@@ -54,6 +54,7 @@ import type { LobbyBrowserController } from './app/netplay/lobby_browser.js';
 import { bindLobbyEventHandlers } from './app/netplay/lobby_bindings.js';
 import { createPresenceUiHelpers } from './app/netplay/presence_ui.js';
 import { ProfileUiController } from './app/netplay/profile_ui.js';
+import { BallPreviewController } from './app/netplay/ball_preview.js';
 import type { LobbyStateController } from './app/netplay/lobby_state.js';
 import {
   RoomMetaController,
@@ -287,6 +288,7 @@ export function runMainApp() {
     profileBallHemi2TextureInput,
     profileBallHemi1TextureClearButton,
     profileBallHemi2TextureClearButton,
+    profileBallPreviewCanvas,
     profileBallTextureError,
     hidePlayerNamesToggle,
     hideLobbyNamesToggle,
@@ -362,6 +364,12 @@ export function runMainApp() {
     fetchSlice,
     getStageBasePath: (gameSource) => packSelection.getStageBasePath(gameSource),
     isNaomiStage,
+  });
+
+  const ballPreview = new BallPreviewController({
+    canvas: profileBallPreviewCanvas,
+    loadPreviewStageData: (stageId) => stageLoader.loadSmb1(stageId),
+    getBallAppearance: () => localProfile.ball,
   });
   
   let currentSmb2LikeMode: 'story' | 'challenge' | null = null;
@@ -1411,6 +1419,7 @@ export function runMainApp() {
     onMenuChanged: () => {
       lobbyUiController?.updateLobbyUi();
       inputControls?.syncTouchPreviewVisibility();
+      updateBallPreviewVisibility();
     },
     onOpenMultiplayerMenu: () => {
       if (lobbyClient) {
@@ -1515,6 +1524,14 @@ export function runMainApp() {
   });
   
   initControllerGraph(leaderboardSessionFlow);
+
+  function updateBallPreviewVisibility() {
+    const overlayVisible = !overlay.classList.contains('hidden');
+    const showPreview = overlayVisible
+      && menuFlow.getActiveMenu() === 'settings'
+      && settingsTabs.getActiveSettingsTab() === 'multiplayer';
+    ballPreview.setVisible(showPreview);
+  }
   
   function openSettingsMenu(tab?: SettingsTab) {
     const currentMenu = menuFlow.getActiveMenu();
@@ -1525,6 +1542,7 @@ export function runMainApp() {
       settingsTabs.setSettingsTab(tab);
     }
     menuFlow.setActiveMenu('settings');
+    updateBallPreviewVisibility();
   }
   
   function openLevelSelectMenu(returnMenu?: MenuPanel, singleplayerMode: 'practice' | null = null) {
@@ -1592,6 +1610,7 @@ export function runMainApp() {
   privacySettings = loadPrivacySettings();
   profileUi.updatePrivacyUi(privacySettings);
   settingsTabs.setSettingsTab(settingsTabs.getActiveSettingsTab());
+  updateBallPreviewVisibility();
   chatUi.updateChatUi(chatMessages, chatTiming.ingameVisibleMs, chatTiming.ingameFadeMs);
   void refreshLeaderboardAllowlist();
   if (leaderboardsOpenButton) {
@@ -1886,6 +1905,7 @@ export function runMainApp() {
     },
     onSetSettingsTab: (tab) => {
       settingsTabs.setSettingsTab(tab);
+      updateBallPreviewVisibility();
     },
     setInterpolationEnabled: (enabled) => {
       interpolationEnabled = enabled;
@@ -2158,6 +2178,10 @@ export function runMainApp() {
   } else if (multiplayerOnlineCount) {
     multiplayerOnlineCount.textContent = 'Offline';
   }
+
+  window.addEventListener('beforeunload', () => {
+    ballPreview.destroy();
+  });
   
   startRenderLoop({
     canvas,

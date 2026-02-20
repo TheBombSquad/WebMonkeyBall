@@ -16,4 +16,21 @@ export type RibbonRenderPrimitive = {
   additiveBlend?: boolean;
 };
 
-export type ModRenderPrimitive = RibbonRenderPrimitive;
+export type QuadRenderPrimitive = {
+  kind: 'quad';
+  corners: [Vec3, Vec3, Vec3, Vec3];
+  alpha: number;
+  alphaClip?: boolean;
+  colorR?: number;
+  colorG?: number;
+  colorB?: number;
+  textureName?: string;
+  depthTest?: boolean;
+  additiveBlend?: boolean;
+  uMin?: number;
+  uMax?: number;
+  vMin?: number;
+  vMax?: number;
+};
+
+export type ModRenderPrimitive = RibbonRenderPrimitive | QuadRenderPrimitive;
