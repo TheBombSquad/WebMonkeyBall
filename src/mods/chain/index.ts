@@ -2016,9 +2016,17 @@ function simulateChainedTogether(
         const reverseSolveFirst = ((substep + iter) & 1) === 1;
         solveChainSegmentConstraints(link.nodes, segmentRestLen, reverseSolveFirst, portalConstraint);
         solveChainSegmentConstraints(link.nodes, segmentRestLen, !reverseSolveFirst, portalConstraint);
-        const useFullCollision = iter === (CHAIN_CONSTRAINT_ITERS - 1);
-        collideChainInteriorNodes(state, game, link, stageFormat, useFullCollision, (iter & 1) === 1);
       }
+    }
+
+    for (let linkIndex = 0; linkIndex < state.links.length; linkIndex += 1) {
+      const link = state.links[linkIndex];
+      const playerA = playerMap.get(link.playerAId);
+      const playerB = playerMap.get(link.playerBId);
+      if (!playerA || !playerB) {
+        continue;
+      }
+      collideChainInteriorNodes(state, game, link, stageFormat, true, (substep & 1) === 1);
     }
 
     for (let linkIndex = 0; linkIndex < state.links.length; linkIndex += 1) {
