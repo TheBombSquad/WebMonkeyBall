@@ -17,6 +17,7 @@ type MenuFlowOptions = {
   setOverlayVisible: (visible: boolean) => void;
   isRunning: () => boolean;
   isNetplayEnabled: () => boolean;
+  isLeaderboardsMenuEnabled?: () => boolean;
   onPauseSingleplayer: () => void;
   onResumeSingleplayer: () => void;
 };
@@ -34,29 +35,31 @@ export class MenuFlowController {
   }
 
   setActiveMenu(menu: MenuPanel) {
-    if (this.activeMenu === menu) {
+    const leaderboardsEnabled = this.options.isLeaderboardsMenuEnabled?.() ?? true;
+    const nextMenu = menu === 'leaderboards' && !leaderboardsEnabled ? 'main' : menu;
+    if (this.activeMenu === nextMenu) {
       return;
     }
-    this.activeMenu = menu;
-    this.options.mainMenuPanel?.classList.toggle('hidden', menu !== 'main');
-    this.options.pauseMenuPanel?.classList.toggle('hidden', menu !== 'pause');
-    this.options.multiplayerLayout?.classList.toggle('hidden', menu !== 'multiplayer');
-    this.options.multiplayerMenuPanel?.classList.toggle('hidden', menu !== 'multiplayer');
-    this.options.multiplayerIngameMenuPanel?.classList.toggle('hidden', menu !== 'multiplayer-ingame');
-    this.options.settingsMenuPanel?.classList.toggle('hidden', menu !== 'settings');
-    this.options.levelSelectMenuPanel?.classList.toggle('hidden', menu !== 'level-select');
-    this.options.leaderboardsMenuPanel?.classList.toggle('hidden', menu !== 'leaderboards');
+    this.activeMenu = nextMenu;
+    this.options.mainMenuPanel?.classList.toggle('hidden', nextMenu !== 'main');
+    this.options.pauseMenuPanel?.classList.toggle('hidden', nextMenu !== 'pause');
+    this.options.multiplayerLayout?.classList.toggle('hidden', nextMenu !== 'multiplayer');
+    this.options.multiplayerMenuPanel?.classList.toggle('hidden', nextMenu !== 'multiplayer');
+    this.options.multiplayerIngameMenuPanel?.classList.toggle('hidden', nextMenu !== 'multiplayer-ingame');
+    this.options.settingsMenuPanel?.classList.toggle('hidden', nextMenu !== 'settings');
+    this.options.levelSelectMenuPanel?.classList.toggle('hidden', nextMenu !== 'level-select');
+    this.options.leaderboardsMenuPanel?.classList.toggle('hidden', nextMenu !== 'leaderboards');
     this.options.onMenuChanged();
-    if (menu === 'multiplayer') {
+    if (nextMenu === 'multiplayer') {
       this.options.onOpenMultiplayerMenu();
     }
-    if (menu === 'settings') {
+    if (nextMenu === 'settings') {
       this.options.onOpenSettingsMenu();
     }
-    if (menu === 'level-select') {
+    if (nextMenu === 'level-select') {
       this.options.onOpenLevelSelectMenu();
     }
-    if (menu === 'leaderboards') {
+    if (nextMenu === 'leaderboards') {
       this.options.onOpenLeaderboardsMenu();
     }
   }

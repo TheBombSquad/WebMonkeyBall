@@ -109,6 +109,8 @@ import {
 } from './pack.js';
 import type { LoadedPack } from './pack.js';
 
+const LEADERBOARDS_MENU_ENABLED = false;
+
 export function runMainApp() {
   
   const modRegistry = createDefaultModRegistry();
@@ -1226,6 +1228,7 @@ export function runMainApp() {
     setOverlayVisible,
     isRunning: () => running,
     isNetplayEnabled: () => netplayEnabled,
+    isLeaderboardsMenuEnabled: () => LEADERBOARDS_MENU_ENABLED,
     onPauseSingleplayer: () => {
       if (singleplayerPauseController) {
         singleplayerPauseController.handlePauseRequest();
@@ -1361,7 +1364,15 @@ export function runMainApp() {
   chatUi.updateChatUi(chatMessages, chatTiming.ingameVisibleMs, chatTiming.ingameFadeMs);
   void refreshLeaderboardAllowlist();
   if (leaderboardsOpenButton) {
-    leaderboardsOpenButton.disabled = !leaderboardsClient;
+    if (!LEADERBOARDS_MENU_ENABLED) {
+      leaderboardsOpenButton.classList.add('hidden');
+      leaderboardsOpenButton.disabled = true;
+    } else {
+      leaderboardsOpenButton.disabled = !leaderboardsClient;
+    }
+  }
+  if (!LEADERBOARDS_MENU_ENABLED) {
+    leaderboardsMenuPanel?.classList.add('hidden');
   }
   
   function resetLocalPlayersAfterNetplay() {
