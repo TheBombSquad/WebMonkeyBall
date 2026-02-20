@@ -77,7 +77,8 @@ export class LobbyStateController {
     }
     const current = this.deps.localProfile();
     const sanitized = this.deps.sanitizeProfile(current);
-    if (sanitized.name !== current.name || sanitized.avatarData !== current.avatarData) {
+    const hasBallChanged = JSON.stringify(sanitized.ball ?? null) !== JSON.stringify(current.ball ?? null);
+    if (sanitized.name !== current.name || sanitized.avatarData !== current.avatarData || hasBallChanged) {
       this.deps.setLocalProfile(sanitized);
       this.deps.saveLocalProfile(sanitized);
       this.deps.updateProfileUi();

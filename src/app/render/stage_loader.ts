@@ -19,11 +19,34 @@ export class StageLoader {
   private readonly fetchSlice: StageLoaderOptions['fetchSlice'];
   private readonly getStageBasePath: StageLoaderOptions['getStageBasePath'];
   private readonly isNaomiStage: StageLoaderOptions['isNaomiStage'];
+  private smb1BallCommonGmaPromise: Promise<Gma.Gma | null> | null = null;
 
   constructor(options: StageLoaderOptions) {
     this.fetchSlice = options.fetchSlice;
     this.getStageBasePath = options.getStageBasePath;
     this.isNaomiStage = options.isNaomiStage;
+  }
+
+  private loadSmb1BallCommonGma(): Promise<Gma.Gma | null> {
+    if (this.smb1BallCommonGmaPromise) {
+      return this.smb1BallCommonGmaPromise;
+    }
+    const smb1BasePath = this.getStageBasePath(GAME_SOURCES.SMB1) ?? STAGE_BASE_PATHS[GAME_SOURCES.SMB1];
+    this.smb1BallCommonGmaPromise = (async () => {
+      if (!smb1BasePath) {
+        return null;
+      }
+      try {
+        const [ballGmaBuf, ballTplBuf] = await Promise.all([
+          this.fetchSlice(`${smb1BasePath}/init/common.gma`),
+          this.fetchSlice(`${smb1BasePath}/init/common.tpl`),
+        ]);
+        return Gma.parseGma(ballGmaBuf, parseAVTpl(ballTplBuf, 'smb1-common-ball'));
+      } catch {
+        return null;
+      }
+    })();
+    return this.smb1BallCommonGmaPromise;
   }
 
   async loadSmb1(stageId: number): Promise<StageData> {
@@ -121,6 +144,7 @@ export class StageLoader {
       stageGma,
       bgGma,
       commonGma,
+      ballCommonGma: commonGma,
       goalTimerGma,
       nlObj,
       stageNlObj,
@@ -150,6 +174,7 @@ export class StageLoader {
     const bgName = stageInfo.bgInfo.fileName;
     const bgGmaPath = bgName ? `${stageBasePath}/bg/${bgName}.gma` : '';
     const bgTplPath = bgName ? `${stageBasePath}/bg/${bgName}.tpl` : '';
+    const ballCommonGmaPromise = this.loadSmb1BallCommonGma();
 
     const [
       stageGmaBuf,
@@ -160,6 +185,7 @@ export class StageLoader {
       commonNlTplBuf,
       bgGmaBuf,
       bgTplBuf,
+      ballCommonGma,
     ] =
       await Promise.all([
         this.fetchSlice(stageGmaPath),
@@ -170,6 +196,7 @@ export class StageLoader {
         this.fetchSlice(commonNlTplPath),
         bgName ? this.fetchSlice(bgGmaPath) : Promise.resolve(new ArrayBufferSlice(new ArrayBuffer(0))),
         bgName ? this.fetchSlice(bgTplPath) : Promise.resolve(new ArrayBufferSlice(new ArrayBuffer(0))),
+        ballCommonGmaPromise,
       ]);
 
     const stageTpl = parseAVTpl(stageTplBuf, `st${stageIdStr}`);
@@ -189,6 +216,7 @@ export class StageLoader {
       stageGma,
       bgGma,
       commonGma,
+      ballCommonGma: ballCommonGma ?? commonGma,
       nlObj,
       stageNlObj: null,
       stageNlObjNameMap: null,

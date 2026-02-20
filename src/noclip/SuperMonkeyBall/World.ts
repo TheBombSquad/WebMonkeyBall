@@ -57,6 +57,11 @@ import { AnimGroup } from "./AnimGroup.js";
 import { Lighting, LightingGroups } from "./Lighting.js";
 import { CommonModelID } from "./ModelInfo.js";
 import { GAME_SOURCES } from "../../shared/constants/index.js";
+import {
+    BALL_HEMI1_DEFAULT_COLOR,
+    BALL_HEMI2_DEFAULT_COLOR,
+    writeRgbFromHex,
+} from "../../shared/ball_appearance.js";
 import { CommonNlModelID } from "./NlModelInfo.js";
 import { S16_TO_RADIANS } from "./Utils.js";
 import { Vec3Zero, transformVec3Mat4w0, transformVec3Mat4w1 } from "../MathHelpers.js";
@@ -70,6 +75,7 @@ export type StageData = {
     stageGma: Gma.Gma;
     bgGma: Gma.Gma;
     commonGma: Gma.Gma;
+    ballCommonGma?: Gma.Gma | null;
     goalTimerGma?: Gma.Gma | null;
     nlObj: Nl.Obj; // Extra Naomi model archive from filedrop
     stageNlObj?: Nl.Obj | null;
@@ -103,10 +109,17 @@ export type WorldState = {
 };
 
 export type BallRenderState = {
+    playerId: number;
     pos: { x: number; y: number; z: number };
     orientation: { x: number; y: number; z: number; w: number };
     radius: number;
     visible: boolean;
+    appearance?: {
+        hemi1Color?: string;
+        hemi2Color?: string;
+        hemi1Texture?: string;
+        hemi2Texture?: string;
+    };
 };
 
 export type GoalTimerDigits = {
@@ -128,6 +141,11 @@ const SHADOW_FADE_SCALE = 0.2;
 const SHADOW_PARAMS_WORDS = 40;
 const SHADOW_UBO_INDEX = 1;
 const STREAK_VERTEX_SIZE = 24;
+const BALL_TEXTURE_MAX_DIM = 512;
+const BALL_HEMI_Y_ROT_180 = mat4.fromYRotation(mat4.create(), Math.PI);
+const BALL_COLOR_GAIN_EPSILON = 0.001;
+const BALL_COLOR_GAIN_MAX = 20.0;
+const BALL_CLEAR_HEMI_ALPHA_MUL = 1.6;
 const EFFECT_DEPTH_BIAS = 0.2;
 const EFFECT_DEPTH_BIAS_MAX = 0.5;
 const SPARKLE_TEXTURE_PATH = "assets/particle/beautifulstar.png";
@@ -801,68 +819,125 @@ function collectStreakTextures(textureSources: Map<string, TextureInputGX>, gma:
 }
 
 class BallInst {
-    private models: ModelInst[];
-    private modelDepthOffsets: number[];
-    private modelDisableSpecular: boolean[];
+    private slots: {
+        model: ModelInst;
+        depthOffset: number;
+        disableSpecular: boolean;
+        colorChannel: "hemi1" | "hemi2" | "edge";
+        textureChannel: "none" | "hemi1" | "hemi2";
+        rotateY180: boolean;
+        colorGainR: number;
+        colorGainG: number;
+        colorGainB: number;
+        alphaMul: number;
+    }[] = [];
     private visible = false;
     private pos = vec3.create();
     private rotation = quat.create();
     private scale = vec3.create();
     private modelFromBall = mat4.create();
+    private modelFromBallRotated = mat4.create();
+    private viewFromModelDefault = mat4.create();
+    private viewFromModelRotated = mat4.create();
+    private hasRotatedSlots = false;
+    private hemi1ColorHex = BALL_HEMI1_DEFAULT_COLOR;
+    private hemi2ColorHex = BALL_HEMI2_DEFAULT_COLOR;
+    private hemi1Color: [number, number, number] = [1, 0, 0];
+    private hemi2Color: [number, number, number] = [1, 1, 1];
+    private hemi1Texture?: string;
+    private hemi2Texture?: string;
 
-    constructor(modelCache: ModelCache, stageData: StageData) {
-        const models: ModelInst[] = [];
-        const modelDepthOffsets: number[] = [];
-        const modelDisableSpecular: boolean[] = [];
-        const usesSmb2Models = stageData.gameSource === 'smb2' || stageData.gameSource === 'mb2ws';
-        if (usesSmb2Models) {
-            const inside = modelCache.getModel("BALL_INSIDE", GmaSrc.Common);
-            const outside = modelCache.getModel("BALL_OUTSIDE", GmaSrc.Common);
-            if (inside) {
-                models.push(inside);
-                modelDepthOffsets.push(2);
-                modelDisableSpecular.push(true);
+    constructor(
+        modelCache: ModelCache,
+        private resolveTextureMapping: (textureName?: string) => GXTextureMapping | null,
+    ) {
+        const clearInside = modelCache.getBallModel(CommonModelID.CLEAR_HEMI_INSIDE);
+        const clearOutside = modelCache.getBallModel(CommonModelID.CLEAR_HEMI_OUTSIDE);
+        const hemi1Inside = clearInside;
+        const hemi1Outside = clearOutside;
+        const edge = modelCache.getBallModel(CommonModelID.SPHERE_EDGE_01_RED);
+        if (clearInside) {
+            this.pushSlot(clearInside, 4, true, "hemi2", "hemi2", false, BALL_CLEAR_HEMI_ALPHA_MUL);
+        }
+        if (hemi1Inside) {
+            this.pushSlot(hemi1Inside, 3, true, "hemi1", "hemi1", true, BALL_CLEAR_HEMI_ALPHA_MUL);
+        }
+        if (edge) {
+            this.pushSlot(edge, 2, false, "edge", "none", false, 1.0);
+            this.pushSlot(edge, 2, false, "edge", "none", true, 1.0);
+        }
+        if (clearOutside) {
+            this.pushSlot(clearOutside, 1, false, "hemi2", "hemi2", false, BALL_CLEAR_HEMI_ALPHA_MUL);
+        }
+        if (hemi1Outside) {
+            this.pushSlot(hemi1Outside, 0, false, "hemi1", "hemi1", true, BALL_CLEAR_HEMI_ALPHA_MUL);
+        }
+        if (this.slots.length === 0) {
+            const fallbackInside = modelCache.getModel("BALL_INSIDE", GmaSrc.Common);
+            const fallbackOutside = modelCache.getModel("BALL_OUTSIDE", GmaSrc.Common);
+            if (fallbackInside) {
+                this.pushSlot(fallbackInside, 2, true, "hemi1", "hemi1", false, 1.0);
             }
-            if (outside) {
-                models.push(outside);
-                modelDepthOffsets.push(0);
-                modelDisableSpecular.push(false);
-            }
-        } else {
-            const clearInside = modelCache.getModel(CommonModelID.CLEAR_HEMI_INSIDE, GmaSrc.Common);
-            const coloredInside = modelCache.getModel(CommonModelID.RED_HEMI_INSIDE, GmaSrc.Common);
-            const edge = modelCache.getModel(CommonModelID.SPHERE_EDGE_01_RED, GmaSrc.Common);
-            const clearOutside = modelCache.getModel(CommonModelID.CLEAR_HEMI_OUTSIDE, GmaSrc.Common);
-            const coloredOutside = modelCache.getModel(CommonModelID.RED_HEMI_OUTSIDE, GmaSrc.Common);
-            if (clearInside) {
-                models.push(clearInside);
-                modelDepthOffsets.push(4);
-                modelDisableSpecular.push(true);
-            }
-            if (coloredInside) {
-                models.push(coloredInside);
-                modelDepthOffsets.push(3);
-                modelDisableSpecular.push(true);
-            }
-            if (edge) {
-                models.push(edge);
-                modelDepthOffsets.push(2);
-                modelDisableSpecular.push(false);
-            }
-            if (clearOutside) {
-                models.push(clearOutside);
-                modelDepthOffsets.push(1);
-                modelDisableSpecular.push(false);
-            }
-            if (coloredOutside) {
-                models.push(coloredOutside);
-                modelDepthOffsets.push(0);
-                modelDisableSpecular.push(false);
+            if (fallbackOutside) {
+                this.pushSlot(fallbackOutside, 0, false, "hemi2", "hemi2", false, 1.0);
             }
         }
-        this.models = models;
-        this.modelDepthOffsets = modelDepthOffsets;
-        this.modelDisableSpecular = modelDisableSpecular;
+        writeRgbFromHex(this.hemi1Color, this.hemi1ColorHex);
+        writeRgbFromHex(this.hemi2Color, this.hemi2ColorHex);
+    }
+
+    private computeSlotColorGains(model: ModelInst): [number, number, number] {
+        const materialColor = model.modelData.shapes[0]?.material.materialColor;
+        if (!materialColor) {
+            return [1, 1, 1];
+        }
+        const gainR = Math.min(BALL_COLOR_GAIN_MAX, 1 / Math.max(BALL_COLOR_GAIN_EPSILON, materialColor.r));
+        const gainG = Math.min(BALL_COLOR_GAIN_MAX, 1 / Math.max(BALL_COLOR_GAIN_EPSILON, materialColor.g));
+        const gainB = Math.min(BALL_COLOR_GAIN_MAX, 1 / Math.max(BALL_COLOR_GAIN_EPSILON, materialColor.b));
+        return [gainR, gainG, gainB];
+    }
+
+    private pushSlot(
+        model: ModelInst,
+        depthOffset: number,
+        disableSpecular: boolean,
+        colorChannel: "hemi1" | "hemi2" | "edge",
+        textureChannel: "none" | "hemi1" | "hemi2",
+        rotateY180: boolean,
+        alphaMul: number,
+    ): void {
+        const [colorGainR, colorGainG, colorGainB] = this.computeSlotColorGains(model);
+        this.slots.push({
+            model,
+            depthOffset,
+            disableSpecular,
+            colorChannel,
+            textureChannel,
+            rotateY180,
+            colorGainR,
+            colorGainG,
+            colorGainB,
+            alphaMul,
+        });
+        if (rotateY180) {
+            this.hasRotatedSlots = true;
+        }
+    }
+
+    private updateAppearance(state: BallRenderState): void {
+        const appearance = state.appearance;
+        const hemi1Color = typeof appearance?.hemi1Color === "string" ? appearance.hemi1Color : BALL_HEMI1_DEFAULT_COLOR;
+        const hemi2Color = typeof appearance?.hemi2Color === "string" ? appearance.hemi2Color : BALL_HEMI2_DEFAULT_COLOR;
+        if (hemi1Color !== this.hemi1ColorHex) {
+            this.hemi1ColorHex = hemi1Color;
+            writeRgbFromHex(this.hemi1Color, hemi1Color);
+        }
+        if (hemi2Color !== this.hemi2ColorHex) {
+            this.hemi2ColorHex = hemi2Color;
+            writeRgbFromHex(this.hemi2Color, hemi2Color);
+        }
+        this.hemi1Texture = typeof appearance?.hemi1Texture === "string" ? appearance.hemi1Texture : undefined;
+        this.hemi2Texture = typeof appearance?.hemi2Texture === "string" ? appearance.hemi2Texture : undefined;
     }
 
     public setState(state: BallRenderState | null): void {
@@ -875,10 +950,11 @@ class BallInst {
         quat.set(this.rotation, state.orientation.x, state.orientation.y, state.orientation.z, state.orientation.w);
         const scale = state.radius / BALL_BASE_RADIUS;
         vec3.set(this.scale, scale, scale, scale);
+        this.updateAppearance(state);
     }
 
     public prepareToRender(state: WorldState, ctx: RenderContext): void {
-        if (!this.visible || this.models.length === 0) return;
+        if (!this.visible || this.slots.length === 0) return;
 
         const rp = scratchRenderParams;
         rp.reset();
@@ -886,13 +962,38 @@ class BallInst {
         rp.lighting = state.lighting;
         mat4.fromRotationTranslationScale(this.modelFromBall, this.rotation, this.pos, this.scale);
         const viewFromWorld = ctx.viewFromWorld ?? ctx.viewerInput.camera.viewMatrix;
-        mat4.mul(rp.viewFromModel, viewFromWorld, this.modelFromBall);
+        mat4.mul(this.viewFromModelDefault, viewFromWorld, this.modelFromBall);
+        if (this.hasRotatedSlots) {
+            mat4.mul(this.modelFromBallRotated, this.modelFromBall, BALL_HEMI_Y_ROT_180);
+            mat4.mul(this.viewFromModelRotated, viewFromWorld, this.modelFromBallRotated);
+        }
 
-        for (let i = 0; i < this.models.length; i++) {
-            rp.depthOffset = this.modelDepthOffsets[i] ?? 0;
+        for (let i = 0; i < this.slots.length; i++) {
+            const slot = this.slots[i];
+            rp.depthOffset = slot.depthOffset;
+            mat4.copy(rp.viewFromModel, slot.rotateY180 ? this.viewFromModelRotated : this.viewFromModelDefault);
             // Hack: the OG ball's inner shells appear to be unlit by specular.
-            rp.disableSpecular = this.modelDisableSpecular[i] ?? false;
-            this.models[i].prepareToRender(ctx, rp);
+            rp.disableSpecular = slot.disableSpecular;
+            const color =
+                slot.colorChannel === "hemi1" || slot.colorChannel === "edge"
+                    ? this.hemi1Color
+                    : this.hemi2Color;
+            rp.colorMul.r = color[0] * slot.colorGainR;
+            rp.colorMul.g = color[1] * slot.colorGainG;
+            rp.colorMul.b = color[2] * slot.colorGainB;
+            rp.colorMul.a = slot.alphaMul;
+            let customTexture: GXTextureMapping | null = null;
+            if (slot.textureChannel === "hemi1") {
+                customTexture = this.resolveTextureMapping(this.hemi1Texture);
+            } else if (slot.textureChannel === "hemi2") {
+                customTexture = this.resolveTextureMapping(this.hemi2Texture);
+            }
+            let textureOverride: GXTextureMapping | null = null;
+            if (customTexture && customTexture.gfxTexture && customTexture.gfxSampler) {
+                textureOverride = customTexture;
+            }
+            rp.textureOverride = textureOverride;
+            slot.model.prepareToRender(ctx, rp);
         }
     }
 }
@@ -967,6 +1068,10 @@ export class World {
     private streakExternalTextureLoading = new Set<string>();
     private streakExternalTextureFailed = new Set<string>();
     private streakExternalTextureOwned = new Set<string>();
+    private ballTextureMappings = new Map<string, GXTextureMapping>();
+    private ballExternalTextureLoading = new Set<string>();
+    private ballExternalTextureFailed = new Set<string>();
+    private ballExternalTextureOwned = new Set<string>();
     private streakHistory = new Map<number, { older: vec3; prev: vec3; lastUpdate: number }>();
     private prevViewFromWorld = mat4.create();
     private lastViewFromWorld = mat4.create();
@@ -1446,7 +1551,7 @@ export class World {
         }
         this.background = new stageData.stageInfo.bgInfo.bgConstructor(this.worldState, bgObjects);
         this.fgObjects = fgObjects;
-        this.ball = new BallInst(this.worldState.modelCache, stageData);
+        this.ball = new BallInst(this.worldState.modelCache, (textureName) => this.getBallTextureMapping(textureName));
         this.balls = [this.ball];
         this.shadowProgram = createShadowProgram(renderCache);
         this.shadowMegaState.depthWrite = false;
@@ -1579,7 +1684,7 @@ export class World {
         if (this.balls.length !== states.length) {
             this.balls = new Array(states.length);
             for (let i = 0; i < states.length; i++) {
-                this.balls[i] = new BallInst(this.worldState.modelCache, this.stageData);
+                this.balls[i] = new BallInst(this.worldState.modelCache, (textureName) => this.getBallTextureMapping(textureName));
             }
         }
         let primary: BallRenderState | null = null;
@@ -2527,6 +2632,96 @@ export class World {
         return mapping;
     }
 
+    private isExternalBallTextureName(textureName: string): boolean {
+        return textureName.includes("/")
+            || textureName.includes("\\")
+            || textureName.startsWith("data:")
+            || /\.(png|jpe?g|webp|gif|bmp)$/i.test(textureName);
+    }
+
+    private createExternalBallTextureMapping(textureName: string): GXTextureMapping | null {
+        const mapping = new GXTextureMapping();
+        this.ballTextureMappings.set(textureName, mapping);
+        if (this.ballExternalTextureLoading.has(textureName) || this.ballExternalTextureFailed.has(textureName)) {
+            return mapping;
+        }
+        if (typeof Image === "undefined") {
+            this.ballExternalTextureFailed.add(textureName);
+            console.warn("[ball] Image not available; skipping texture load", textureName);
+            return mapping;
+        }
+        if (typeof document === "undefined") {
+            this.ballExternalTextureFailed.add(textureName);
+            console.warn("[ball] document not available; skipping texture load", textureName);
+            return mapping;
+        }
+        this.ballExternalTextureLoading.add(textureName);
+        const img = new Image();
+        img.onload = () => {
+            this.ballExternalTextureLoading.delete(textureName);
+            const width = img.naturalWidth || img.width;
+            const height = img.naturalHeight || img.height;
+            if (!width || !height) {
+                this.ballExternalTextureFailed.add(textureName);
+                return;
+            }
+            if (width > BALL_TEXTURE_MAX_DIM || height > BALL_TEXTURE_MAX_DIM) {
+                this.ballExternalTextureFailed.add(textureName);
+                console.warn("[ball] texture too large", textureName, width, height);
+                return;
+            }
+            const canvas = document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+                this.ballExternalTextureFailed.add(textureName);
+                return;
+            }
+            ctx.clearRect(0, 0, width, height);
+            ctx.drawImage(img, 0, 0, width, height);
+            const tex = this.renderCache.device.createTexture(makeTextureDescriptor2D(GfxFormat.U8_RGBA_NORM, width, height, 1));
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const pixels = new Uint8Array(imageData.data.buffer, imageData.data.byteOffset, imageData.data.byteLength);
+            this.renderCache.device.uploadTextureData(tex, 0, [pixels]);
+            if (mapping.gfxTexture && this.ballExternalTextureOwned.has(textureName)) {
+                this.renderCache.device.destroyTexture(mapping.gfxTexture);
+            }
+            if (!this.streakDefaultTexture.gfxSampler) {
+                this.ballExternalTextureFailed.add(textureName);
+                this.renderCache.device.destroyTexture(tex);
+                return;
+            }
+            mapping.gfxTexture = tex;
+            mapping.gfxSampler = this.streakDefaultTexture.gfxSampler;
+            mapping.width = width;
+            mapping.height = height;
+            mapping.flipY = false;
+            this.ballExternalTextureOwned.add(textureName);
+        };
+        img.onerror = () => {
+            this.ballExternalTextureLoading.delete(textureName);
+            this.ballExternalTextureFailed.add(textureName);
+            console.warn("[ball] failed to load texture", textureName);
+        };
+        img.src = textureName;
+        return mapping;
+    }
+
+    private getBallTextureMapping(textureName?: string): GXTextureMapping | null {
+        if (!textureName) {
+            return null;
+        }
+        const cached = this.ballTextureMappings.get(textureName);
+        if (cached) {
+            return cached;
+        }
+        if (!this.isExternalBallTextureName(textureName)) {
+            return null;
+        }
+        return this.createExternalBallTextureMapping(textureName);
+    }
+
     public getTiltedViewMatrix(viewFromWorld: mat4, out: mat4, pivot?: vec3): mat4 {
         if (!this.stageTilt || !this.hasBallPosForTilt) {
             return viewFromWorld;
@@ -3459,6 +3654,14 @@ export class World {
         this.nlTextureCache?.destroy(device);
         for (const [name, mapping] of this.streakTextureMappings.entries()) {
             if (!this.streakExternalTextureOwned.has(name)) {
+                continue;
+            }
+            if (mapping.gfxTexture && mapping.gfxTexture !== this.streakDefaultTexture.gfxTexture) {
+                device.destroyTexture(mapping.gfxTexture);
+            }
+        }
+        for (const [name, mapping] of this.ballTextureMappings.entries()) {
+            if (!this.ballExternalTextureOwned.has(name)) {
                 continue;
             }
             if (mapping.gfxTexture && mapping.gfxTexture !== this.streakDefaultTexture.gfxTexture) {

@@ -2465,6 +2465,7 @@ export class GameCore {
     const useInterpolation = alpha < 1;
     if (!this.renderBallState) {
       this.renderBallState = {
+        playerId: this.ball.playerId ?? this.localPlayerId,
         pos: { x: this.ball.pos.x, y: this.ball.pos.y, z: this.ball.pos.z },
         orientation: {
           x: this.ball.orientation.x,
@@ -2477,6 +2478,7 @@ export class GameCore {
       };
     }
     const renderState = this.renderBallState;
+    renderState.playerId = this.ball.playerId ?? this.localPlayerId;
     if (useInterpolation) {
       renderState.pos.x = lerp(this.ball.prevPos.x, this.ball.pos.x, alpha);
       renderState.pos.y = lerp(this.ball.prevPos.y, this.ball.pos.y, alpha);
@@ -2505,7 +2507,9 @@ export class GameCore {
       this.renderBallStates = new Array(this.players.length);
       for (let i = 0; i < this.players.length; i += 1) {
         const ball = this.players[i].ball;
+        const playerId = this.players[i].id;
         this.renderBallStates[i] = {
+          playerId,
           pos: { x: ball.pos.x, y: ball.pos.y, z: ball.pos.z },
           orientation: {
             x: ball.orientation.x,
@@ -2522,6 +2526,7 @@ export class GameCore {
       const player = this.players[i];
       const ball = player.ball;
       const renderState = this.renderBallStates[i];
+      renderState.playerId = player.id;
       if (useInterpolation) {
         renderState.pos.x = lerp(ball.prevPos.x, ball.pos.x, alpha);
         renderState.pos.y = lerp(ball.prevPos.y, ball.pos.y, alpha);

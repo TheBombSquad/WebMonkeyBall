@@ -54,6 +54,8 @@ export class ModelCache {
     private stageEntry: CacheEntry;
     private bgEntry: CacheEntry;
     private commonEntry: CacheEntry;
+    private ballEntry: CacheEntry;
+    private hasDedicatedBallEntry: boolean;
     private allEntries: CacheEntry[];
 
     private textureCache: TextureCache;
@@ -71,6 +73,8 @@ export class ModelCache {
         this.stageEntry = new CacheEntry(stageData.stageGma);
         this.bgEntry = new CacheEntry(stageData.bgGma);
         this.commonEntry = new CacheEntry(stageData.commonGma);
+        this.ballEntry = stageData.ballCommonGma ? new CacheEntry(stageData.ballCommonGma) : this.commonEntry;
+        this.hasDedicatedBallEntry = this.ballEntry !== this.commonEntry;
         this.goalTimerEntry = stageData.goalTimerGma ? new CacheEntry(stageData.goalTimerGma) : null;
         this.allEntries = [this.stageEntry, this.bgEntry, this.commonEntry];
         this.textureCache = new TextureCache();
@@ -168,6 +172,10 @@ export class ModelCache {
         }
     }
 
+    public getBallModel(model: string | number): ModelInst | null {
+        return this.getModelFromEntry(model, this.ballEntry);
+    }
+
     private getEntriesForSrc(src: GmaSrc): CacheEntry[] {
         switch (src) {
             case GmaSrc.Stage:
@@ -256,6 +264,9 @@ export class ModelCache {
     public destroy(device: GfxDevice): void {
         for (let i = 0; i < this.allEntries.length; i++) {
             this.allEntries[i].modelCache.forEach((model) => model.destroy(device));
+        }
+        if (this.hasDedicatedBallEntry) {
+            this.ballEntry.modelCache.forEach((model) => model.destroy(device));
         }
         this.goalTimerEntry?.modelCache.forEach((model) => model.destroy(device));
         this.textureCache.destroy(device);

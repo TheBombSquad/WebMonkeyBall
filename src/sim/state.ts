@@ -3,6 +3,7 @@ import type { createBallState } from '../physics.js';
 import type { World } from '../world.js';
 import type { Quat, Vec3 } from '../shared/types.js';
 import type { QuantizedInput } from '../determinism.js';
+import type { BallAppearanceProfile } from '../shared/ball_appearance.js';
 
 export type MultiplayerGameMode = 'standard' | 'chained_together';
 
@@ -58,10 +59,12 @@ export type ActiveResultReplay = {
 };
 
 export type BallRenderState = {
+  playerId: number;
   pos: Vec3;
   orientation: { x: number; y: number; z: number; w: number };
   radius: number;
   visible: boolean;
+  appearance?: BallAppearanceProfile;
 };
 
 export type CameraPose = { eye: Vec3; lookAt: Vec3; rotX: number; rotY: number; rotZ: number };

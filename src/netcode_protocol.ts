@@ -1,5 +1,6 @@
 import type { QuantizedInput } from './determinism.js';
 import type { GameSource } from './shared/constants/index.js';
+import type { BallAppearanceProfile } from './shared/ball_appearance.js';
 
 export type PlayerId = number;
 
@@ -133,6 +134,7 @@ export type RoomUpdateMessage = {
 export type PlayerProfile = {
   name: string;
   avatarData?: string;
+  ball?: BallAppearanceProfile;
 };
 
 export type PlayerProfileMessage = {

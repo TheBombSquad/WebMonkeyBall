@@ -149,7 +149,10 @@ export class NetplayMessageFlowController {
     { broadcast }: { broadcast?: boolean } = {},
   ) {
     const sanitized = this.deps.sanitizeProfile(incoming);
-    const baseProfile: PlayerProfile = { name: sanitized.name };
+    const baseProfile: PlayerProfile = {
+      name: sanitized.name,
+      ball: sanitized.ball,
+    };
     this.deps.lobbyProfiles.set(playerId, baseProfile);
     if (broadcast) {
       this.deps.hostRelay()?.broadcast({ type: 'player_profile', playerId, profile: baseProfile });
@@ -173,7 +176,11 @@ export class NetplayMessageFlowController {
       }
       this.deps.pendingAvatarByPlayer.delete(playerId);
       const current = this.deps.lobbyProfiles.get(playerId);
-      const finalProfile: PlayerProfile = { name: current?.name ?? sanitized.name, avatarData };
+      const finalProfile: PlayerProfile = {
+        name: current?.name ?? sanitized.name,
+        ball: current?.ball,
+        avatarData,
+      };
       this.deps.lobbyProfiles.set(playerId, finalProfile);
       if (broadcast) {
         this.deps.hostRelay()?.broadcast({ type: 'player_profile', playerId, profile: finalProfile });

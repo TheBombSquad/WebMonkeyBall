@@ -103,6 +103,10 @@ export class StageFlowController {
     if (bgName) {
       paths.push(`${stageBasePath}/bg/${bgName}.gma`, `${stageBasePath}/bg/${bgName}.tpl`);
     }
+    const smb1BasePath = this.deps.getStageBasePath(GAME_SOURCES.SMB1);
+    if (smb1BasePath) {
+      paths.push(`${smb1BasePath}/init/common.gma`, `${smb1BasePath}/init/common.tpl`);
+    }
     return paths;
   }
 

@@ -2,6 +2,7 @@ import { mat4, vec3 } from 'gl-matrix';
 import { Game, type MultiplayerGameMode } from './game.js';
 import { AudioManager } from './audio.js';
 import { GAME_SOURCES, S16_TO_RAD, type GameSource } from './shared/constants/index.js';
+import { ballAppearanceProfilesEqual, type BallAppearanceProfile } from './shared/ball_appearance.js';
 import ArrayBufferSlice from './noclip/ArrayBufferSlice.js';
 import { Camera } from './noclip/Camera.js';
 import { GfxDevice } from './noclip/gfx/platform/GfxPlatform.js';
@@ -71,14 +72,17 @@ import { formatGameSourceLabel } from './app/netplay/presence_format.js';
 import {
   loadLocalProfile,
   loadPrivacySettings,
+  sanitizeBallAppearanceProfile,
   sanitizeChatText,
   sanitizeLobbyName,
   sanitizeLobbyNameDraft,
   sanitizeProfile,
+  sanitizeProfileBallColorInput,
   sanitizeProfileName,
   saveLocalProfile,
   savePrivacySettings,
   validateAvatarFile,
+  validateBallTextureFile,
 } from './app/netplay/profile_utils.js';
 import { PackLoader } from './app/packs/pack_loader.js';
 import { PackSelectionController } from './app/packs/pack_selection.js';
@@ -277,8 +281,16 @@ export function runMainApp() {
     profileAvatarPreview,
     profileAvatarClearButton,
     profileAvatarError,
+    profileBallHemi1ColorInput,
+    profileBallHemi2ColorInput,
+    profileBallHemi1TextureInput,
+    profileBallHemi2TextureInput,
+    profileBallHemi1TextureClearButton,
+    profileBallHemi2TextureClearButton,
+    profileBallTextureError,
     hidePlayerNamesToggle,
     hideLobbyNamesToggle,
+    hideRemoteBallTexturesToggle,
     nameplateLayer,
   } = refs;
   
@@ -319,8 +331,14 @@ export function runMainApp() {
     profileNameInput,
     profileAvatarPreview,
     profileAvatarError,
+    profileBallTextureError,
+    profileBallHemi1ColorInput,
+    profileBallHemi2ColorInput,
+    profileBallHemi1TextureClearButton,
+    profileBallHemi2TextureClearButton,
     hidePlayerNamesToggle,
     hideLobbyNamesToggle,
+    hideRemoteBallTexturesToggle,
   });
   let inputControls: InputControlsController | null = null;
   
@@ -590,7 +608,7 @@ export function runMainApp() {
   let lastLobbyNameUpdateMs: number | null = null;
   let lastRoomMetaKey: string | null = null;
   let lastRoomPlayerCount: number | null = null;
-  let privacySettings = { hidePlayerNames: false, hideLobbyNames: false };
+  let privacySettings = { hidePlayerNames: false, hideLobbyNames: false, hideRemoteBallTextures: false };
   const profileUpdateThrottle = new Map<number, number>();
   type ChatEntry = { id: number; playerId: number; text: string; time: number };
   let chatMessages: ChatEntry[] = [];
@@ -1928,6 +1946,24 @@ export function runMainApp() {
       frameStatsOverlay.hide();
     }
   });
+
+  function applyLocalBallAppearancePatch(patch: Partial<BallAppearanceProfile>) {
+    const merged: Partial<BallAppearanceProfile> = {
+      ...(localProfile.ball ?? {}),
+      ...patch,
+    };
+    const nextProfile = sanitizeProfile({
+      ...localProfile,
+      ball: sanitizeBallAppearanceProfile(merged),
+    });
+    if (ballAppearanceProfilesEqual(localProfile.ball, nextProfile.ball)) {
+      return;
+    }
+    localProfile = nextProfile;
+    saveLocalProfile(localProfile);
+    profileUi.updateProfileUi(localProfile);
+    lobbyState.scheduleProfileBroadcast();
+  }
   
   bindLobbyEventHandlers({
     lobbyRefreshButton,
@@ -1943,8 +1979,15 @@ export function runMainApp() {
     profileNameInput,
     profileAvatarInput,
     profileAvatarClearButton,
+    profileBallHemi1ColorInput,
+    profileBallHemi2ColorInput,
+    profileBallHemi1TextureInput,
+    profileBallHemi2TextureInput,
+    profileBallHemi1TextureClearButton,
+    profileBallHemi2TextureClearButton,
     hidePlayerNamesToggle,
     hideLobbyNamesToggle,
+    hideRemoteBallTexturesToggle,
     lobbyNameInput,
     lobbyRoomNameInput,
     lobbyChatInput,
@@ -2007,6 +2050,60 @@ export function runMainApp() {
       lobbyState.scheduleProfileBroadcast();
       profileUi.setAvatarError();
     },
+    onProfileBallHemi1ColorInput: (value, input) => {
+      const sanitized = sanitizeProfileBallColorInput(value, 1);
+      if (input.value !== sanitized) {
+        input.value = sanitized;
+      }
+      applyLocalBallAppearancePatch({ hemi1Color: sanitized });
+    },
+    onProfileBallHemi2ColorInput: (value, input) => {
+      const sanitized = sanitizeProfileBallColorInput(value, 2);
+      if (input.value !== sanitized) {
+        input.value = sanitized;
+      }
+      applyLocalBallAppearancePatch({ hemi2Color: sanitized });
+    },
+    onProfileBallHemi1TextureChange: async (file) => {
+      if (!file) {
+        return;
+      }
+      const dataUrl = await validateBallTextureFile(file, (message) => {
+        profileUi.setBallTextureError(message);
+      });
+      if (!dataUrl) {
+        return;
+      }
+      profileUi.setBallTextureError();
+      applyLocalBallAppearancePatch({ hemi1Texture: dataUrl });
+    },
+    onProfileBallHemi2TextureChange: async (file) => {
+      if (!file) {
+        return;
+      }
+      const dataUrl = await validateBallTextureFile(file, (message) => {
+        profileUi.setBallTextureError(message);
+      });
+      if (!dataUrl) {
+        return;
+      }
+      profileUi.setBallTextureError();
+      applyLocalBallAppearancePatch({ hemi2Texture: dataUrl });
+    },
+    onProfileBallHemi1TextureClear: () => {
+      if (!localProfile.ball?.hemi1Texture) {
+        return;
+      }
+      profileUi.setBallTextureError();
+      applyLocalBallAppearancePatch({ hemi1Texture: undefined });
+    },
+    onProfileBallHemi2TextureClear: () => {
+      if (!localProfile.ball?.hemi2Texture) {
+        return;
+      }
+      profileUi.setBallTextureError();
+      applyLocalBallAppearancePatch({ hemi2Texture: undefined });
+    },
     onHidePlayerNamesChange: (checked) => {
       privacySettings = { ...privacySettings, hidePlayerNames: checked };
       savePrivacySettings(privacySettings);
@@ -2017,6 +2114,10 @@ export function runMainApp() {
       savePrivacySettings(privacySettings);
       lobbyUiController?.updateLobbyUi();
       void lobbyBrowser.refreshLobbyList();
+    },
+    onHideRemoteBallTexturesChange: (checked) => {
+      privacySettings = { ...privacySettings, hideRemoteBallTextures: checked };
+      savePrivacySettings(privacySettings);
     },
     onLobbyNameInput: (value, input) => {
       const sanitized = sanitizeLobbyNameDraft(value);
@@ -2085,6 +2186,14 @@ export function runMainApp() {
     getSwapChain: () => swapChain,
     isRenderReady: () => renderReady,
     isNetplayEnabled: () => netplayEnabled,
+    getLocalPlayerId: () => game.localPlayerId,
+    getProfileForPlayer: (playerId) => {
+      if (playerId === game.localPlayerId) {
+        return localProfile;
+      }
+      return lobbyProfiles.get(playerId) ?? presenceUi.profileFallbackForPlayer(playerId);
+    },
+    getPrivacySettings: () => privacySettings,
     netplayTick: (dtSeconds) => {
       netplayRuntime?.netplayTick(dtSeconds);
     },

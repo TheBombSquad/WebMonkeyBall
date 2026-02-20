@@ -1,17 +1,25 @@
 import type { PlayerProfile } from '../../netcode_protocol.js';
+import { BALL_HEMI1_DEFAULT_COLOR, BALL_HEMI2_DEFAULT_COLOR, resolveBallAppearance } from '../../shared/ball_appearance.js';
 import { getAvatarValidationPromise } from './profile_utils.js';
 
 type PrivacySettings = {
   hidePlayerNames: boolean;
   hideLobbyNames: boolean;
+  hideRemoteBallTextures: boolean;
 };
 
 type ProfileUiDeps = {
   profileNameInput: HTMLInputElement | null;
   profileAvatarPreview: HTMLElement | null;
   profileAvatarError: HTMLElement | null;
+  profileBallTextureError: HTMLElement | null;
+  profileBallHemi1ColorInput: HTMLInputElement | null;
+  profileBallHemi2ColorInput: HTMLInputElement | null;
+  profileBallHemi1TextureClearButton: HTMLButtonElement | null;
+  profileBallHemi2TextureClearButton: HTMLButtonElement | null;
   hidePlayerNamesToggle: HTMLInputElement | null;
   hideLobbyNamesToggle: HTMLInputElement | null;
+  hideRemoteBallTexturesToggle: HTMLInputElement | null;
 };
 
 export class ProfileUiController {
@@ -38,6 +46,22 @@ export class ProfileUiController {
     profileAvatarError.classList.remove('error');
   }
 
+  setBallTextureError(message?: string) {
+    const { profileBallTextureError } = this.deps;
+    if (!profileBallTextureError) {
+      return;
+    }
+    if (message) {
+      profileBallTextureError.textContent = message;
+      profileBallTextureError.classList.remove('hidden');
+      profileBallTextureError.classList.add('error');
+      return;
+    }
+    profileBallTextureError.textContent = '';
+    profileBallTextureError.classList.add('hidden');
+    profileBallTextureError.classList.remove('error');
+  }
+
   getAvatarValidationCached(dataUrl: string): Promise<boolean> {
     return getAvatarValidationPromise(this.avatarValidationCache, dataUrl);
   }
@@ -48,6 +72,9 @@ export class ProfileUiController {
     }
     if (this.deps.hideLobbyNamesToggle) {
       this.deps.hideLobbyNamesToggle.checked = privacySettings.hideLobbyNames;
+    }
+    if (this.deps.hideRemoteBallTexturesToggle) {
+      this.deps.hideRemoteBallTexturesToggle.checked = privacySettings.hideRemoteBallTextures;
     }
   }
 
@@ -66,6 +93,29 @@ export class ProfileUiController {
         img.src = localProfile.avatarData;
         this.deps.profileAvatarPreview.appendChild(img);
       }
+    }
+    const appearance = resolveBallAppearance(localProfile.ball);
+    const hemi1ColorInput = this.deps.profileBallHemi1ColorInput;
+    if (hemi1ColorInput) {
+      const isEditing = document.activeElement === hemi1ColorInput;
+      const value = appearance.hemi1Color || BALL_HEMI1_DEFAULT_COLOR;
+      if (!isEditing && hemi1ColorInput.value !== value) {
+        hemi1ColorInput.value = value;
+      }
+    }
+    const hemi2ColorInput = this.deps.profileBallHemi2ColorInput;
+    if (hemi2ColorInput) {
+      const isEditing = document.activeElement === hemi2ColorInput;
+      const value = appearance.hemi2Color || BALL_HEMI2_DEFAULT_COLOR;
+      if (!isEditing && hemi2ColorInput.value !== value) {
+        hemi2ColorInput.value = value;
+      }
+    }
+    if (this.deps.profileBallHemi1TextureClearButton) {
+      this.deps.profileBallHemi1TextureClearButton.disabled = !appearance.hemi1Texture;
+    }
+    if (this.deps.profileBallHemi2TextureClearButton) {
+      this.deps.profileBallHemi2TextureClearButton.disabled = !appearance.hemi2Texture;
     }
   }
 }

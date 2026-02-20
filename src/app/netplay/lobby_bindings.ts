@@ -12,8 +12,15 @@ type LobbyBindingsOptions = {
   profileNameInput: HTMLInputElement | null;
   profileAvatarInput: HTMLInputElement | null;
   profileAvatarClearButton: HTMLButtonElement | null;
+  profileBallHemi1ColorInput: HTMLInputElement | null;
+  profileBallHemi2ColorInput: HTMLInputElement | null;
+  profileBallHemi1TextureInput: HTMLInputElement | null;
+  profileBallHemi2TextureInput: HTMLInputElement | null;
+  profileBallHemi1TextureClearButton: HTMLButtonElement | null;
+  profileBallHemi2TextureClearButton: HTMLButtonElement | null;
   hidePlayerNamesToggle: HTMLInputElement | null;
   hideLobbyNamesToggle: HTMLInputElement | null;
+  hideRemoteBallTexturesToggle: HTMLInputElement | null;
   lobbyNameInput: HTMLInputElement | null;
   lobbyRoomNameInput: HTMLInputElement | null;
   lobbyChatInput: HTMLInputElement | null;
@@ -31,8 +38,15 @@ type LobbyBindingsOptions = {
   onProfileNameInput: (value: string, input: HTMLInputElement) => void;
   onProfileAvatarChange: (file: File | null) => Promise<void>;
   onProfileAvatarClear: () => void;
+  onProfileBallHemi1ColorInput: (value: string, input: HTMLInputElement) => void;
+  onProfileBallHemi2ColorInput: (value: string, input: HTMLInputElement) => void;
+  onProfileBallHemi1TextureChange: (file: File | null) => Promise<void>;
+  onProfileBallHemi2TextureChange: (file: File | null) => Promise<void>;
+  onProfileBallHemi1TextureClear: () => void;
+  onProfileBallHemi2TextureClear: () => void;
   onHidePlayerNamesChange: (checked: boolean) => void;
   onHideLobbyNamesChange: (checked: boolean) => void;
+  onHideRemoteBallTexturesChange: (checked: boolean) => void;
   onLobbyNameInput: (value: string, input: HTMLInputElement) => void;
   isHost: () => boolean;
   onLobbyRoomNameInput: (value: string, input: HTMLInputElement) => void;
@@ -90,11 +104,46 @@ export function bindLobbyEventHandlers(options: LobbyBindingsOptions) {
   options.profileAvatarClearButton?.addEventListener('click', () => {
     options.onProfileAvatarClear();
   });
+  options.profileBallHemi1ColorInput?.addEventListener('input', () => {
+    options.onProfileBallHemi1ColorInput(
+      options.profileBallHemi1ColorInput?.value ?? '',
+      options.profileBallHemi1ColorInput!,
+    );
+  });
+  options.profileBallHemi2ColorInput?.addEventListener('input', () => {
+    options.onProfileBallHemi2ColorInput(
+      options.profileBallHemi2ColorInput?.value ?? '',
+      options.profileBallHemi2ColorInput!,
+    );
+  });
+  options.profileBallHemi1TextureInput?.addEventListener('change', async () => {
+    const file = options.profileBallHemi1TextureInput?.files?.[0] ?? null;
+    if (options.profileBallHemi1TextureInput) {
+      options.profileBallHemi1TextureInput.value = '';
+    }
+    await options.onProfileBallHemi1TextureChange(file);
+  });
+  options.profileBallHemi2TextureInput?.addEventListener('change', async () => {
+    const file = options.profileBallHemi2TextureInput?.files?.[0] ?? null;
+    if (options.profileBallHemi2TextureInput) {
+      options.profileBallHemi2TextureInput.value = '';
+    }
+    await options.onProfileBallHemi2TextureChange(file);
+  });
+  options.profileBallHemi1TextureClearButton?.addEventListener('click', () => {
+    options.onProfileBallHemi1TextureClear();
+  });
+  options.profileBallHemi2TextureClearButton?.addEventListener('click', () => {
+    options.onProfileBallHemi2TextureClear();
+  });
   options.hidePlayerNamesToggle?.addEventListener('change', () => {
     options.onHidePlayerNamesChange(!!options.hidePlayerNamesToggle?.checked);
   });
   options.hideLobbyNamesToggle?.addEventListener('change', () => {
     options.onHideLobbyNamesChange(!!options.hideLobbyNamesToggle?.checked);
+  });
+  options.hideRemoteBallTexturesToggle?.addEventListener('change', () => {
+    options.onHideRemoteBallTexturesChange(!!options.hideRemoteBallTexturesToggle?.checked);
   });
 
   options.lobbyNameInput?.addEventListener('input', () => {

@@ -5,6 +5,7 @@ import type { HudRenderer } from '../../hud.js';
 import type { GfxDevice } from '../../noclip/gfx/platform/GfxPlatform.js';
 import type { ViewerInputState } from './boot.js';
 import type { createSwapChainForWebGL2 } from '../../noclip/gfx/platform/GfxPlatformWebGL2.js';
+import { BALL_HEMI1_DEFAULT_COLOR, BALL_HEMI2_DEFAULT_COLOR } from '../../shared/ball_appearance.js';
 
 const RENDER_FRAME_MS = 1000 / 60;
 const FRAME_STATS_REFRESH_MS = 100;
@@ -44,6 +45,9 @@ type FrameLoopDeps = {
   getSwapChain: () => ReturnType<typeof createSwapChainForWebGL2> | null;
   isRenderReady: () => boolean;
   isNetplayEnabled: () => boolean;
+  getLocalPlayerId: () => number;
+  getProfileForPlayer: (playerId: number) => any;
+  getPrivacySettings: () => { hideRemoteBallTextures?: boolean };
   netplayTick: (dtSeconds: number) => void;
   updateNetplayDebugOverlay: (now: number) => void;
   isFrameStatsEnabled: () => boolean;
@@ -54,6 +58,30 @@ type FrameLoopDeps = {
   updateNameplates: (interpolationAlpha: number) => void;
   onBeforeTick: (now: number) => void;
 };
+
+function applyBallAppearanceFromProfile(
+  ballState: any,
+  profile: any,
+  allowTextures: boolean,
+) {
+  if (!ballState) {
+    return;
+  }
+  const appearance = ballState.appearance ?? (ballState.appearance = {});
+  const profileBall = profile?.ball;
+  appearance.hemi1Color = typeof profileBall?.hemi1Color === 'string'
+    ? profileBall.hemi1Color
+    : BALL_HEMI1_DEFAULT_COLOR;
+  appearance.hemi2Color = typeof profileBall?.hemi2Color === 'string'
+    ? profileBall.hemi2Color
+    : BALL_HEMI2_DEFAULT_COLOR;
+  appearance.hemi1Texture = allowTextures && typeof profileBall?.hemi1Texture === 'string'
+    ? profileBall.hemi1Texture
+    : undefined;
+  appearance.hemi2Texture = allowTextures && typeof profileBall?.hemi2Texture === 'string'
+    ? profileBall.hemi2Texture
+    : undefined;
+}
 
 export function startRenderLoop(deps: FrameLoopDeps) {
   let frameStatsWasEnabled = false;
@@ -193,8 +221,30 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     deps.syncState.jamabars = deps.game.getJamabarRenderState(interpolationAlpha);
     deps.syncState.bananaCollectedByAnimGroup = null;
     deps.syncState.animGroupTransforms = deps.game.getAnimGroupTransforms(interpolationAlpha);
-    deps.syncState.ball = deps.game.getBallRenderState(interpolationAlpha);
-    deps.syncState.balls = deps.game.getBallRenderStates(interpolationAlpha);
+    const localPlayerId = deps.getLocalPlayerId();
+    const hideRemoteBallTextures = !!deps.getPrivacySettings().hideRemoteBallTextures;
+    const singleBallState = deps.game.getBallRenderState(interpolationAlpha);
+    if (singleBallState) {
+      const singleBallPlayerId = Number.isFinite(singleBallState.playerId) ? singleBallState.playerId : localPlayerId;
+      const singleBallProfile = deps.getProfileForPlayer(singleBallPlayerId);
+      applyBallAppearanceFromProfile(singleBallState, singleBallProfile, true);
+    }
+    deps.syncState.ball = singleBallState;
+    const ballStates = deps.game.getBallRenderStates(interpolationAlpha);
+    if (ballStates) {
+      for (let i = 0; i < ballStates.length; i += 1) {
+        const ballState = ballStates[i];
+        if (!ballState) {
+          continue;
+        }
+        const fallbackPlayerId = Number.isFinite(deps.game.players?.[i]?.id) ? deps.game.players[i].id : localPlayerId;
+        const playerId = Number.isFinite(ballState.playerId) ? ballState.playerId : fallbackPlayerId;
+        const profile = deps.getProfileForPlayer(playerId);
+        const allowTextures = !hideRemoteBallTextures || playerId === localPlayerId;
+        applyBallAppearanceFromProfile(ballState, profile, allowTextures);
+      }
+    }
+    deps.syncState.balls = ballStates;
     deps.syncState.goalBags = deps.game.getGoalBagRenderState(interpolationAlpha);
     deps.syncState.goalTapes = deps.game.getGoalTapeRenderState(interpolationAlpha);
     deps.syncState.confetti = deps.game.getConfettiRenderState(interpolationAlpha);

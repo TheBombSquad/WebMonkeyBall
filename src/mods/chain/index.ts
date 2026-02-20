@@ -31,6 +31,10 @@ const CHAIN_LINK_LENGTH_MAX = 4.0;
 const CHAIN_LINK_LENGTH_STEP = 0.1;
 const CHAIN_SEGMENTS = 10;
 const CHAIN_SPAWN_SPACING = 1.5;
+const CHAIN_SPAWN_RADIUS = CHAIN_SPAWN_SPACING * 0.5;
+const CHAIN_SPAWN_TRIANGLE_BACK_Z = -CHAIN_SPAWN_RADIUS * 0.5;
+const CHAIN_SPAWN_TRIANGLE_HALF_WIDTH = CHAIN_SPAWN_RADIUS * (sqrt(3) * 0.5);
+const CHAIN_SPAWN_SQUARE_AXIS = CHAIN_SPAWN_RADIUS * sqrt(0.5);
 const CHAIN_NODE_RADIUS = 0.25;
 const CHAIN_NODE_DAMPING = 1.0;
 const CHAIN_SUBSTEPS = 2;
@@ -2606,17 +2610,39 @@ function buildChainHooks(): ModHooks {
       if (!Array.isArray(activePlayers) || activePlayers.length <= 1) {
         return null;
       }
+      const playerCount = activePlayers.length;
       const index = activePlayers.findIndex((entry) => entry.id === (player as any).id);
       if (index < 0) {
         return null;
       }
-      const offset = (index - ((activePlayers.length - 1) * 0.5)) * CHAIN_SPAWN_SPACING;
+
       const rightX = cosS16(startRotY);
       const rightZ = -sinS16(startRotY);
+      const forwardX = sinS16(startRotY);
+      const forwardZ = cosS16(startRotY);
+
+      let offsetRight = (index - ((playerCount - 1) * 0.5)) * CHAIN_SPAWN_SPACING;
+      let offsetForward = 0;
+
+      if (playerCount === 3) {
+        if (index === 1) {
+          offsetRight = 0;
+          offsetForward = CHAIN_SPAWN_RADIUS;
+        } else {
+          offsetRight = index === 0 ? -CHAIN_SPAWN_TRIANGLE_HALF_WIDTH : CHAIN_SPAWN_TRIANGLE_HALF_WIDTH;
+          offsetForward = CHAIN_SPAWN_TRIANGLE_BACK_Z;
+        }
+      } else if (playerCount === 4) {
+        const rightSign = index >= 2 ? 1 : -1;
+        const forwardSign = index === 1 || index === 2 ? 1 : -1;
+        offsetRight = rightSign * CHAIN_SPAWN_SQUARE_AXIS;
+        offsetForward = forwardSign * CHAIN_SPAWN_SQUARE_AXIS;
+      }
+
       return {
-        x: startPos.x + (rightX * offset),
+        x: startPos.x + (rightX * offsetRight) + (forwardX * offsetForward),
         y: defaultPos.y,
-        z: startPos.z + (rightZ * offset),
+        z: startPos.z + (rightZ * offsetRight) + (forwardZ * offsetForward),
       };
     },
     onBeforeSimTick: ({ game }) => {

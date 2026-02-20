@@ -546,6 +546,40 @@
               </div>
             </div>
             <div class="control-hint">PNG/JPG/WebP only. Max 512x512 and 150kb.</div>
+            <div class="profile-ball-row">
+              <label class="field">
+                <span>Hemisphere 1 Color</span>
+                <input id="profile-ball-hemi1-color" class="color-input" type="color" value="#ff0000" />
+              </label>
+              <label class="field">
+                <span>Hemisphere 2 Color</span>
+                <input id="profile-ball-hemi2-color" class="color-input" type="color" value="#ffffff" />
+              </label>
+            </div>
+            <div class="profile-ball-texture-row">
+              <label class="field">
+                <span>Hemisphere 1 Texture</span>
+                <input
+                  id="profile-ball-hemi1-texture-input"
+                  class="text-input"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                />
+                <button id="profile-ball-hemi1-texture-clear" class="ghost compact" type="button">Clear Hemisphere 1 Texture</button>
+              </label>
+              <label class="field">
+                <span>Hemisphere 2 Texture</span>
+                <input
+                  id="profile-ball-hemi2-texture-input"
+                  class="text-input"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                />
+                <button id="profile-ball-hemi2-texture-clear" class="ghost compact" type="button">Clear Hemisphere 2 Texture</button>
+              </label>
+            </div>
+            <div id="profile-ball-texture-error" class="control-hint hidden"></div>
+            <div class="control-hint">Ball textures sync in multiplayer. Max 512x512 and 100kb per hemisphere.</div>
           </div>
           <div class="panel-section">
             <div class="panel-section-header">
@@ -558,6 +592,10 @@
             <label class="checkbox-field">
               <input id="hide-lobby-names" type="checkbox" />
               <span>Hide Lobby Names</span>
+            </label>
+            <label class="checkbox-field">
+              <input id="hide-remote-ball-textures" type="checkbox" />
+              <span>Hide Remote Ball Textures</span>
             </label>
             <div class="control-hint">Replaces names with deterministic aliases for safer sharing.</div>
           </div>

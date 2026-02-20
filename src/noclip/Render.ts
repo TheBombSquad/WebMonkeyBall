@@ -1,5 +1,6 @@
 import { Camera, CameraController } from './Camera.js';
 import { mat4, vec3 } from 'gl-matrix';
+import type { BallAppearanceProfile } from '../shared/ball_appearance.js';
 import { transformVec3Mat4w0, transformVec3Mat4w1 } from './MathHelpers.js';
 import {
   makeAttachmentClearDescriptor,
@@ -57,10 +58,12 @@ export type RenderContext = {
 };
 
 export type BallRenderState = {
+  playerId: number;
   pos: { x: number; y: number; z: number };
   orientation: { x: number; y: number; z: number; w: number };
   radius: number;
   visible: boolean;
+  appearance?: BallAppearanceProfile;
 };
 
 export type BananaRenderState = {

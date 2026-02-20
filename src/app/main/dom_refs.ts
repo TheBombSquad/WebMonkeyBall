@@ -161,8 +161,16 @@ export function collectMainDomRefs() {
   const profileAvatarPreview = document.getElementById('profile-avatar-preview') as HTMLElement | null;
   const profileAvatarClearButton = document.getElementById('profile-avatar-clear') as HTMLButtonElement | null;
   const profileAvatarError = document.getElementById('profile-avatar-error') as HTMLElement | null;
+  const profileBallHemi1ColorInput = document.getElementById('profile-ball-hemi1-color') as HTMLInputElement | null;
+  const profileBallHemi2ColorInput = document.getElementById('profile-ball-hemi2-color') as HTMLInputElement | null;
+  const profileBallHemi1TextureInput = document.getElementById('profile-ball-hemi1-texture-input') as HTMLInputElement | null;
+  const profileBallHemi2TextureInput = document.getElementById('profile-ball-hemi2-texture-input') as HTMLInputElement | null;
+  const profileBallHemi1TextureClearButton = document.getElementById('profile-ball-hemi1-texture-clear') as HTMLButtonElement | null;
+  const profileBallHemi2TextureClearButton = document.getElementById('profile-ball-hemi2-texture-clear') as HTMLButtonElement | null;
+  const profileBallTextureError = document.getElementById('profile-ball-texture-error') as HTMLElement | null;
   const hidePlayerNamesToggle = document.getElementById('hide-player-names') as HTMLInputElement | null;
   const hideLobbyNamesToggle = document.getElementById('hide-lobby-names') as HTMLInputElement | null;
+  const hideRemoteBallTexturesToggle = document.getElementById('hide-remote-ball-textures') as HTMLInputElement | null;
 
   const nameplateLayer = document.createElement('div');
   nameplateLayer.id = 'nameplate-layer';
@@ -328,8 +336,16 @@ export function collectMainDomRefs() {
     profileAvatarPreview,
     profileAvatarClearButton,
     profileAvatarError,
+    profileBallHemi1ColorInput,
+    profileBallHemi2ColorInput,
+    profileBallHemi1TextureInput,
+    profileBallHemi2TextureInput,
+    profileBallHemi1TextureClearButton,
+    profileBallHemi2TextureClearButton,
+    profileBallTextureError,
     hidePlayerNamesToggle,
     hideLobbyNamesToggle,
+    hideRemoteBallTexturesToggle,
     nameplateLayer,
   };
 }

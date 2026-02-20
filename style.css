@@ -491,6 +491,41 @@ body.gameplay-active {
   width: 100%;
 }
 
+.profile-ball-row {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-ball-texture-row {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-ball-texture-row .field {
+  display: grid;
+  gap: 6px;
+}
+
+.color-input {
+  width: 100%;
+  height: 40px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 12, 18, 0.6);
+}
+
+@media (max-width: 740px) {
+  .profile-ball-row,
+  .profile-ball-texture-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .menu-header {
   display: flex;
   align-items: flex-start;
