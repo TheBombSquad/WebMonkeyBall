@@ -27,6 +27,71 @@ import { TevLayerInst } from "./TevLayer.js";
 import { GfxRenderInst } from "../gfx/render/GfxRenderInstManager.js";
 import { assert } from "../util.js";
 
+const BALL_UV_REMAP_EPSILON = 1e-6;
+const BALL_UV_EDGE_RELIEF = 1.0;
+
+function isBallHemisphereModelName(modelName: string): boolean {
+    return /_HEMI_(INSIDE|OUTSIDE)(?:_L[23])?$/.test(modelName);
+}
+
+function remapBallHemisphereTex0(loadedVertexDatas: LoadedVertexData[], loadedVertexLayout: LoadedVertexLayout): void {
+    const tex0Offset = loadedVertexLayout.vertexAttributeOffsets[GX.Attr.TEX0];
+    if (tex0Offset === undefined || tex0Offset < 0) {
+        return;
+    }
+    const stride = loadedVertexLayout.vertexBufferStrides[0];
+    for (let i = 0; i < loadedVertexDatas.length; i++) {
+        const loadedVertexData = loadedVertexDatas[i];
+        const vertexBuffer = loadedVertexData.vertexBuffers[0];
+        if (!(vertexBuffer instanceof ArrayBuffer)) {
+            continue;
+        }
+        const view = new DataView(vertexBuffer);
+        let minU = Number.POSITIVE_INFINITY;
+        let maxU = Number.NEGATIVE_INFINITY;
+        let minV = Number.POSITIVE_INFINITY;
+        let maxV = Number.NEGATIVE_INFINITY;
+        for (let vtx = 0; vtx < loadedVertexData.totalVertexCount; vtx++) {
+            const baseOffs = vtx * stride + tex0Offset;
+            const u = view.getFloat32(baseOffs + 0x00, false);
+            const v = view.getFloat32(baseOffs + 0x04, false);
+            if (u < minU) minU = u;
+            if (u > maxU) maxU = u;
+            if (v < minV) minV = v;
+            if (v > maxV) maxV = v;
+        }
+        const centerU = (minU + maxU) * 0.5;
+        const centerV = (minV + maxV) * 0.5;
+        const radiusU = (maxU - minU) * 0.5;
+        const radiusV = (maxV - minV) * 0.5;
+        if (radiusU <= BALL_UV_REMAP_EPSILON || radiusV <= BALL_UV_REMAP_EPSILON) {
+            continue;
+        }
+        for (let vtx = 0; vtx < loadedVertexData.totalVertexCount; vtx++) {
+            const baseOffs = vtx * stride + tex0Offset;
+            const u = view.getFloat32(baseOffs + 0x00, false);
+            const v = view.getFloat32(baseOffs + 0x04, false);
+            const dx = (u - centerU) / radiusU;
+            const dy = (v - centerV) / radiusV;
+            const radius = Math.hypot(dx, dy);
+            if (radius <= BALL_UV_REMAP_EPSILON) {
+                continue;
+            }
+            const clampedRadius = Math.min(1, radius);
+            const equalAreaRadius = Math.sqrt(
+                1 - Math.sqrt(Math.max(0, 1 - clampedRadius * clampedRadius))
+            );
+            const remappedRadius =
+                clampedRadius + (equalAreaRadius - clampedRadius) * BALL_UV_EDGE_RELIEF;
+            const scale = remappedRadius / radius;
+            const remappedU = centerU + dx * scale * radiusU;
+            const remappedV = centerV + dy * scale * radiusV;
+            view.setFloat32(baseOffs + 0x00, remappedU, false);
+            view.setFloat32(baseOffs + 0x04, remappedV, false);
+        }
+    }
+}
+
 function fillVatFormat(vtxType: GX.CompType, isNBT: boolean): GX_VtxAttrFmt[] {
     const vatFormat: GX_VtxAttrFmt[] = [];
     const compShift = vtxType === GX.CompType.S16 ? 0x0d : 0x00;
@@ -94,6 +159,7 @@ export class ShapeInst {
         renderCache: GfxRenderCache,
         public shapeData: Gma.Shape,
         modelTevLayers: TevLayerInst[],
+        modelName: string,
         modelFlags: Gma.ModelFlags,
         private translucent: boolean,
         private modelBoundCenter: vec3,
@@ -120,6 +186,9 @@ export class ShapeInst {
         const loadedVertexDatas = shapeData.dlists.map((dlist) =>
             generateLoadedVertexData(dlist.data.slice(1), loader)
         );
+        if (isBallHemisphereModelName(modelName)) {
+            remapBallHemisphereTex0(loadedVertexDatas, loadedVertexLayout);
+        }
         this.bufferCoalescer = loadedDataCoalescerComboGfx(device, loadedVertexDatas);
         this.subShapes = shapeData.dlists.map((dlist, i) => {
             const buf = this.bufferCoalescer.coalescedBuffers[i];

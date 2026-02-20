@@ -993,6 +993,7 @@ class BallInst {
                 textureOverride = customTexture;
             }
             rp.textureOverride = textureOverride;
+            rp.textureOverrideForceTex0 = textureOverride !== null;
             slot.model.prepareToRender(ctx, rp);
         }
     }

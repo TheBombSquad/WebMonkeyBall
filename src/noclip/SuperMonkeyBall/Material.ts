@@ -37,6 +37,10 @@ type BuildState = {
     texGenSrc: GX.TexGenSrc;
 };
 
+type MaterialBuildOptions = {
+    worldSpecularDiffuseUsesUv: boolean;
+};
+
 const WORLD_SPECULAR_TEX_WIDTH = 16;
 const WORLD_SPECULAR_TEX_HEIGHT = 4;
 let worldSpecularTexture: GfxTexture | null = null;
@@ -168,6 +172,73 @@ function buildWorldSpecularLayer(mb: GXMaterialBuilder, state: BuildState, color
     state.texGenSrc++;
 }
 
+function buildWorldSpecularLayerWithUvDiffuse(
+    mb: GXMaterialBuilder,
+    state: BuildState,
+    colorIn: GX.CC,
+    alphaIn: GX.CA,
+    texGenMatrix: GX.TexGenMatrix
+) {
+    const stageSpec = state.stage;
+    const stageDiffuse = state.stage + 1;
+    const stageCombine = state.stage + 2;
+
+    // Stage 0: compute world-specular highlight into C2 (same as vanilla world-spec stage0).
+    mb.setTevDirect(stageSpec);
+    mb.setTevSwapMode(stageSpec, SWAP_TABLES[0], SWAP_TABLES[0]);
+    mb.setTevKColorSel(stageSpec, GX.KonstColorSel.KCSEL_K1);
+    mb.setTexCoordGen(
+        state.texCoord,
+        GX.TexGenType.MTX3x4,
+        GX.TexGenSrc.NRM,
+        GX.TexGenMatrix.TEXMTX0,
+        true,
+        GX.PostTexGenMatrix.PTTEXMTX2
+    );
+    mb.setTevOrder(stageSpec, state.texCoord, GX.TexMapID.TEXMAP0, GX.RasColorChannelID.COLOR0A0);
+    mb.setTevColorIn(stageSpec, GX.CC.ZERO, GX.CC.TEXC, GX.CC.KONST, GX.CC.ZERO);
+    mb.setTevColorOp(stageSpec, GX.TevOp.ADD, GX.TevBias.ZERO, GX.TevScale.SCALE_1, true, GX.Register.REG2);
+    mb.setTevAlphaIn(stageSpec, GX.CA.ZERO, GX.CA.ZERO, GX.CA.ZERO, alphaIn);
+    mb.setTevAlphaOp(stageSpec, GX.TevOp.ADD, GX.TevBias.ZERO, GX.TevScale.SCALE_1, true, GX.Register.REG2);
+
+    // Stage 1: regular UV diffuse from custom texture (extra texture map after original layer map).
+    mb.setTevDirect(stageDiffuse);
+    mb.setTevSwapMode(stageDiffuse, SWAP_TABLES[0], SWAP_TABLES[0]);
+    mb.setTexCoordGen(state.texCoord + 1, GX.TexGenType.MTX2x4, state.texGenSrc, texGenMatrix);
+    mb.setTevOrder(stageDiffuse, state.texCoord + 1, state.texMap + 1, GX.RasColorChannelID.COLOR0A0);
+    mb.setTevColorIn(stageDiffuse, GX.CC.ZERO, GX.CC.TEXC, colorIn, GX.CC.ZERO);
+    mb.setTevColorOp(stageDiffuse, GX.TevOp.ADD, GX.TevBias.ZERO, GX.TevScale.SCALE_1, true, GX.Register.PREV);
+    mb.setTevAlphaIn(stageDiffuse, GX.CA.ZERO, GX.CA.TEXA, alphaIn, GX.CA.ZERO);
+    mb.setTevAlphaOp(stageDiffuse, GX.TevOp.ADD, GX.TevBias.ZERO, GX.TevScale.SCALE_1, true, GX.Register.PREV);
+
+    // Stage 2: vanilla-style world-spec add using original layer texture mask.
+    mb.setTevDirect(stageCombine);
+    mb.setTevSwapMode(stageCombine, SWAP_TABLES[0], SWAP_TABLES[0]);
+    mb.setTexCoordGen(
+        state.texCoord + 2,
+        GX.TexGenType.MTX3x4,
+        GX.TexGenSrc.NRM,
+        GX.TexGenMatrix.TEXMTX0,
+        true,
+        GX.PostTexGenMatrix.PTTEXMTX1
+    );
+    mb.setTevOrder(
+        stageCombine,
+        state.texCoord + 2,
+        state.texMap,
+        GX.RasColorChannelID.COLOR0A0
+    );
+    mb.setTevColorIn(stageCombine, GX.CC.ZERO, GX.CC.TEXC, GX.CC.C2, GX.CC.CPREV);
+    mb.setTevColorOp(stageCombine, GX.TevOp.ADD, GX.TevBias.ZERO, GX.TevScale.SCALE_1, true, GX.Register.PREV);
+    mb.setTevAlphaIn(stageCombine, GX.CA.ZERO, GX.CA.ZERO, GX.CA.ZERO, GX.CA.APREV);
+    mb.setTevAlphaOp(stageCombine, GX.TevOp.ADD, GX.TevBias.ZERO, GX.TevScale.SCALE_1, true, GX.Register.PREV);
+
+    state.stage += 3;
+    state.texCoord += 3;
+    state.texMap += 2;
+    state.texGenSrc++;
+}
+
 function buildAlphaBlendLayer(
     mb: GXMaterialBuilder,
     state: BuildState,
@@ -276,6 +347,7 @@ function computeWorldSpecularPostTexMtx(dst1: mat4, dst2: mat4, modelDirView: ve
 export class MaterialInst {
     private tevLayers: TevLayerInst[];
     private materialHelper: GXMaterialHelperGfx;
+    private materialHelperWorldSpecularAsDiffuse: GXMaterialHelperGfx | null = null;
     private textureSlots: (TevLayerInst | "worldSpecular")[];
     private hasViewSpecular = false;
     private hasWorldSpecular = false;
@@ -303,10 +375,10 @@ export class MaterialInst {
             this.textureSlots.push(tevLayer);
         }
 
-        this.genGXMaterial();
+        this.materialHelper = this.genGXMaterial({ worldSpecularDiffuseUsesUv: false });
     }
 
-    private genGXMaterial(): void {
+    private genGXMaterial(options: MaterialBuildOptions): GXMaterialHelperGfx {
         const mb = new GXMaterialBuilder();
 
         mb.setCullMode(this.cullMode);
@@ -425,7 +497,17 @@ export class MaterialInst {
                 } else if (layerTypeFlags & Gma.TevLayerFlags.TypeViewSpecular) {
                     buildViewSpecularLayer(mb, buildState, colorIn, alphaIn);
                 } else if (layerTypeFlags & Gma.TevLayerFlags.TypeWorldSpecular) {
-                    buildWorldSpecularLayer(mb, buildState, colorIn, alphaIn);
+                    if (options.worldSpecularDiffuseUsesUv) {
+                        buildWorldSpecularLayerWithUvDiffuse(
+                            mb,
+                            buildState,
+                            colorIn,
+                            alphaIn,
+                            texGenMatrix
+                        );
+                    } else {
+                        buildWorldSpecularLayer(mb, buildState, colorIn, alphaIn);
+                    }
                 } else {
                     // TODO(complexplane): The other kinds of layers
                     buildDummyPassthroughLayer(mb, buildState, colorIn, alphaIn);
@@ -450,15 +532,36 @@ export class MaterialInst {
 
         mb.setZMode(true, GX.CompareType.LEQUAL, true);
 
-        this.materialHelper = new GXMaterialHelperGfx(mb.finish());
+        return new GXMaterialHelperGfx(mb.finish());
+    }
+
+    private getRenderMaterialHelper(renderParams: RenderParams): GXMaterialHelperGfx {
+        if (
+            !this.hasWorldSpecular ||
+            !renderParams.textureOverrideForceTex0 ||
+            !renderParams.textureOverride?.gfxTexture ||
+            !renderParams.textureOverride?.gfxSampler
+        ) {
+            return this.materialHelper;
+        }
+        if (!this.materialHelperWorldSpecularAsDiffuse) {
+            this.materialHelperWorldSpecularAsDiffuse = this.genGXMaterial({ worldSpecularDiffuseUsesUv: true });
+        }
+        return this.materialHelperWorldSpecularAsDiffuse;
     }
 
     public setMaterialHacks(hacks: GXMaterialHacks): void {
         this.materialHelper.setMaterialHacks(hacks);
+        if (this.materialHelperWorldSpecularAsDiffuse) {
+            this.materialHelperWorldSpecularAsDiffuse.setMaterialHacks(hacks);
+        }
     }
 
     public prewarmProgram(renderCache: GfxRenderCache): void {
         this.materialHelper.cacheProgram(renderCache);
+        if (this.materialHelperWorldSpecularAsDiffuse) {
+            this.materialHelperWorldSpecularAsDiffuse.cacheProgram(renderCache);
+        }
     }
 
     public setOnRenderInst(
@@ -467,8 +570,10 @@ export class MaterialInst {
         drawParams: DrawParams,
         renderParams: RenderParams
     ): void {
+        const materialHelper = this.getRenderMaterialHelper(renderParams);
+
         // Shader program
-        this.materialHelper.setOnRenderInst(renderCache, inst);
+        materialHelper.setOnRenderInst(renderCache, inst);
 
         // Sampler bindings
         const materialParams = scratchMaterialParams;
@@ -483,7 +588,16 @@ export class MaterialInst {
         }
         const overrideTexture = renderParams.textureOverride;
         if (overrideTexture && overrideTexture.gfxTexture && overrideTexture.gfxSampler) {
-            materialParams.m_TextureMapping[texSlotOffset].copy(overrideTexture);
+            if (renderParams.textureOverrideForceTex0 && this.hasWorldSpecular) {
+                const extraCustomSlot = texSlotOffset + this.textureSlots.length;
+                if (extraCustomSlot < materialParams.m_TextureMapping.length) {
+                    materialParams.m_TextureMapping[extraCustomSlot].copy(overrideTexture);
+                } else {
+                    materialParams.m_TextureMapping[texSlotOffset].copy(overrideTexture);
+                }
+            } else {
+                materialParams.m_TextureMapping[texSlotOffset].copy(overrideTexture);
+            }
         }
 
         const lighting = assertExists(renderParams.lighting);
@@ -578,10 +692,10 @@ export class MaterialInst {
             }
         }
 
-        this.materialHelper.allocateMaterialParamsDataOnInst(inst, materialParams);
+        materialHelper.allocateMaterialParamsDataOnInst(inst, materialParams);
         inst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
 
         // Draw params
-        this.materialHelper.allocateDrawParamsDataOnInst(inst, drawParams);
+        materialHelper.allocateDrawParamsDataOnInst(inst, drawParams);
     }
 }

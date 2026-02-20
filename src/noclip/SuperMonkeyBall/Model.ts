@@ -33,6 +33,7 @@ export class RenderParams {
     public colorMul: Color;
     public disableSpecular: boolean;
     public textureOverride: GXTextureMapping | null;
+    public textureOverrideForceTex0: boolean;
     public megaStateFlags?: Partial<GfxMegaStateDescriptor>;
 
     constructor() {
@@ -54,6 +55,7 @@ export class RenderParams {
         this.colorMul.a = 1;
         this.disableSpecular = false;
         this.textureOverride = null;
+        this.textureOverrideForceTex0 = false;
         this.megaStateFlags = undefined;
     }
 }
@@ -75,6 +77,7 @@ export class ModelInst implements ModelInterface {
                     renderCache,
                     shapeData,
                     this.tevLayers,
+                    modelData.name,
                     modelData.flags,
                     i >= modelData.opaqueShapeCount,
                     modelData.boundSphereCenter,
