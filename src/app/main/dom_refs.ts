@@ -5,6 +5,9 @@ export function collectMainDomRefs() {
   const hudCanvas = document.getElementById('hud-canvas') as HTMLCanvasElement;
   const overlay = document.getElementById('overlay') as HTMLElement;
   const mainMenuPanel = document.getElementById('main-menu') as HTMLElement | null;
+  const singleplayerMenuPanel = document.getElementById('singleplayer-menu') as HTMLElement | null;
+  const coursePlayMenuPanel = document.getElementById('course-play-menu') as HTMLElement | null;
+  const replayLibraryMenuPanel = document.getElementById('replay-library-menu') as HTMLElement | null;
   const pauseMenuPanel = document.getElementById('pause-menu') as HTMLElement | null;
   const multiplayerMenuPanel = document.getElementById('multiplayer-menu') as HTMLElement | null;
   const multiplayerIngameMenuPanel = document.getElementById('multiplayer-ingame-menu') as HTMLElement | null;
@@ -60,10 +63,8 @@ export function collectMainDomRefs() {
   const packStatus = document.getElementById('pack-status') as HTMLElement | null;
   const packFileInput = document.getElementById('pack-file') as HTMLInputElement | null;
   const packFolderInput = document.getElementById('pack-folder') as HTMLInputElement | null;
-  const replaySaveButton = document.getElementById('replay-save') as HTMLButtonElement | null;
-  const replayLoadButton = document.getElementById('replay-load') as HTMLButtonElement | null;
-  const replayFileInput = document.getElementById('replay-file') as HTMLInputElement | null;
-  const replayStatus = document.getElementById('replay-status') as HTMLElement | null;
+  const levelSelectTitle = document.getElementById('level-select-title') as HTMLElement | null;
+  const levelSelectSubtitle = document.getElementById('level-select-subtitle') as HTMLElement | null;
   const smb1Fields = document.getElementById('smb1-fields') as HTMLElement;
   const smb2Fields = document.getElementById('smb2-fields') as HTMLElement;
   const smb2ModeSelect = document.getElementById('smb2-mode') as HTMLSelectElement;
@@ -80,7 +81,22 @@ export function collectMainDomRefs() {
   const announcerVolumeValue = document.getElementById('announcer-volume-value') as HTMLOutputElement;
   const hudStatus = document.getElementById('hud-status') as HTMLElement | null;
 
+  const singleplayerOpenButton = document.getElementById('open-singleplayer') as HTMLButtonElement | null;
+  const replayLibraryOpenButton = document.getElementById('open-replay-library') as HTMLButtonElement | null;
   const multiplayerOpenButton = document.getElementById('open-multiplayer') as HTMLButtonElement | null;
+  const singleplayerBackButton = document.getElementById('singleplayer-back') as HTMLButtonElement | null;
+  const singleplayerCoursePlayButton = document.getElementById('open-course-play') as HTMLButtonElement | null;
+  const singleplayerPracticeButton = document.getElementById('open-practice') as HTMLButtonElement | null;
+  const coursePlayBackButton = document.getElementById('course-play-back') as HTMLButtonElement | null;
+  const coursePlaySourceSelect = document.getElementById('course-play-source') as HTMLSelectElement | null;
+  const coursePlayDifficultySelect = document.getElementById('course-play-difficulty') as HTMLSelectElement | null;
+  const coursePlayStartButton = document.getElementById('course-play-start') as HTMLButtonElement | null;
+  const replayLibraryBackButton = document.getElementById('replay-library-back') as HTMLButtonElement | null;
+  const replayLibraryImportButton = document.getElementById('replay-library-import') as HTMLButtonElement | null;
+  const replayLibraryRefreshButton = document.getElementById('replay-library-refresh') as HTMLButtonElement | null;
+  const replayLibraryFileInput = document.getElementById('replay-library-file') as HTMLInputElement | null;
+  const replayLibraryStatus = document.getElementById('replay-library-status') as HTMLElement | null;
+  const replayLibraryList = document.getElementById('replay-library-list') as HTMLElement | null;
   const multiplayerBackButton = document.getElementById('multiplayer-back') as HTMLButtonElement | null;
   const levelSelectOpenButton = document.getElementById('open-level-select') as HTMLButtonElement | null;
   const levelSelectBackButton = document.getElementById('level-select-back') as HTMLButtonElement | null;
@@ -156,6 +172,9 @@ export function collectMainDomRefs() {
     hudCanvas,
     overlay,
     mainMenuPanel,
+    singleplayerMenuPanel,
+    coursePlayMenuPanel,
+    replayLibraryMenuPanel,
     pauseMenuPanel,
     multiplayerMenuPanel,
     multiplayerIngameMenuPanel,
@@ -211,10 +230,8 @@ export function collectMainDomRefs() {
     packStatus,
     packFileInput,
     packFolderInput,
-    replaySaveButton,
-    replayLoadButton,
-    replayFileInput,
-    replayStatus,
+    levelSelectTitle,
+    levelSelectSubtitle,
     smb1Fields,
     smb2Fields,
     smb2ModeSelect,
@@ -230,7 +247,22 @@ export function collectMainDomRefs() {
     sfxVolumeValue,
     announcerVolumeValue,
     hudStatus,
+    singleplayerOpenButton,
+    replayLibraryOpenButton,
     multiplayerOpenButton,
+    singleplayerBackButton,
+    singleplayerCoursePlayButton,
+    singleplayerPracticeButton,
+    coursePlayBackButton,
+    coursePlaySourceSelect,
+    coursePlayDifficultySelect,
+    coursePlayStartButton,
+    replayLibraryBackButton,
+    replayLibraryImportButton,
+    replayLibraryRefreshButton,
+    replayLibraryFileInput,
+    replayLibraryStatus,
+    replayLibraryList,
     multiplayerBackButton,
     levelSelectOpenButton,
     levelSelectBackButton,

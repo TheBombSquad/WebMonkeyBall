@@ -1,6 +1,6 @@
 import { GAME_SOURCES, INFO_FLAGS, type GameSource } from './shared/constants/index.js';
 import { getPackStageName } from './pack.js';
-import { getSmb2StageName } from './smb2_stage_names.js';
+import { getStageNameForSource } from './stage_names.js';
 
 const HUD_WIDTH = 640;
 const HUD_HEIGHT = 480;
@@ -940,7 +940,8 @@ function getSmb2StageNameText(game: any, floorInfo: any, maxLength: number): str
     const text = packName.toUpperCase();
     return text.length > maxLength ? text.slice(0, maxLength) : text;
   }
-  const vanillaName = getSmb2StageName(stageId);
+  const gameSource = game?.gameSource === GAME_SOURCES.MB2WS ? GAME_SOURCES.MB2WS : GAME_SOURCES.SMB2;
+  const vanillaName = getStageNameForSource(gameSource, stageId);
   if (vanillaName) {
     const text = vanillaName.toUpperCase();
     return text.length > maxLength ? text.slice(0, maxLength) : text;

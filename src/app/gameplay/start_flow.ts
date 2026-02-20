@@ -86,6 +86,13 @@ export class MatchStartFlowController {
 
   async startStage(
     difficulty: any,
+    {
+      practiceMode = false,
+      enableLeaderboardSession = true,
+    }: {
+      practiceMode?: boolean;
+      enableLeaderboardSession?: boolean;
+    } = {},
   ) {
     this.deps.setOverlayVisible(false);
     this.deps.resumeButton.disabled = true;
@@ -100,13 +107,38 @@ export class MatchStartFlowController {
     this.deps.setCurrentSmb2LikeMode(
       activeGameSource !== GAME_SOURCES.SMB1 && this.hasSmb2LikeMode(difficulty) ? difficulty.mode : null,
     );
+    this.deps.game.setPracticeMode(practiceMode);
     void this.deps.audio.resume();
     await this.deps.game.start(difficulty);
-    if (!this.deps.getNetplayEnabled() && this.deps.leaderboardsClient) {
+    if (!practiceMode && enableLeaderboardSession && !this.deps.getNetplayEnabled() && this.deps.leaderboardsClient) {
       this.deps.startLeaderboardSession(difficulty);
     } else {
       this.deps.clearLeaderboardSession();
     }
+  }
+
+  startSingleplayerSelection(
+    gameSource: GameSource,
+    courseConfig: any,
+    {
+      practiceMode = false,
+      enableLeaderboardSession = !practiceMode,
+    }: {
+      practiceMode?: boolean;
+      enableLeaderboardSession?: boolean;
+    } = {},
+  ) {
+    if (this.deps.getNetplayEnabled()) {
+      return;
+    }
+    this.deps.setActiveGameSource(gameSource);
+    this.deps.game.setMultiplayerGameMode(this.deps.modeStandard);
+    this.startStage(courseConfig, { practiceMode, enableLeaderboardSession }).catch((error) => {
+      if (this.deps.hudStatus) {
+        this.deps.hudStatus.textContent = 'Failed to load stage.';
+      }
+      console.error(error);
+    });
   }
 
   handleHostStageLoadStart() {
@@ -180,7 +212,7 @@ export class MatchStartFlowController {
         this.deps.sendLobbyHeartbeatNow();
       }
     }
-    this.startStage(difficulty).catch((error) => {
+    this.startStage(difficulty, { practiceMode: false, enableLeaderboardSession: true }).catch((error) => {
       if (this.deps.hudStatus) {
         this.deps.hudStatus.textContent = 'Failed to load stage.';
       }

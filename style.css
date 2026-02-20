@@ -222,6 +222,10 @@ body.gameplay-active {
   overscroll-behavior: contain;
 }
 
+#replay-library-menu {
+  width: min(1024px, 96vw);
+}
+
 .panel h1 {
   margin: 0 0 8px;
   font-size: 28px;
@@ -1357,4 +1361,45 @@ button:disabled {
   text-align: right;
   font-variant-numeric: tabular-nums;
   opacity: 0.9;
+}
+
+.replay-library-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.replay-library-row:last-child {
+  border-bottom: none;
+}
+
+.replay-library-info {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.replay-library-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.replay-library-subtitle {
+  margin-top: 2px;
+  opacity: 0.75;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.replay-library-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }

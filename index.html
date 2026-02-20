@@ -66,20 +66,13 @@
       <button id="open-settings" class="ghost compact settings-button" type="button">Settings</button>
     </div>
     <div class="panel" id="main-menu">
-      <h1>Super Monkey Ball 1</h1>
-      <p>Standard gameplay (Beginner / Advanced / Expert).</p>
+      <h1>Super Monkey Ball</h1>
+      <p>Select a mode.</p>
 
       <div class="panel-section">
-        <button id="open-level-select" class="menu-button" type="button">
-          <span class="menu-button-title">Level Select</span>
-          <span class="menu-button-subtitle">Choose game source and stage</span>
-        </button>
-      </div>
-
-      <div class="panel-section">
-        <button id="open-leaderboards" class="menu-button" type="button">
-          <span class="menu-button-title">Leaderboards</span>
-          <span class="menu-button-subtitle">Stage and course rankings</span>
+        <button id="open-singleplayer" class="menu-button" type="button">
+          <span class="menu-button-title">Singleplayer</span>
+          <span class="menu-button-subtitle">Course play and practice</span>
         </button>
       </div>
 
@@ -90,14 +83,65 @@
         </button>
       </div>
 
-      <div class="row">
+      <div class="panel-section">
+        <button id="open-replay-library" class="menu-button" type="button">
+          <span class="menu-button-title">Replays</span>
+          <span class="menu-button-subtitle">Saved local replay library</span>
+        </button>
+      </div>
+
+      <div class="row hidden">
         <button id="start" disabled>Start</button>
         <button id="resume" class="ghost" disabled>Resume</button>
       </div>
       <div class="hint">
         <div>Controls: WASD / Arrow Keys = tilt, R = reset stage, N = skip stage</div>
         <div>If you have a controller plugged in, it should work too.</div>
-        <div>Don't worry about reporting bugs. I probably already know about it - it'll get fixed.</div>
+      </div>
+    </div>
+    <div class="panel hidden" id="singleplayer-menu">
+      <div class="menu-header">
+        <button id="singleplayer-back" class="ghost compact" type="button">Back</button>
+        <div>
+          <h1>Singleplayer</h1>
+          <p>Pick course play or practice.</p>
+        </div>
+      </div>
+      <div class="panel-section">
+        <button id="open-course-play" class="menu-button" type="button">
+          <span class="menu-button-title">Course Play</span>
+          <span class="menu-button-subtitle">Start from floor 1</span>
+        </button>
+      </div>
+      <div class="panel-section">
+        <button id="open-practice" class="menu-button" type="button">
+          <span class="menu-button-title">Practice</span>
+          <span class="menu-button-subtitle">Choose any stage, then repeat it</span>
+        </button>
+      </div>
+    </div>
+    <div class="panel hidden" id="course-play-menu">
+      <div class="menu-header">
+        <button id="course-play-back" class="ghost compact" type="button">Back</button>
+        <div>
+          <h1>Course Play</h1>
+          <p>Choose source and difficulty.</p>
+        </div>
+      </div>
+      <div class="panel-section">
+        <label class="field">
+          <span>Game Source</span>
+          <select id="course-play-source"></select>
+        </label>
+      </div>
+      <div class="panel-section">
+        <label class="field">
+          <span>Difficulty</span>
+          <select id="course-play-difficulty"></select>
+        </label>
+      </div>
+      <div class="panel-section">
+        <button id="course-play-start" type="button">Start Course</button>
       </div>
     </div>
     <div class="panel hidden pause-menu-panel" id="pause-menu">
@@ -116,8 +160,8 @@
       <div class="menu-header">
         <button id="level-select-back" class="ghost compact" type="button">Back</button>
         <div>
-          <h1>Level Select</h1>
-          <p>Choose the game source, course, and stage.</p>
+          <h1 id="level-select-title">Level Select</h1>
+          <p id="level-select-subtitle">Choose the game source, course, and stage.</p>
         </div>
       </div>
       <div class="panel-section">
@@ -144,17 +188,6 @@
         </div>
         <input id="pack-file" class="hidden" type="file" accept=".zip" />
         <input id="pack-folder" class="hidden" type="file" webkitdirectory />
-      </div>
-      <div class="panel-section">
-        <div class="panel-section-header">
-          <h2>Replay</h2>
-        </div>
-        <div class="pack-controls">
-          <button id="replay-save" class="ghost compact" type="button">Save Replay</button>
-          <button id="replay-load" class="ghost compact" type="button">Load Replay</button>
-          <div id="replay-status" class="pack-status">Replay: none</div>
-        </div>
-        <input id="replay-file" class="hidden" type="file" accept=".json" />
       </div>
       <div class="panel-section">
         <div class="panel-section-header">
@@ -229,49 +262,22 @@
         <div class="control-hint">Updates the lobby selection without starting the match.</div>
       </div>
     </div>
-    <div class="panel hidden" id="leaderboards-menu">
+    <div class="panel hidden" id="replay-library-menu">
       <div class="menu-header">
-        <button id="leaderboards-back" class="ghost compact" type="button">Back</button>
+        <button id="replay-library-back" class="ghost compact" type="button">Back</button>
         <div>
-          <h1>Leaderboards</h1>
-          <p>Rankings for the current stage or course selection.</p>
+          <h1>Replays</h1>
+          <p>Local replay library.</p>
         </div>
       </div>
       <div class="panel-section">
-        <label class="field">
-          <span>Type</span>
-          <select id="leaderboard-type">
-            <option value="stage">Stage</option>
-            <option value="course">Course</option>
-          </select>
-        </label>
-        <label class="field" id="leaderboard-goal-field">
-          <span>Goal</span>
-          <select id="leaderboard-goal">
-            <option value="B">Blue</option>
-            <option value="G">Green</option>
-            <option value="R">Red</option>
-          </select>
-        </label>
-        <label class="field" id="leaderboard-metric-field">
-          <span>Metric</span>
-          <select id="leaderboard-metric">
-            <option value="time">Time</option>
-            <option value="score">Score</option>
-          </select>
-        </label>
-        <label class="field hidden" id="leaderboard-warp-field">
-          <span>Warp</span>
-          <select id="leaderboard-warp">
-            <option value="warpless">Warpless</option>
-            <option value="warped">Warped</option>
-          </select>
-        </label>
         <div class="row">
-          <button id="leaderboard-refresh" class="ghost" type="button">Refresh</button>
-          <div id="leaderboard-status" class="pack-status">Leaderboards: idle</div>
+          <button id="replay-library-import" class="ghost" type="button">Import Replay</button>
+          <button id="replay-library-refresh" class="ghost" type="button">Refresh</button>
+          <div id="replay-library-status" class="pack-status">Replays: idle</div>
         </div>
-        <div id="leaderboard-list" class="leaderboard-list"></div>
+        <input id="replay-library-file" class="hidden" type="file" accept=".json" />
+        <div id="replay-library-list" class="leaderboard-list"></div>
       </div>
     </div>
     <div class="multiplayer-layout hidden" id="multiplayer-layout">

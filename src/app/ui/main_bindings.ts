@@ -11,6 +11,9 @@ type BindMainUiDeps = {
   controlModeSelect: HTMLSelectElement | null;
   fullscreenButton: HTMLButtonElement | null;
   mainMenuPanel: HTMLElement | null;
+  singleplayerMenuPanel: HTMLElement | null;
+  coursePlayMenuPanel: HTMLElement | null;
+  replayLibraryMenuPanel: HTMLElement | null;
   pauseMenuPanel: HTMLElement | null;
   multiplayerMenuPanel: HTMLElement | null;
   multiplayerIngameMenuPanel: HTMLElement | null;
@@ -20,7 +23,16 @@ type BindMainUiDeps = {
   gamepadCalibrationButton: HTMLButtonElement | null;
   gamepadCalibrationOverlay: HTMLElement | null;
   interpolationToggle: HTMLInputElement | null;
+  singleplayerOpenButton: HTMLButtonElement | null;
+  replayLibraryOpenButton: HTMLButtonElement | null;
   multiplayerOpenButton: HTMLButtonElement | null;
+  singleplayerBackButton: HTMLButtonElement | null;
+  singleplayerCoursePlayButton: HTMLButtonElement | null;
+  singleplayerPracticeButton: HTMLButtonElement | null;
+  coursePlayBackButton: HTMLButtonElement | null;
+  coursePlaySourceSelect: HTMLSelectElement | null;
+  coursePlayStartButton: HTMLButtonElement | null;
+  replayLibraryBackButton: HTMLButtonElement | null;
   leaderboardsOpenButton: HTMLButtonElement | null;
   multiplayerBackButton: HTMLButtonElement | null;
   levelSelectOpenButton: HTMLButtonElement | null;
@@ -45,6 +57,11 @@ type BindMainUiDeps = {
   onStopGamepadCalibration: () => void;
   onSetActiveMenu: (menu: MenuPanel) => void;
   onOpenLevelSelectMenu: (menu: MenuPanel) => void;
+  onOpenPracticeLevelSelectMenu: () => void;
+  onOpenCoursePlayMenu: () => void;
+  onStartCoursePlay: () => void;
+  onConfirmLevelSelect: () => void;
+  onSyncCoursePlaySourceSelection: () => void;
   onOpenSettingsMenu: () => void;
   getLevelSelectReturnMenu: () => MenuPanel;
   getSettingsReturnMenu: () => MenuPanel;
@@ -113,6 +130,9 @@ export function bindMainUiControls(deps: BindMainUiDeps) {
 
   for (const panel of [
     deps.mainMenuPanel,
+    deps.singleplayerMenuPanel,
+    deps.coursePlayMenuPanel,
+    deps.replayLibraryMenuPanel,
     deps.pauseMenuPanel,
     deps.multiplayerMenuPanel,
     deps.multiplayerIngameMenuPanel,
@@ -146,8 +166,45 @@ export function bindMainUiControls(deps: BindMainUiDeps) {
     deps.setInterpolationEnabled(true);
   }
 
+  deps.singleplayerOpenButton?.addEventListener('click', () => {
+    deps.onSetActiveMenu('singleplayer');
+  });
+
+  deps.replayLibraryOpenButton?.addEventListener('click', () => {
+    deps.onSetActiveMenu('replays');
+  });
+
   deps.multiplayerOpenButton?.addEventListener('click', () => {
     deps.onSetActiveMenu('multiplayer');
+  });
+
+  deps.singleplayerBackButton?.addEventListener('click', () => {
+    deps.onSetActiveMenu('main');
+  });
+
+  deps.singleplayerCoursePlayButton?.addEventListener('click', () => {
+    deps.onOpenCoursePlayMenu();
+    deps.onSetActiveMenu('course-play');
+  });
+
+  deps.singleplayerPracticeButton?.addEventListener('click', () => {
+    deps.onOpenPracticeLevelSelectMenu();
+  });
+
+  deps.coursePlayBackButton?.addEventListener('click', () => {
+    deps.onSetActiveMenu('singleplayer');
+  });
+
+  deps.coursePlaySourceSelect?.addEventListener('change', () => {
+    deps.onSyncCoursePlaySourceSelection();
+  });
+
+  deps.coursePlayStartButton?.addEventListener('click', () => {
+    deps.onStartCoursePlay();
+  });
+
+  deps.replayLibraryBackButton?.addEventListener('click', () => {
+    deps.onSetActiveMenu('main');
   });
 
   deps.leaderboardsOpenButton?.addEventListener('click', () => {
@@ -163,7 +220,7 @@ export function bindMainUiControls(deps: BindMainUiDeps) {
   });
 
   deps.levelSelectConfirmButton?.addEventListener('click', () => {
-    deps.onSetActiveMenu('main');
+    deps.onConfirmLevelSelect();
   });
 
   deps.levelSelectBackButton?.addEventListener('click', () => {

@@ -384,6 +384,7 @@ export class GameCore {
   public rollbackEnabled: boolean;
   public rollbackSession: RollbackSession<any> | null;
   public allowCourseAdvance: boolean;
+  public practiceMode: boolean;
   public nextPlayerId: number;
   public lastLocalInput: QuantizedInput;
   public fixedTickMode: boolean;
@@ -526,6 +527,7 @@ export class GameCore {
     this.rollbackEnabled = false;
     this.rollbackSession = null;
     this.allowCourseAdvance = true;
+    this.practiceMode = false;
     this.nextPlayerId = 1;
     this.lastLocalInput = { x: 0, y: 0, buttons: 0 };
     this.fixedTickMode = false;
@@ -562,6 +564,10 @@ export class GameCore {
       return;
     }
     this.multiplayerGameMode = normalized;
+  }
+
+  setPracticeMode(enabled: boolean) {
+    this.practiceMode = !!enabled;
   }
 
   getMultiplayerGameMode(): MultiplayerGameMode {
@@ -678,6 +684,7 @@ export class GameCore {
     this.goalReplayStartArmed = false;
     this.resultReplayHistory.length = 0;
     if (enabled) {
+      this.practiceMode = false;
       this.inputRecord = null;
       this.replayInputStartTick = 0;
       this.replayAutoFastForward = true;
@@ -1014,6 +1021,7 @@ export class GameCore {
     state.goalReplayStartArmed = this.goalReplayStartArmed;
     state.multiplayerGameMode = this.multiplayerGameMode;
     state.infiniteTimeEnabled = this.infiniteTimeEnabled;
+    state.practiceMode = this.practiceMode;
     state.world = this.world ? cloneWorldState(this.world, state.world) : null;
 
     const players = Array.isArray(state.players) ? state.players : [];
@@ -1315,6 +1323,9 @@ export class GameCore {
     this.multiplayerGameMode = this.normalizeMultiplayerGameMode(state.multiplayerGameMode);
     if (state.infiniteTimeEnabled !== undefined) {
       this.infiniteTimeEnabled = !!state.infiniteTimeEnabled;
+    }
+    if (state.practiceMode !== undefined) {
+      this.practiceMode = !!state.practiceMode;
     }
     this.hudGoalEventTick = Number.isFinite(state.hudGoalEventTick) ? state.hudGoalEventTick : -1;
     this.hudRingoutEventTick = Number.isFinite(state.hudRingoutEventTick) ? state.hudRingoutEventTick : -1;
@@ -3494,6 +3505,11 @@ export class GameCore {
         this.hidePlayerBall(localPlayer);
         return false;
       }
+      if (this.practiceMode && this.stage) {
+        this.accumulator = 0;
+        void this.loadStage(this.stage.stageId);
+        return true;
+      }
       this.accumulator = 0;
       if (this.allowCourseAdvance) {
         void this.advanceCourse(this.makeAdvanceInfo(INFO_FLAGS.FALLOUT));
@@ -3528,6 +3544,11 @@ export class GameCore {
       });
     }
     if (isBonusStage) {
+      if (this.practiceMode && this.stage) {
+        this.accumulator = 0;
+        void this.loadStage(this.stage.stageId);
+        return true;
+      }
       this.accumulator = 0;
       if (this.allowCourseAdvance) {
         void this.advanceCourse(this.makeAdvanceInfo(INFO_FLAGS.TIMEOVER));
@@ -3761,7 +3782,7 @@ export class GameCore {
     if (this.input.wasPressed('KeyR')) {
       this.retryStage();
     }
-    if (this.input.wasPressed('KeyN')) {
+    if (!this.practiceMode && this.input.wasPressed('KeyN')) {
       this.skipStage();
     }
   }
@@ -3783,7 +3804,7 @@ export class GameCore {
   }
 
   skipStage() {
-    if (!this.allowCourseAdvance) {
+    if (!this.allowCourseAdvance || this.practiceMode) {
       return;
     }
     if (!this.course || !this.stage) {
@@ -3897,6 +3918,11 @@ export class GameCore {
     const localPlayer = this.getLocalPlayer();
     if (this.bonusClearPending) {
       this.bonusClearPending = false;
+      if (this.practiceMode) {
+        this.accumulator = 0;
+        await this.loadStage(this.stage.stageId);
+        return;
+      }
       if (this.allowCourseAdvance) {
         await this.advanceCourse(this.makeAdvanceInfo(INFO_FLAGS.BONUS_CLEAR));
       } else if (localPlayer) {
@@ -3908,6 +3934,11 @@ export class GameCore {
     if (localPlayer) {
       localPlayer.finished = true;
       localPlayer.goalType = goalType;
+    }
+    if (this.practiceMode) {
+      this.accumulator = 0;
+      await this.loadStage(this.stage.stageId);
+      return;
     }
     if (this.session.isSinglePlayer(this)) {
       await this.advanceCourse(this.makeAdvanceInfo(INFO_FLAGS.GOAL, goalType));

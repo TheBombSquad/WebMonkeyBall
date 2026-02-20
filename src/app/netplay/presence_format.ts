@@ -1,4 +1,8 @@
+import { getStageListForDifficulty } from '../../course.js';
+import { MB2WS_CHALLENGE_ORDER, MB2WS_STORY_ORDER, type Mb2wsChallengeDifficulty } from '../../course_mb2ws.js';
+import { SMB2_CHALLENGE_ORDER, SMB2_STORY_ORDER, type Smb2ChallengeDifficulty } from '../../course_smb2.js';
 import { GAME_SOURCES, type GameSource } from '../../shared/constants/index.js';
+import { getStageNameForSource } from '../../stage_names.js';
 
 const ALIAS_ADJECTIVES = [
   'Brisk', 'Calm', 'Copper', 'Dusty', 'Frost', 'Golden', 'Hidden', 'Jade', 'Keen', 'Lucky',
@@ -71,19 +75,35 @@ export function formatCourseMeta(gameSource: GameSource, course: any) {
     const difficulty = titleCaseLabel(course.difficulty ?? 'Beginner');
     const stageIndexRaw = Number(course.stageIndex ?? 0);
     const stageIndex = Number.isFinite(stageIndexRaw) ? stageIndexRaw : 0;
-    return { courseLabel: difficulty || 'Beginner', stageLabel: `Stage ${stageIndex + 1}` };
+    const stages = getStageListForDifficulty(course.difficulty ?? 'beginner');
+    const stageId = stages[stageIndex]?.id ?? null;
+    const stageName = stageId !== null ? getStageNameForSource(gameSource, stageId) : null;
+    return {
+      courseLabel: difficulty || 'Beginner',
+      stageLabel: stageName ? `${stageIndex + 1}: ${stageName}` : `Stage ${stageIndex + 1}`,
+    };
   }
+  const getSmb2LikeStoryOrder = () => (gameSource === GAME_SOURCES.MB2WS ? MB2WS_STORY_ORDER : SMB2_STORY_ORDER);
+  const getSmb2LikeChallengeOrder = () => (gameSource === GAME_SOURCES.MB2WS ? MB2WS_CHALLENGE_ORDER : SMB2_CHALLENGE_ORDER);
   const mode = course.mode ?? 'story';
   if (mode === 'story') {
     const worldIndexRaw = Number(course.worldIndex ?? 0);
     const stageIndexRaw = Number(course.stageIndex ?? 0);
     const worldIndex = Number.isFinite(worldIndexRaw) ? worldIndexRaw : 0;
     const stageIndex = Number.isFinite(stageIndexRaw) ? stageIndexRaw : 0;
-    return { courseLabel: 'Story', stageLabel: `World ${worldIndex + 1}-${stageIndex + 1}` };
+    const storyOrder = getSmb2LikeStoryOrder();
+    const stageId = storyOrder[worldIndex]?.[stageIndex] ?? null;
+    const stageName = stageId !== null ? getStageNameForSource(gameSource, Number(stageId)) : null;
+    const worldStage = `World ${worldIndex + 1}-${stageIndex + 1}`;
+    return { courseLabel: 'Story', stageLabel: stageName ? `${worldStage} (${stageName})` : worldStage };
   }
   const difficulty = titleCaseLabel(course.difficulty ?? 'Beginner');
   const stageIndexRaw = Number(course.stageIndex ?? 0);
   const stageIndex = Number.isFinite(stageIndexRaw) ? stageIndexRaw : 0;
   const modeLabel = mode === 'challenge' ? 'Challenge' : titleCaseLabel(mode);
-  return { courseLabel: `${modeLabel} ${difficulty}`.trim(), stageLabel: `Stage ${stageIndex + 1}` };
+  const challengeOrder = getSmb2LikeChallengeOrder();
+  const stageId = challengeOrder[course.difficulty as Smb2ChallengeDifficulty | Mb2wsChallengeDifficulty]?.[stageIndex] ?? null;
+  const stageName = stageId !== null ? getStageNameForSource(gameSource, Number(stageId)) : null;
+  const stageLabel = stageName ? `${stageIndex + 1}: ${stageName}` : `Stage ${stageIndex + 1}`;
+  return { courseLabel: `${modeLabel} ${difficulty}`.trim(), stageLabel };
 }

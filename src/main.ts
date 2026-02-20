@@ -122,6 +122,9 @@ export function runMainApp() {
     hudCanvas,
     overlay,
     mainMenuPanel,
+    singleplayerMenuPanel,
+    coursePlayMenuPanel,
+    replayLibraryMenuPanel,
     pauseMenuPanel,
     multiplayerMenuPanel,
     multiplayerIngameMenuPanel,
@@ -177,10 +180,8 @@ export function runMainApp() {
     packStatus,
     packFileInput,
     packFolderInput,
-    replaySaveButton,
-    replayLoadButton,
-    replayFileInput,
-    replayStatus,
+    levelSelectTitle,
+    levelSelectSubtitle,
     smb1Fields,
     smb2Fields,
     smb2ModeSelect,
@@ -196,7 +197,22 @@ export function runMainApp() {
     sfxVolumeValue,
     announcerVolumeValue,
     hudStatus,
+    singleplayerOpenButton,
+    replayLibraryOpenButton,
     multiplayerOpenButton,
+    singleplayerBackButton,
+    singleplayerCoursePlayButton,
+    singleplayerPracticeButton,
+    coursePlayBackButton,
+    coursePlaySourceSelect,
+    coursePlayDifficultySelect,
+    coursePlayStartButton,
+    replayLibraryBackButton,
+    replayLibraryImportButton,
+    replayLibraryRefreshButton,
+    replayLibraryFileInput,
+    replayLibraryStatus,
+    replayLibraryList,
     multiplayerBackButton,
     levelSelectOpenButton,
     levelSelectBackButton,
@@ -365,6 +381,8 @@ export function runMainApp() {
     courseSelection.updateSmb2StoryOptions();
     courseSelection.updateSmb1Stages();
     courseSelection.updateGameSourceFields();
+    syncCoursePlaySourceOptions();
+    syncCoursePlaySourceSelection();
   }
   
   const packLoader = new PackLoader({
@@ -458,10 +476,6 @@ export function runMainApp() {
   const replayController = new ReplayController({
     game,
     audio,
-    replayStatus,
-    replaySaveButton,
-    replayLoadButton,
-    replayFileInput,
     resumeButton,
     hudStatus,
     gameSourceSelect,
@@ -476,6 +490,17 @@ export function runMainApp() {
       currentSmb2LikeMode = mode;
     },
     getStageBasePath: (gameSource) => packSelection.getStageBasePath(gameSource),
+    replayLibraryStatus,
+    replayLibraryList,
+    replayLibraryImportButton,
+    replayLibraryRefreshButton,
+    replayLibraryFileInput,
+    onReplayPlaybackExitToMenu: () => {
+      matchFlow?.resetMatchState();
+      matchFlow?.endActiveMatch();
+      setOverlayVisible(true);
+      menuFlow.setActiveMenu('replays');
+    },
   });
   
   let lobbyBrowser: LobbyBrowserController;
@@ -504,6 +529,7 @@ export function runMainApp() {
   let renderReady = false;
   let frameStatsEnabled = false;
   let activeGameSource: GameSource = GAME_SOURCES.SMB1;
+  let levelSelectSingleplayerMode: 'practice' | null = null;
   let interpolationEnabled = true;
   const syncState: GameplaySyncState = {
     timeFrames: null,
@@ -1196,9 +1222,163 @@ export function runMainApp() {
     buildCourseId: (gameSource, config) => leaderboardSessionFlow.buildCourseId(gameSource, config),
     buildCourseMode: (gameSource, config) => leaderboardSessionFlow.buildCourseMode(gameSource, config),
   });
-  
+
+  function setCoursePlaySelectOptions(options: Array<{ value: string; label: string }>) {
+    if (!coursePlayDifficultySelect) {
+      return;
+    }
+    coursePlayDifficultySelect.innerHTML = '';
+    for (const option of options) {
+      const elem = document.createElement('option');
+      elem.value = option.value;
+      elem.textContent = option.label;
+      coursePlayDifficultySelect.appendChild(elem);
+    }
+  }
+
+  function syncCoursePlaySourceOptions() {
+    if (!coursePlaySourceSelect || !gameSourceSelect) {
+      return;
+    }
+    const current = coursePlaySourceSelect.value;
+    const fallback = gameSourceSelect.value;
+    coursePlaySourceSelect.innerHTML = '';
+    for (const option of Array.from(gameSourceSelect.options)) {
+      const elem = document.createElement('option');
+      elem.value = option.value;
+      elem.textContent = option.textContent ?? option.value;
+      coursePlaySourceSelect.appendChild(elem);
+    }
+    const available = Array.from(coursePlaySourceSelect.options).map((option) => option.value);
+    if (available.includes(current)) {
+      coursePlaySourceSelect.value = current;
+    } else if (available.includes(fallback)) {
+      coursePlaySourceSelect.value = fallback;
+    } else if (available.length > 0) {
+      coursePlaySourceSelect.value = available[0];
+    }
+  }
+
+  function syncCoursePlaySourceSelection() {
+    if (!coursePlaySourceSelect || !gameSourceSelect) {
+      return;
+    }
+    const selection = coursePlaySourceSelect.value;
+    const hasSelection = Array.from(gameSourceSelect.options).some((option) => option.value === selection);
+    if (hasSelection) {
+      gameSourceSelect.value = selection;
+    }
+    packSelection.syncEnabled();
+    courseSelection.updateGameSourceFields();
+    const { gameSource } = packSelection.resolveSelectedGameSource();
+    const currentDifficulty = coursePlayDifficultySelect?.value ?? '';
+    if (gameSource === GAME_SOURCES.SMB1) {
+      const smb1DifficultyOptions = Array.from(difficultySelect?.options ?? []).map((option) => ({
+        value: option.value,
+        label: option.textContent ?? option.value,
+      }));
+      setCoursePlaySelectOptions(smb1DifficultyOptions);
+    } else {
+      const smb2LikeOptions = [
+        { value: 'story', label: 'Story (World 1-1)' },
+        ...Array.from(smb2ChallengeSelect?.options ?? []).map((option) => ({
+          value: option.value,
+          label: option.textContent ?? option.value,
+        })),
+      ];
+      setCoursePlaySelectOptions(smb2LikeOptions);
+    }
+    if (!coursePlayDifficultySelect || coursePlayDifficultySelect.options.length === 0) {
+      return;
+    }
+    const values = Array.from(coursePlayDifficultySelect.options).map((option) => option.value);
+    coursePlayDifficultySelect.value = values.includes(currentDifficulty)
+      ? currentDifficulty
+      : coursePlayDifficultySelect.options[0].value;
+  }
+
+  function updateLevelSelectMenuLabels() {
+    if (!levelSelectTitle || !levelSelectSubtitle) {
+      return;
+    }
+    const controlHint = levelSelectActions?.querySelector('.control-hint') as HTMLElement | null;
+    if (levelSelectSingleplayerMode === 'practice') {
+      levelSelectTitle.textContent = 'Practice';
+      levelSelectSubtitle.textContent = 'Choose source, course, and stage for practice mode.';
+      if (levelSelectConfirmButton) {
+        levelSelectConfirmButton.textContent = 'Start Practice';
+      }
+      if (controlHint) {
+        controlHint.textContent = 'Starts practice on this stage. Stage progression is disabled.';
+      }
+      return;
+    }
+    levelSelectTitle.textContent = 'Level Select';
+    levelSelectSubtitle.textContent = 'Choose the game source, course, and stage.';
+    if (levelSelectConfirmButton) {
+      levelSelectConfirmButton.textContent = 'Confirm';
+    }
+    if (controlHint) {
+      controlHint.textContent = 'Return to main menu with this selection.';
+    }
+  }
+
+  function buildSingleplayerSelectionFromLevelSelect() {
+    const { gameSource } = packSelection.resolveSelectedGameSource();
+    const courseConfig = gameSource === GAME_SOURCES.SMB2
+      ? courseSelection.buildSmb2CourseConfig()
+      : gameSource === GAME_SOURCES.MB2WS
+        ? courseSelection.buildMb2wsCourseConfig()
+        : courseSelection.buildSmb1CourseConfig();
+    return { gameSource, courseConfig };
+  }
+
+  function buildSingleplayerSelectionFromCoursePlay() {
+    syncCoursePlaySourceSelection();
+    const { gameSource } = packSelection.resolveSelectedGameSource();
+    const selectedDifficulty = coursePlayDifficultySelect?.value ?? 'beginner';
+    if (gameSource === GAME_SOURCES.SMB1) {
+      return {
+        gameSource,
+        courseConfig: {
+          difficulty: selectedDifficulty === 'story' ? 'beginner' : selectedDifficulty,
+          stageIndex: 0,
+        },
+      };
+    }
+    if (selectedDifficulty === 'story') {
+      return {
+        gameSource,
+        courseConfig: {
+          mode: 'story',
+          worldIndex: 0,
+          stageIndex: 0,
+        },
+      };
+    }
+    return {
+      gameSource,
+      courseConfig: {
+        mode: 'challenge',
+        difficulty: selectedDifficulty,
+        stageIndex: 0,
+      },
+    };
+  }
+
+  function startCoursePlay() {
+    const selection = buildSingleplayerSelectionFromCoursePlay();
+    matchStartFlow?.startSingleplayerSelection(selection.gameSource, selection.courseConfig, {
+      practiceMode: false,
+      enableLeaderboardSession: true,
+    });
+  }
+
   const menuFlow = new MenuFlowController({
     mainMenuPanel,
+    singleplayerMenuPanel,
+    coursePlayMenuPanel,
+    replayLibraryMenuPanel,
     pauseMenuPanel,
     multiplayerLayout,
     multiplayerMenuPanel,
@@ -1215,11 +1395,23 @@ export function runMainApp() {
         void lobbyBrowser.refreshLobbyList();
       }
     },
+    onOpenSingleplayerMenu: () => {
+      levelSelectSingleplayerMode = null;
+      updateLevelSelectMenuLabels();
+    },
+    onOpenCoursePlayMenu: () => {
+      syncCoursePlaySourceOptions();
+      syncCoursePlaySourceSelection();
+    },
+    onOpenReplaysMenu: () => {
+      void replayController.refreshReplayLibrary();
+    },
     onOpenSettingsMenu: () => {
       updateSettingsUi();
     },
     onOpenLevelSelectMenu: () => {
       lobbyUiController?.updateLevelSelectUi();
+      updateLevelSelectMenuLabels();
     },
     onOpenLeaderboardsMenu: () => {
       leaderboardsUi.updateUi();
@@ -1247,18 +1439,19 @@ export function runMainApp() {
     },
   });
 
-  function saveReplayFromPauseMenu() {
-    if (!game || !game.stage) {
-      replayController.setReplayStatus('Replay: no stage active');
+  let pauseReplaySaveInFlight = false;
+
+  async function saveReplayFromPauseMenu() {
+    if (pauseReplaySaveInFlight) {
       return;
     }
-    const replay = game.exportReplay();
-    if (!replay) {
-      replayController.setReplayStatus('Replay: no inputs recorded');
-      return;
+    pauseReplaySaveInFlight = true;
+    try {
+      const result = await replayController.saveActiveReplayToLibrary();
+      window.alert(result.message);
+    } finally {
+      pauseReplaySaveInFlight = false;
     }
-    replayController.downloadReplay(replay);
-    replayController.setReplayStatus(`Replay saved (stage ${replay.stageId})`);
   }
 
   singleplayerPauseController = new SingleplayerPauseController({
@@ -1312,12 +1505,28 @@ export function runMainApp() {
     menuFlow.setActiveMenu('settings');
   }
   
-  function openLevelSelectMenu(returnMenu?: MenuPanel) {
+  function openLevelSelectMenu(returnMenu?: MenuPanel, singleplayerMode: 'practice' | null = null) {
     const currentMenu = menuFlow.getActiveMenu();
     if (currentMenu !== 'level-select') {
       settingsTabs.setLevelSelectReturnMenu(returnMenu ?? currentMenu);
     }
+    levelSelectSingleplayerMode = singleplayerMode;
+    updateLevelSelectMenuLabels();
     menuFlow.setActiveMenu('level-select');
+  }
+
+  function handleLevelSelectConfirm() {
+    if (levelSelectSingleplayerMode === 'practice') {
+      const selection = buildSingleplayerSelectionFromLevelSelect();
+      matchStartFlow?.startSingleplayerSelection(selection.gameSource, selection.courseConfig, {
+        practiceMode: true,
+        enableLeaderboardSession: false,
+      });
+      levelSelectSingleplayerMode = null;
+      updateLevelSelectMenuLabels();
+      return;
+    }
+    menuFlow.setActiveMenu('main');
   }
   
   async function handleHostDisconnect() {
@@ -1460,6 +1669,15 @@ export function runMainApp() {
   }
   
   function getActiveOverlayPanel(): HTMLElement | null {
+    if (replayLibraryMenuPanel && !replayLibraryMenuPanel.classList.contains('hidden')) {
+      return replayLibraryMenuPanel;
+    }
+    if (coursePlayMenuPanel && !coursePlayMenuPanel.classList.contains('hidden')) {
+      return coursePlayMenuPanel;
+    }
+    if (singleplayerMenuPanel && !singleplayerMenuPanel.classList.contains('hidden')) {
+      return singleplayerMenuPanel;
+    }
     if (levelSelectMenuPanel && !levelSelectMenuPanel.classList.contains('hidden')) {
       return levelSelectMenuPanel;
     }
@@ -1498,6 +1716,8 @@ export function runMainApp() {
       courseSelection.updateSmb2StoryOptions();
       courseSelection.updateSmb1Stages();
       courseSelection.updateGameSourceFields();
+      syncCoursePlaySourceOptions();
+      syncCoursePlaySourceSelection();
     },
   });
   
@@ -1570,6 +1790,9 @@ export function runMainApp() {
     controlModeSelect,
     fullscreenButton,
     mainMenuPanel,
+    singleplayerMenuPanel,
+    coursePlayMenuPanel,
+    replayLibraryMenuPanel,
     pauseMenuPanel,
     multiplayerMenuPanel,
     multiplayerIngameMenuPanel,
@@ -1579,7 +1802,16 @@ export function runMainApp() {
     gamepadCalibrationButton,
     gamepadCalibrationOverlay,
     interpolationToggle,
+    singleplayerOpenButton,
+    replayLibraryOpenButton,
     multiplayerOpenButton,
+    singleplayerBackButton,
+    singleplayerCoursePlayButton,
+    singleplayerPracticeButton,
+    coursePlayBackButton,
+    coursePlaySourceSelect,
+    coursePlayStartButton,
+    replayLibraryBackButton,
     leaderboardsOpenButton,
     multiplayerBackButton,
     levelSelectOpenButton,
@@ -1603,9 +1835,24 @@ export function runMainApp() {
     onStartGamepadCalibration: () => inputControls?.startGamepadCalibration(),
     onStopGamepadCalibration: () => inputControls?.stopGamepadCalibration(),
     onSetActiveMenu: (menu) => {
+      const current = menuFlow.getActiveMenu();
+      if (current === 'level-select' && menu !== 'level-select' && levelSelectSingleplayerMode !== null) {
+        levelSelectSingleplayerMode = null;
+        updateLevelSelectMenuLabels();
+      }
       menuFlow.setActiveMenu(menu);
     },
     onOpenLevelSelectMenu: openLevelSelectMenu,
+    onOpenPracticeLevelSelectMenu: () => {
+      openLevelSelectMenu('singleplayer', 'practice');
+    },
+    onOpenCoursePlayMenu: () => {
+      syncCoursePlaySourceOptions();
+      syncCoursePlaySourceSelection();
+    },
+    onStartCoursePlay: startCoursePlay,
+    onConfirmLevelSelect: handleLevelSelectConfirm,
+    onSyncCoursePlaySourceSelection: syncCoursePlaySourceSelection,
     onOpenSettingsMenu: () => openSettingsMenu(),
     getLevelSelectReturnMenu: () => settingsTabs.getLevelSelectReturnMenu(),
     getSettingsReturnMenu: () => settingsTabs.getSettingsReturnMenu(),
@@ -1661,6 +1908,10 @@ export function runMainApp() {
     },
     updateIngameChatVisibility,
     ingameChatWrap,
+    isReplayPlaybackActive: () => replayController.isReplayPlaybackActive(),
+    onExitReplayPlayback: () => {
+      replayController.exitReplayPlaybackToMenu();
+    },
   });
 
   window.addEventListener('keydown', (event) => {
@@ -1855,6 +2106,9 @@ export function runMainApp() {
       inputControls?.maybeUpdateControlModeSettings(now);
       inputControls?.updateInputPreview();
       inputControls?.updateGamepadCalibration();
+      if (replayController.isReplayPlaybackActive() && game.input?.wasStartPressed?.()) {
+        replayController.exitReplayPlaybackToMenu();
+      }
       singleplayerPauseController?.tick(now);
     },
   });

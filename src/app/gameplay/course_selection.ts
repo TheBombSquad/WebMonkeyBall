@@ -12,8 +12,11 @@ import {
   type Mb2wsCourseConfig,
 } from '../../course_mb2ws.js';
 import { GAME_SOURCES, type GameSource } from '../../shared/constants/index.js';
+import { formatStageOptionLabel } from '../../stage_names.js';
 
 type SelectOption = { value: string; label: string };
+
+type StageOrderEntry = number | { id?: number };
 
 function setSelectOptions(select: HTMLSelectElement, values: SelectOption[]) {
   select.innerHTML = '';
@@ -23,6 +26,13 @@ function setSelectOptions(select: HTMLSelectElement, values: SelectOption[]) {
     elem.textContent = option.label;
     select.appendChild(elem);
   }
+}
+
+function getStageIdFromOrderEntry(entry: StageOrderEntry): number {
+  if (typeof entry === 'number') {
+    return entry;
+  }
+  return Math.max(0, Math.trunc(Number(entry?.id ?? 0)));
 }
 
 type CourseSelectionDeps = {
@@ -101,9 +111,9 @@ export class CourseSelectionController {
     }
     const difficulty = smb2ChallengeSelect.value as Smb2ChallengeDifficulty | Mb2wsChallengeDifficulty;
     const stages = order[difficulty] ?? [];
-    const options = stages.map((_: unknown, index: number) => ({
+    const options = stages.map((entry: StageOrderEntry, index: number) => ({
       value: String(index + 1),
-      label: `Stage ${index + 1}`,
+      label: formatStageOptionLabel(gameSource, getStageIdFromOrderEntry(entry), index + 1),
     }));
     setSelectOptions(smb2ChallengeStageSelect, options);
   }
@@ -143,9 +153,9 @@ export class CourseSelectionController {
     const currentWorld = Math.max(0, Math.min(storyOrder.length - 1, selectedWorld - 1));
     smb2StoryWorldSelect.value = String(currentWorld + 1);
     const stageList = storyOrder[currentWorld] ?? [];
-    const stageOptions = stageList.map((_: unknown, index: number) => ({
+    const stageOptions = stageList.map((entry: StageOrderEntry, index: number) => ({
       value: String(index + 1),
-      label: `Stage ${index + 1}`,
+      label: formatStageOptionLabel(gameSource, getStageIdFromOrderEntry(entry), index + 1),
     }));
     setSelectOptions(smb2StoryStageSelect, stageOptions);
     if (stageList.length > 0) {

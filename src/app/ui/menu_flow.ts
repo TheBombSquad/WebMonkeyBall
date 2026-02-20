@@ -1,7 +1,20 @@
-export type MenuPanel = 'main' | 'pause' | 'multiplayer' | 'multiplayer-ingame' | 'settings' | 'level-select' | 'leaderboards';
+export type MenuPanel =
+  | 'main'
+  | 'singleplayer'
+  | 'course-play'
+  | 'replays'
+  | 'pause'
+  | 'multiplayer'
+  | 'multiplayer-ingame'
+  | 'settings'
+  | 'level-select'
+  | 'leaderboards';
 
 type MenuFlowOptions = {
   mainMenuPanel: HTMLElement | null;
+  singleplayerMenuPanel: HTMLElement | null;
+  coursePlayMenuPanel: HTMLElement | null;
+  replayLibraryMenuPanel: HTMLElement | null;
   pauseMenuPanel: HTMLElement | null;
   multiplayerLayout: HTMLElement | null;
   multiplayerMenuPanel: HTMLElement | null;
@@ -11,6 +24,9 @@ type MenuFlowOptions = {
   leaderboardsMenuPanel: HTMLElement | null;
   onMenuChanged: () => void;
   onOpenMultiplayerMenu: () => void;
+  onOpenSingleplayerMenu?: () => void;
+  onOpenCoursePlayMenu?: () => void;
+  onOpenReplaysMenu?: () => void;
   onOpenSettingsMenu: () => void;
   onOpenLevelSelectMenu: () => void;
   onOpenLeaderboardsMenu: () => void;
@@ -42,6 +58,9 @@ export class MenuFlowController {
     }
     this.activeMenu = nextMenu;
     this.options.mainMenuPanel?.classList.toggle('hidden', nextMenu !== 'main');
+    this.options.singleplayerMenuPanel?.classList.toggle('hidden', nextMenu !== 'singleplayer');
+    this.options.coursePlayMenuPanel?.classList.toggle('hidden', nextMenu !== 'course-play');
+    this.options.replayLibraryMenuPanel?.classList.toggle('hidden', nextMenu !== 'replays');
     this.options.pauseMenuPanel?.classList.toggle('hidden', nextMenu !== 'pause');
     this.options.multiplayerLayout?.classList.toggle('hidden', nextMenu !== 'multiplayer');
     this.options.multiplayerMenuPanel?.classList.toggle('hidden', nextMenu !== 'multiplayer');
@@ -52,6 +71,15 @@ export class MenuFlowController {
     this.options.onMenuChanged();
     if (nextMenu === 'multiplayer') {
       this.options.onOpenMultiplayerMenu();
+    }
+    if (nextMenu === 'singleplayer') {
+      this.options.onOpenSingleplayerMenu?.();
+    }
+    if (nextMenu === 'course-play') {
+      this.options.onOpenCoursePlayMenu?.();
+    }
+    if (nextMenu === 'replays') {
+      this.options.onOpenReplaysMenu?.();
     }
     if (nextMenu === 'settings') {
       this.options.onOpenSettingsMenu();

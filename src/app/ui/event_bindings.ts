@@ -23,6 +23,8 @@ type UiEventBindingsOptions = {
   blurActiveInput: () => void;
   updateIngameChatVisibility: () => void;
   ingameChatWrap: HTMLElement | null;
+  isReplayPlaybackActive?: () => boolean;
+  onExitReplayPlayback?: () => void;
 };
 
 export function bindUiEventHandlers(options: UiEventBindingsOptions) {
@@ -57,6 +59,11 @@ export function bindUiEventHandlers(options: UiEventBindingsOptions) {
 
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+      if (options.isReplayPlaybackActive?.()) {
+        event.preventDefault();
+        options.onExitReplayPlayback?.();
+        return;
+      }
       if (options.isIngameChatOpen()) {
         event.preventDefault();
         options.setIngameChatOpen(false);
