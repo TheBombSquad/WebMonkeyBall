@@ -25,6 +25,9 @@ export type RoomJoinResult = {
 
 const DEFAULT_STUN = [{ urls: 'stun:stun.l.google.com:19302' }];
 const FAST_MESSAGE_TYPES = new Set(['frame', 'input', 'ack', 'ping', 'pong']);
+const FAST_LEGACY_CHANNEL_LABEL = 'fast';
+const FAST_C2S_CHANNEL_LABEL = 'fast_c2s';
+const FAST_S2C_CHANNEL_LABEL = 'fast_s2c';
 const FAST_CHANNEL_MAX_BUFFERED = 256 * 1024;
 const CTRL_CHANNEL_MAX_BUFFERED = 1024 * 1024;
 const SIGNAL_PROTOCOL = 'wmb.v1';
@@ -217,7 +220,8 @@ function encodeInputBatchPacket(stageSeq: number, lastAck: number, entries: Inpu
   offs += 1;
   view.setUint32(offs, stageSeq >>> 0, true);
   offs += 4;
-  view.setUint32(offs, lastAck >>> 0, true);
+  // Signed so -1 sentinel survives round-trip (no host frames acked yet).
+  view.setInt32(offs, lastAck | 0, true);
   offs += 4;
   view.setUint16(offs, count, true);
   offs += 2;
@@ -244,7 +248,7 @@ function decodeInputBatchPacket(data: ArrayBuffer): DecodedInputBatch | null {
   let offs = 1;
   const stageSeq = view.getUint32(offs, true);
   offs += 4;
-  const lastAck = view.getUint32(offs, true);
+  const lastAck = view.getInt32(offs, true);
   offs += 4;
   const count = view.getUint16(offs, true);
   offs += 2;
@@ -434,12 +438,23 @@ function updateIngressWindow(
   return true;
 }
 
-function getChannelRole(label: string) {
-  return label === 'fast' ? 'fast' : 'ctrl';
+type ChannelRole = 'ctrl' | 'fastLegacy' | 'fastC2S' | 'fastS2C';
+
+function getChannelRole(label: string): ChannelRole {
+  if (label === FAST_C2S_CHANNEL_LABEL) {
+    return 'fastC2S';
+  }
+  if (label === FAST_S2C_CHANNEL_LABEL) {
+    return 'fastS2C';
+  }
+  if (label === FAST_LEGACY_CHANNEL_LABEL) {
+    return 'fastLegacy';
+  }
+  return 'ctrl';
 }
 
 function getChannelBufferedLimit(channel: RTCDataChannel) {
-  return getChannelRole(channel.label) === 'fast' ? FAST_CHANNEL_MAX_BUFFERED : CTRL_CHANNEL_MAX_BUFFERED;
+  return getChannelRole(channel.label) === 'ctrl' ? CTRL_CHANNEL_MAX_BUFFERED : FAST_CHANNEL_MAX_BUFFERED;
 }
 
 function isChannelWritable(channel: RTCDataChannel | null | undefined) {
@@ -599,7 +614,12 @@ export class LobbyClient {
 
 export class HostRelay {
   private peers = new Map<number, RTCPeerConnection>();
-  private channels = new Map<number, { ctrl?: RTCDataChannel; fast?: RTCDataChannel }>();
+  private channels = new Map<number, {
+    ctrl?: RTCDataChannel;
+    fastLegacy?: RTCDataChannel;
+    fastC2S?: RTCDataChannel;
+    fastS2C?: RTCDataChannel;
+  }>();
   private connected = new Set<number>();
   private pendingIce = new Map<number, RTCIceCandidateInit[]>();
   private ingressWindows = new Map<number, IngressWindow>();
@@ -668,7 +688,15 @@ export class HostRelay {
   attachChannel(playerId: number, channel: RTCDataChannel) {
     const role = getChannelRole(channel.label);
     const entry = this.channels.get(playerId) ?? {};
-    entry[role] = channel;
+    if (role === 'ctrl') {
+      entry.ctrl = channel;
+    } else if (role === 'fastLegacy') {
+      entry.fastLegacy = channel;
+    } else if (role === 'fastC2S') {
+      entry.fastC2S = channel;
+    } else {
+      entry.fastS2C = channel;
+    }
     this.channels.set(playerId, entry);
     channel.binaryType = 'arraybuffer';
     channel.addEventListener('open', () => {
@@ -680,7 +708,10 @@ export class HostRelay {
     channel.addEventListener('message', (event) => {
       const binary = asArrayBuffer(event.data);
       if (binary) {
-        if (role === 'fast' && !this.connected.has(playerId)) {
+        if (role !== 'ctrl' && !this.connected.has(playerId)) {
+          return;
+        }
+        if (role === 'ctrl' || role === 'fastS2C') {
           return;
         }
         const size = binary.byteLength;
@@ -709,7 +740,10 @@ export class HostRelay {
       if (typeof event.data !== 'string') {
         return;
       }
-      if (role === 'fast' && !this.connected.has(playerId)) {
+      if (role !== 'ctrl' && !this.connected.has(playerId)) {
+        return;
+      }
+      if (role === 'fastS2C') {
         return;
       }
       const size = utf8Encoder.encode(event.data).byteLength;
@@ -734,7 +768,13 @@ export class HostRelay {
     });
     channel.addEventListener('close', () => {
       const current = this.channels.get(playerId);
-      const active = role === 'ctrl' ? current?.ctrl : current?.fast;
+      const active = role === 'ctrl'
+        ? current?.ctrl
+        : role === 'fastLegacy'
+          ? current?.fastLegacy
+          : role === 'fastC2S'
+            ? current?.fastC2S
+            : current?.fastS2C;
       if (active !== channel) {
         return;
       }
@@ -745,13 +785,17 @@ export class HostRelay {
     });
   }
 
-  private pickChannel(playerId: number, preferFast: boolean) {
+  private pickChannel(playerId: number, preferFast: boolean, allowFastFallbackToCtrl = true) {
     const entry = this.channels.get(playerId);
     if (!entry) {
       return null;
     }
-    const primary = preferFast ? entry.fast : entry.ctrl;
-    const fallback = preferFast ? entry.ctrl : entry.fast;
+    const primary = preferFast
+      ? (entry.fastS2C ?? entry.fastLegacy)
+      : entry.ctrl;
+    const fallback = preferFast
+      ? (allowFastFallbackToCtrl ? entry.ctrl : null)
+      : (entry.fastS2C ?? entry.fastLegacy ?? entry.fastC2S);
     if (isChannelWritable(primary)) {
       return primary;
     }
@@ -761,8 +805,13 @@ export class HostRelay {
     return null;
   }
 
-  private sendPayload(playerId: number, payload: string | ArrayBuffer, preferFast: boolean) {
-    const channel = this.pickChannel(playerId, preferFast);
+  private sendPayload(
+    playerId: number,
+    payload: string | ArrayBuffer,
+    preferFast: boolean,
+    allowFastFallbackToCtrl = true,
+  ) {
+    const channel = this.pickChannel(playerId, preferFast, allowFastFallbackToCtrl);
     if (!channel) {
       return false;
     }
@@ -789,8 +838,10 @@ export class HostRelay {
     const states: Array<{ playerId: number; readyState: string }> = [];
     for (const [playerId, entry] of this.channels.entries()) {
       const ctrl = entry.ctrl?.readyState ?? 'none';
-      const fast = entry.fast?.readyState ?? 'none';
-      states.push({ playerId, readyState: `ctrl=${ctrl} fast=${fast}` });
+      const fastC2S = entry.fastC2S?.readyState ?? 'none';
+      const fastS2C = entry.fastS2C?.readyState ?? 'none';
+      const fastLegacy = entry.fastLegacy?.readyState ?? 'none';
+      states.push({ playerId, readyState: `ctrl=${ctrl} c2s=${fastC2S} s2c=${fastS2C} fast=${fastLegacy}` });
     }
     return states;
   }
@@ -814,12 +865,12 @@ export class HostRelay {
     if (frames.length <= 0) {
       return;
     }
-    this.sendPayload(playerId, encodeFrameBatchPacket(lastAck, frames), true);
+    this.sendPayload(playerId, encodeFrameBatchPacket(lastAck, frames), true, false);
   }
 
   closeAll() {
     for (const entry of this.channels.values()) {
-      for (const channel of [entry.ctrl, entry.fast]) {
+      for (const channel of [entry.ctrl, entry.fastLegacy, entry.fastC2S, entry.fastS2C]) {
         if (!channel) {
           continue;
         }
@@ -855,7 +906,7 @@ export class HostRelay {
     const entry = this.channels.get(playerId);
     try {
       if (entry) {
-        for (const channel of [entry.ctrl, entry.fast]) {
+        for (const channel of [entry.ctrl, entry.fastLegacy, entry.fastC2S, entry.fastS2C]) {
           if (!channel) {
             continue;
           }
@@ -909,7 +960,9 @@ export class HostRelay {
 export class ClientPeer {
   private pc: RTCPeerConnection | null = null;
   private ctrlChannel: RTCDataChannel | null = null;
-  private fastChannel: RTCDataChannel | null = null;
+  private fastLegacyChannel: RTCDataChannel | null = null;
+  private fastC2SChannel: RTCDataChannel | null = null;
+  private fastS2CChannel: RTCDataChannel | null = null;
   private pendingIce: RTCIceCandidateInit[] = [];
   private ingressWindow: IngressWindow = {
     windowStart: performance.now(),
@@ -933,10 +986,14 @@ export class ClientPeer {
 
   private attachChannel(channel: RTCDataChannel) {
     const role = getChannelRole(channel.label);
-    if (role === 'fast') {
-      this.fastChannel = channel;
-    } else {
+    if (role === 'ctrl') {
       this.ctrlChannel = channel;
+    } else if (role === 'fastLegacy') {
+      this.fastLegacyChannel = channel;
+    } else if (role === 'fastC2S') {
+      this.fastC2SChannel = channel;
+    } else {
+      this.fastS2CChannel = channel;
     }
     channel.binaryType = 'arraybuffer';
     channel.addEventListener('open', () => {
@@ -947,6 +1004,9 @@ export class ClientPeer {
     channel.addEventListener('message', (event) => {
       const binary = asArrayBuffer(event.data);
       if (binary) {
+        if (role === 'ctrl' || role === 'fastC2S') {
+          return;
+        }
         const size = binary.byteLength;
         this.traffic.recordDown(size);
         if (size > HOST_SIGNAL_MAX_MESSAGE_BYTES || !this.shouldAcceptIngress(size)) {
@@ -963,6 +1023,9 @@ export class ClientPeer {
         return;
       }
       if (typeof event.data !== 'string') {
+        return;
+      }
+      if (role === 'fastC2S') {
         return;
       }
       const size = utf8Encoder.encode(event.data).byteLength;
@@ -986,7 +1049,13 @@ export class ClientPeer {
       }
     });
     channel.addEventListener('close', () => {
-      const active = role === 'ctrl' ? this.ctrlChannel : this.fastChannel;
+      const active = role === 'ctrl'
+        ? this.ctrlChannel
+        : role === 'fastLegacy'
+          ? this.fastLegacyChannel
+          : role === 'fastC2S'
+            ? this.fastC2SChannel
+            : this.fastS2CChannel;
       if (active !== channel) {
         return;
       }
@@ -1010,9 +1079,13 @@ export class ClientPeer {
     return pc;
   }
 
-  private sendPayload(payload: string | ArrayBuffer, preferFast: boolean) {
-    const primary = preferFast ? this.fastChannel : this.ctrlChannel;
-    const fallback = preferFast ? this.ctrlChannel : this.fastChannel;
+  private sendPayload(payload: string | ArrayBuffer, preferFast: boolean, allowFastFallbackToCtrl = true) {
+    const primary = preferFast
+      ? (this.fastC2SChannel ?? this.fastLegacyChannel)
+      : this.ctrlChannel;
+    const fallback = preferFast
+      ? (allowFastFallbackToCtrl ? this.ctrlChannel : null)
+      : (this.fastC2SChannel ?? this.fastLegacyChannel ?? this.fastS2CChannel);
     const size = payloadByteSize(payload);
     if (isChannelWritable(primary)) {
       try {
@@ -1041,13 +1114,15 @@ export class ClientPeer {
     if (entries.length <= 0) {
       return;
     }
-    this.sendPayload(encodeInputBatchPacket(stageSeq, lastAck, entries), true);
+    this.sendPayload(encodeInputBatchPacket(stageSeq, lastAck, entries), true, false);
   }
 
   getChannelState(): string {
     const ctrl = this.ctrlChannel?.readyState ?? 'none';
-    const fast = this.fastChannel?.readyState ?? 'none';
-    return `ctrl=${ctrl} fast=${fast}`;
+    const c2s = this.fastC2SChannel?.readyState ?? 'none';
+    const s2c = this.fastS2CChannel?.readyState ?? 'none';
+    const fast = this.fastLegacyChannel?.readyState ?? 'none';
+    return `ctrl=${ctrl} c2s=${c2s} s2c=${s2c} fast=${fast}`;
   }
 
   getBandwidthStats(): BandwidthStats {
@@ -1055,7 +1130,7 @@ export class ClientPeer {
   }
 
   close() {
-    for (const channel of [this.ctrlChannel, this.fastChannel]) {
+    for (const channel of [this.ctrlChannel, this.fastLegacyChannel, this.fastC2SChannel, this.fastS2CChannel]) {
       if (!channel) {
         continue;
       }
@@ -1071,7 +1146,9 @@ export class ClientPeer {
       // Ignore.
     }
     this.ctrlChannel = null;
-    this.fastChannel = null;
+    this.fastLegacyChannel = null;
+    this.fastC2SChannel = null;
+    this.fastS2CChannel = null;
     this.pc = null;
     this.pendingIce = [];
     this.ingressWindow = {
@@ -1132,8 +1209,12 @@ export async function createHostOffer(host: HostRelay, playerId: number) {
   const pc = host.getPeer(playerId);
   const ctrl = pc.createDataChannel('ctrl');
   host.attachChannel(playerId, ctrl);
-  const fast = pc.createDataChannel('fast', { ordered: false, maxRetransmits: 0 });
-  host.attachChannel(playerId, fast);
+  // Godot's unreliable_ordered behaves closer to UDP + stale packet drop than strict
+  // in-order delivery. `ordered:false` avoids WebRTC HOL stalls under loss.
+  const fastC2S = pc.createDataChannel(FAST_C2S_CHANNEL_LABEL, { ordered: false, maxRetransmits: 0 });
+  host.attachChannel(playerId, fastC2S);
+  const fastS2C = pc.createDataChannel(FAST_S2C_CHANNEL_LABEL, { ordered: false, maxRetransmits: 0 });
+  host.attachChannel(playerId, fastS2C);
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   return pc.localDescription;

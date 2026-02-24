@@ -86,6 +86,17 @@ export class NetplayMessageFlowController {
     return -1;
   }
 
+  private coerceAckFrame(value: unknown): number | null {
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+      return null;
+    }
+    if (num < 0) {
+      return -1;
+    }
+    return Math.floor(num);
+  }
+
   private recordHashMismatch(state: any, frame: number, expectedHash: number, localHash: number, nowMs: number) {
     state.debugHashMismatchCount = (state.debugHashMismatchCount ?? 0) + 1;
     state.debugLastMismatchFrame = frame;
@@ -307,7 +318,7 @@ export class NetplayMessageFlowController {
         return;
       }
       if (msg.lastAck !== undefined) {
-        const ackFrame = this.deps.coerceFrame(msg.lastAck);
+        const ackFrame = this.coerceAckFrame(msg.lastAck);
         if (ackFrame !== null) {
           state.lastAckedLocalFrame = Math.max(state.lastAckedLocalFrame, ackFrame);
         }
@@ -512,7 +523,7 @@ export class NetplayMessageFlowController {
       const player = this.deps.game.players.find((entry) => entry.id === playerId);
       const awaitingSpawn = !!player?.pendingSpawn || !!player?.isSpectator;
       if (msg.lastAck !== undefined) {
-        const ackFrame = this.deps.coerceFrame(msg.lastAck);
+        const ackFrame = this.coerceAckFrame(msg.lastAck);
         if (ackFrame !== null) {
           clientState.lastAckedHostFrame = Math.max(
             clientState.lastAckedHostFrame,
@@ -555,7 +566,7 @@ export class NetplayMessageFlowController {
       return;
     }
     if (msg.type === 'ack') {
-      const frame = this.deps.coerceFrame(msg.frame);
+      const frame = this.coerceAckFrame(msg.frame);
       if (frame !== null) {
         clientState.lastAckedHostFrame = Math.max(
           clientState.lastAckedHostFrame,

@@ -849,6 +849,7 @@ netplayRuntime = new NetplayRuntimeController({
     hostSnapshotBehindFrames: NETPLAY_HOST_SNAPSHOT_BEHIND_FRAMES,
     hostSnapshotCooldownMs: NETPLAY_HOST_SNAPSHOT_COOLDOWN_MS,
     clientInactivityTimeoutMs: NETPLAY_CLIENT_INACTIVITY_TIMEOUT_MS,
+    hostMaxInputRollback: NETPLAY_HOST_MAX_INPUT_ROLLBACK,
   },
 });
 stageFlow = new StageFlowController({

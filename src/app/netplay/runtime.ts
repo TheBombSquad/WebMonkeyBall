@@ -24,6 +24,7 @@ type RuntimeConstants = {
   hostSnapshotBehindFrames: number;
   hostSnapshotCooldownMs: number;
   clientInactivityTimeoutMs: number;
+  hostMaxInputRollback: number;
 };
 
 type RuntimeDeps = {
@@ -120,46 +121,141 @@ export class NetplayRuntimeController {
     return currentFrame;
   }
 
+  private hostCanonizeClientInputAcks(state: any, currentFrame: number) {
+    if (!state || state.role !== 'host' || !state.clientStates?.entries) {
+      return;
+    }
+    // Canonize slightly behind the host frontier to smooth ACK progression without
+    // immediately freezing out late-arriving corrections for the most recent frames.
+    const rollbackLimit = Math.max(0, Math.floor(this.deps.constants.hostMaxInputRollback ?? 0));
+    const canonizeSlack = Math.min(rollbackLimit, 2);
+    const canonizeThrough = Math.floor(currentFrame) - canonizeSlack;
+    if (!Number.isFinite(canonizeThrough)) {
+      return;
+    }
+    for (const [playerId, clientState] of state.clientStates.entries()) {
+      if (!clientState) {
+        continue;
+      }
+      const pending = clientState.pendingClientInputReceipts;
+      let contiguous = Number.isFinite(clientState.lastAckedClientInput)
+        ? Math.floor(clientState.lastAckedClientInput)
+        : -1;
+      if (contiguous >= canonizeThrough) {
+        continue;
+      }
+      const player = this.deps.game.players.find((entry) => entry.id === playerId);
+      const autoCanonize = !player || player.isSpectator || player.pendingSpawn;
+      while (contiguous < canonizeThrough) {
+        const next = contiguous + 1;
+        if (pending?.has?.(next)) {
+          pending.delete(next);
+          contiguous = next;
+          continue;
+        }
+        if (autoCanonize) {
+          contiguous = next;
+          continue;
+        }
+        const frameInputs = state.inputHistory?.get?.(next);
+        if (frameInputs?.has?.(playerId)) {
+          contiguous = next;
+          continue;
+        }
+        break;
+      }
+      clientState.lastAckedClientInput = contiguous;
+      if (pending?.keys && pending.delete) {
+        for (const frame of pending.keys()) {
+          if (frame <= contiguous) {
+            pending.delete(frame);
+          }
+        }
+      }
+    }
+  }
+
+  private pruneHostFrameBuffer(state: any, currentFrame: number) {
+    if (!state?.hostFrameBuffer?.keys || !state.hostFrameBuffer.delete) {
+      return;
+    }
+    const historyWindow = Math.max(
+      60,
+      Math.floor(state.maxRollback ?? 0),
+      Math.floor(state.maxResend ?? 0),
+    );
+    let cutoff = Math.floor(currentFrame) - historyWindow;
+    let minAck: number | null = null;
+    for (const clientState of state.clientStates?.values?.() ?? []) {
+      const ack = Number(clientState?.lastAckedHostFrame);
+      if (!Number.isFinite(ack)) {
+        continue;
+      }
+      const ackFrame = Math.floor(ack);
+      minAck = minAck === null ? ackFrame : Math.min(minAck, ackFrame);
+    }
+    if (minAck !== null) {
+      cutoff = Math.max(cutoff, minAck);
+    }
+    if (state.pendingHostUpdates?.size > 0) {
+      let earliestPending = Infinity;
+      for (const frame of state.pendingHostUpdates) {
+        if (frame < earliestPending) {
+          earliestPending = frame;
+        }
+      }
+      if (Number.isFinite(earliestPending) && earliestPending <= cutoff) {
+        cutoff = earliestPending - 1;
+      }
+    }
+    for (const frame of state.hostFrameBuffer.keys()) {
+      if (frame <= cutoff) {
+        state.hostFrameBuffer.delete(frame);
+      }
+    }
+  }
+
   private hostResendFrames(currentFrame: number) {
     const hostRelay = this.deps.getHostRelay();
     const state = this.deps.getNetplayState();
     if (!hostRelay || !state) {
       return;
     }
+    this.hostCanonizeClientInputAcks(state, currentFrame);
     const pendingFrames = state.pendingHostUpdates.size > 0
       ? Array.from(state.pendingHostUpdates).sort((a, b) => a - b)
       : [];
-    const resendWindow = Math.max(0, state.maxResend | 0);
-    const gapRescueBudget = Math.min(4, resendWindow);
+    const bufferedFrames = state.hostFrameBuffer.size > 0
+      ? Array.from(state.hostFrameBuffer.keys()).sort((a, b) => a - b)
+      : [];
+    const bundleCache = new Map<number, FrameBundleMessage[]>();
     for (const [playerId, clientState] of state.clientStates.entries()) {
       const ackedHostFrame = Math.min(clientState.lastAckedHostFrame, currentFrame);
-      const start = ackedHostFrame + 1;
-      const tailStart = Math.max(start, currentFrame - resendWindow + 1);
-      const gapEnd = gapRescueBudget > 0
-        ? Math.min(currentFrame, tailStart - 1, start + gapRescueBudget - 1)
-        : start - 1;
-      const selected = new Set<number>();
-      for (const frame of pendingFrames) {
-        if (frame > ackedHostFrame && frame <= currentFrame) {
-          selected.add(frame);
+      let bundles = bundleCache.get(ackedHostFrame);
+      if (!bundles) {
+        const selected = new Set<number>();
+        for (const frame of bufferedFrames) {
+          if (frame > ackedHostFrame && frame <= currentFrame) {
+            selected.add(frame);
+          }
         }
-      }
-      for (let frame = start; frame <= gapEnd; frame += 1) {
-        selected.add(frame);
-      }
-      for (let frame = tailStart; frame <= currentFrame; frame += 1) {
-        selected.add(frame);
-      }
-      const bundles: FrameBundleMessage[] = [];
-      const sortedFrames = selected.size > 0
-        ? Array.from(selected).sort((a, b) => a - b)
-        : [];
-      for (const frame of sortedFrames) {
-        const bundle = state.hostFrameBuffer.get(frame);
-        if (!bundle) {
-          continue;
+        for (const frame of pendingFrames) {
+          if (frame <= currentFrame) {
+            selected.add(frame);
+          }
         }
-        bundles.push(bundle);
+        const sortedFrames = selected.size > 0
+          ? Array.from(selected).sort((a, b) => a - b)
+          : [];
+        bundles = [];
+        for (const frame of sortedFrames) {
+          const bundle = state.hostFrameBuffer.get(frame);
+          if (!bundle) {
+            continue;
+          }
+          bundles.push(bundle);
+        }
+        bundleCache.set(ackedHostFrame, bundles);
       }
       if (bundles.length > 0) {
         hostRelay.sendFrameBatch(playerId, clientState.lastAckedClientInput, bundles);
@@ -230,20 +326,9 @@ export class NetplayRuntimeController {
       : Math.max(-1, Math.floor(state.lastReceivedHostFrame ?? -1));
     const start = state.lastAckedLocalFrame + 1;
     const end = currentFrame;
-    const resendWindow = Math.max(0, state.maxResend | 0);
-    const gapRescueBudget = Math.min(4, resendWindow);
+    const resendWindow = Math.max(1, state.maxResend | 0);
     const tailStart = Math.max(start, end - resendWindow + 1);
-    const gapEnd = gapRescueBudget > 0
-      ? Math.min(end, tailStart - 1, start + gapRescueBudget - 1)
-      : start - 1;
     const batchEntries: Array<{ frame: number; input: QuantizedInput }> = [];
-    for (let frame = start; frame <= gapEnd; frame += 1) {
-      const input = state.pendingLocalInputs.get(frame);
-      if (!input) {
-        continue;
-      }
-      batchEntries.push({ frame, input });
-    }
     for (let frame = tailStart; frame <= end; frame += 1) {
       const input = state.pendingLocalInputs.get(frame);
       if (!input) {
@@ -349,12 +434,7 @@ export class NetplayRuntimeController {
         }
       }
       state.hostFrameBuffer.set(frame, bundle);
-      const minFrame = frame - Math.max(state.maxRollback, state.maxResend);
-      for (const key of state.hostFrameBuffer.keys()) {
-        if (key < minFrame) {
-          state.hostFrameBuffer.delete(key);
-        }
-      }
+      this.pruneHostFrameBuffer(state, frame);
     }
     this.deps.trimNetplayHistory(frame);
     if (state.role === 'host') {
