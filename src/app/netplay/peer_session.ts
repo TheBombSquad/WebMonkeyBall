@@ -12,9 +12,11 @@ import type { GameSource } from '../../shared/constants/index.js';
 type NetplayState = {
   role: 'host' | 'client';
   stageSeq: number;
+  session: { getFrame: () => number };
   clientStates: Map<number, {
     lastAckedHostFrame: number;
     lastAckedClientInput: number;
+    pendingClientInputReceipts: Set<number>;
     lastSnapshotMs: number | null;
     lastSnapshotRequestMs: number | null;
     lastInboundMessageMs: number;
@@ -143,9 +145,13 @@ export class PeerSessionController {
         return;
       }
       if (!liveState.clientStates.has(playerId)) {
+        const baseFrame = Number.isFinite(liveState.session?.getFrame?.())
+          ? Math.floor(liveState.session.getFrame())
+          : -1;
         liveState.clientStates.set(playerId, {
           lastAckedHostFrame: -1,
-          lastAckedClientInput: -1,
+          lastAckedClientInput: baseFrame,
+          pendingClientInputReceipts: new Set<number>(),
           lastSnapshotMs: null,
           lastSnapshotRequestMs: null,
           lastInboundMessageMs: performance.now(),

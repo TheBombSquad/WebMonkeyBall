@@ -1018,6 +1018,7 @@ export function runMainApp() {
   type NetplayClientState = {
     lastAckedHostFrame: number;
     lastAckedClientInput: number;
+    pendingClientInputReceipts: Set<number>;
     lastSnapshotMs: number | null;
     lastSnapshotRequestMs: number | null;
     lastInboundMessageMs: number;

@@ -74,6 +74,18 @@ export class NetplayMessageFlowController {
     this.deps = deps;
   }
 
+  private getContiguousBaseFrame(state: any) {
+    const sessionFrame = state?.session?.getFrame?.();
+    if (Number.isFinite(sessionFrame)) {
+      return Math.max(-1, Math.floor(sessionFrame));
+    }
+    const lastReceived = state?.lastReceivedHostFrame;
+    if (Number.isFinite(lastReceived)) {
+      return Math.max(-1, Math.floor(lastReceived));
+    }
+    return -1;
+  }
+
   private recordHashMismatch(state: any, frame: number, expectedHash: number, localHash: number, nowMs: number) {
     state.debugHashMismatchCount = (state.debugHashMismatchCount ?? 0) + 1;
     state.debugLastMismatchFrame = frame;
@@ -110,12 +122,31 @@ export class NetplayMessageFlowController {
     pending.add(frame);
     let contiguous = Number.isFinite(state.highestContiguousHostFrame)
       ? Math.floor(state.highestContiguousHostFrame)
-      : -1;
+      : this.getContiguousBaseFrame(state);
     while (pending.has(contiguous + 1)) {
       contiguous += 1;
       pending.delete(contiguous);
     }
     state.highestContiguousHostFrame = contiguous;
+  }
+
+  private markClientInputFrameReceived(state: any, clientState: any, frame: number) {
+    if (!clientState) {
+      return;
+    }
+    if (!clientState.pendingClientInputReceipts?.add) {
+      clientState.pendingClientInputReceipts = new Set<number>();
+    }
+    const pending = clientState.pendingClientInputReceipts;
+    pending.add(frame);
+    let contiguous = Number.isFinite(clientState.lastAckedClientInput)
+      ? Math.floor(clientState.lastAckedClientInput)
+      : this.getContiguousBaseFrame(state);
+    while (pending.has(contiguous + 1)) {
+      contiguous += 1;
+      pending.delete(contiguous);
+    }
+    clientState.lastAckedClientInput = contiguous;
   }
 
   private canValidateHashFrame(state: any, frame: number) {
@@ -124,7 +155,7 @@ export class NetplayMessageFlowController {
     }
     const contiguous = Number.isFinite(state.highestContiguousHostFrame)
       ? Math.floor(state.highestContiguousHostFrame)
-      : -1;
+      : this.getContiguousBaseFrame(state);
     return frame <= contiguous;
   }
 
@@ -239,7 +270,10 @@ export class NetplayMessageFlowController {
       state.lastHostFrameTimeMs = performance.now();
       state.awaitingSnapshot = false;
       state.lagBehindSinceMs = null;
-      state.lastAckedLocalFrame = 0;
+      state.lastAckedLocalFrame = Math.max(0, Math.floor(msg.frame));
+      state.receivedHostFrames?.clear?.();
+      state.pendingHostFrameReceipts?.clear?.();
+      state.highestContiguousHostFrame = Math.max(-1, Math.floor(msg.frame));
       if (msg.frame > state.session.getFrame()) {
         this.deps.requestSnapshot('lag', msg.frame, true);
       }
@@ -408,7 +442,7 @@ export class NetplayMessageFlowController {
         currentState.expectedHashProbeByFrame?.clear?.();
         currentState.receivedHostFrames?.clear?.();
         currentState.pendingHostFrameReceipts?.clear?.();
-        currentState.highestContiguousHostFrame = -1;
+        currentState.highestContiguousHostFrame = this.getContiguousBaseFrame(currentState);
       }
       if (msg.lateJoin && Number.isFinite(this.deps.game.localPlayerId) && this.deps.game.localPlayerId > 0) {
         this.deps.markPlayerPendingSpawn(this.deps.game.localPlayerId, msg.stageSeq);
@@ -433,9 +467,11 @@ export class NetplayMessageFlowController {
     const nowMs = performance.now();
     let clientState = state.clientStates.get(playerId);
     if (!clientState) {
+      const baseFrame = this.getContiguousBaseFrame(state);
       clientState = {
         lastAckedHostFrame: -1,
-        lastAckedClientInput: -1,
+        lastAckedClientInput: baseFrame,
+        pendingClientInputReceipts: new Set<number>(),
         lastSnapshotMs: null,
         lastSnapshotRequestMs: null,
         lastInboundMessageMs: nowMs,
@@ -484,17 +520,22 @@ export class NetplayMessageFlowController {
           );
         }
       }
-      clientState.lastAckedClientInput = Math.max(clientState.lastAckedClientInput, frame);
       if (awaitingSpawn) {
+        this.markClientInputFrameReceived(state, clientState, frame);
         return;
       }
       const currentFrame = state.session.getFrame();
       const minFrame = Math.max(0, currentFrame - Math.min(state.maxRollback, this.deps.maxInputBehind));
       const maxFrame = currentFrame + this.deps.maxInputAhead;
-      if (frame < minFrame || frame > maxFrame) {
+      if (frame > maxFrame) {
+        return;
+      }
+      if (frame < minFrame) {
+        this.markClientInputFrameReceived(state, clientState, frame);
         return;
       }
       if (frame <= currentFrame && (currentFrame - frame) > this.deps.hostMaxInputRollback) {
+        this.markClientInputFrameReceived(state, clientState, frame);
         const nowMs = performance.now();
         const lastSnap = clientState.lastSnapshotMs;
         if (lastSnap === null || (nowMs - lastSnap) >= this.deps.hostSnapshotCooldownMs) {
@@ -503,6 +544,7 @@ export class NetplayMessageFlowController {
         }
         return;
       }
+      this.markClientInputFrameReceived(state, clientState, frame);
       const changed = this.deps.recordInputForFrame(frame, playerId, input);
       if (changed && frame <= currentFrame) {
         state.pendingHostRollbackFrame = state.pendingHostRollbackFrame === null

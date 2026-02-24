@@ -129,29 +129,33 @@ export class NetplayRuntimeController {
     const pendingFrames = state.pendingHostUpdates.size > 0
       ? Array.from(state.pendingHostUpdates).sort((a, b) => a - b)
       : [];
+    const resendWindow = Math.max(0, state.maxResend | 0);
+    const gapRescueBudget = Math.min(4, resendWindow);
     for (const [playerId, clientState] of state.clientStates.entries()) {
       const ackedHostFrame = Math.min(clientState.lastAckedHostFrame, currentFrame);
-      const start = Math.max(ackedHostFrame + 1, currentFrame - state.maxResend + 1);
-      const bundles: FrameBundleMessage[] = [];
-      let pendingIdx = 0;
-      let frame = start;
-      while (pendingIdx < pendingFrames.length || frame <= currentFrame) {
-        let nextFrame: number;
-        if (pendingIdx >= pendingFrames.length) {
-          nextFrame = frame;
-          frame += 1;
-        } else if (frame > currentFrame || pendingFrames[pendingIdx] < frame) {
-          nextFrame = pendingFrames[pendingIdx];
-          pendingIdx += 1;
-        } else if (pendingFrames[pendingIdx] === frame) {
-          nextFrame = frame;
-          pendingIdx += 1;
-          frame += 1;
-        } else {
-          nextFrame = frame;
-          frame += 1;
+      const start = ackedHostFrame + 1;
+      const tailStart = Math.max(start, currentFrame - resendWindow + 1);
+      const gapEnd = gapRescueBudget > 0
+        ? Math.min(currentFrame, tailStart - 1, start + gapRescueBudget - 1)
+        : start - 1;
+      const selected = new Set<number>();
+      for (const frame of pendingFrames) {
+        if (frame > ackedHostFrame && frame <= currentFrame) {
+          selected.add(frame);
         }
-        const bundle = state.hostFrameBuffer.get(nextFrame);
+      }
+      for (let frame = start; frame <= gapEnd; frame += 1) {
+        selected.add(frame);
+      }
+      for (let frame = tailStart; frame <= currentFrame; frame += 1) {
+        selected.add(frame);
+      }
+      const bundles: FrameBundleMessage[] = [];
+      const sortedFrames = selected.size > 0
+        ? Array.from(selected).sort((a, b) => a - b)
+        : [];
+      for (const frame of sortedFrames) {
+        const bundle = state.hostFrameBuffer.get(frame);
         if (!bundle) {
           continue;
         }
@@ -221,11 +225,26 @@ export class NetplayRuntimeController {
     if (!clientPeer || !state) {
       return;
     }
+    const hostAckFrame = Number.isFinite(state.highestContiguousHostFrame)
+      ? Math.floor(state.highestContiguousHostFrame)
+      : Math.max(-1, Math.floor(state.lastReceivedHostFrame ?? -1));
     const start = state.lastAckedLocalFrame + 1;
     const end = currentFrame;
-    const minFrame = Math.max(start, end - state.maxResend + 1);
+    const resendWindow = Math.max(0, state.maxResend | 0);
+    const gapRescueBudget = Math.min(4, resendWindow);
+    const tailStart = Math.max(start, end - resendWindow + 1);
+    const gapEnd = gapRescueBudget > 0
+      ? Math.min(end, tailStart - 1, start + gapRescueBudget - 1)
+      : start - 1;
     const batchEntries: Array<{ frame: number; input: QuantizedInput }> = [];
-    for (let frame = minFrame; frame <= end; frame += 1) {
+    for (let frame = start; frame <= gapEnd; frame += 1) {
+      const input = state.pendingLocalInputs.get(frame);
+      if (!input) {
+        continue;
+      }
+      batchEntries.push({ frame, input });
+    }
+    for (let frame = tailStart; frame <= end; frame += 1) {
       const input = state.pendingLocalInputs.get(frame);
       if (!input) {
         continue;
@@ -233,14 +252,14 @@ export class NetplayRuntimeController {
       batchEntries.push({ frame, input });
     }
     if (batchEntries.length > 0) {
-      clientPeer.sendInputBatch(state.stageSeq, state.lastReceivedHostFrame, batchEntries);
+      clientPeer.sendInputBatch(state.stageSeq, hostAckFrame, batchEntries);
     }
     if (start > end) {
       clientPeer.send({
         type: 'ack',
         stageSeq: state.stageSeq,
         playerId: this.deps.game.localPlayerId,
-        frame: state.lastReceivedHostFrame,
+        frame: hostAckFrame,
       });
     }
   }

@@ -83,6 +83,7 @@ export class NetplayStateSyncController {
     const session = this.deps.game.ensureRollbackSession();
     session.prime(this.deps.game.simTick);
     this.deps.game.netplayRttMs = null;
+    const baseFrame = Math.max(-1, Math.floor(this.deps.game.simTick));
     const next = {
       role,
       session,
@@ -90,7 +91,7 @@ export class NetplayStateSyncController {
       lastInputs: new Map<number, QuantizedInput>(),
       pendingLocalInputs: new Map<number, QuantizedInput>(),
       lastAckedLocalFrame: -1,
-      lastReceivedHostFrame: this.deps.game.simTick,
+      lastReceivedHostFrame: baseFrame,
       hostFrameBuffer: new Map<number, FrameBundleMessage>(),
       clientStates: new Map(),
       maxRollback: this.deps.maxRollback,
@@ -114,7 +115,7 @@ export class NetplayStateSyncController {
       }>(),
       receivedHostFrames: new Set<number>(),
       pendingHostFrameReceipts: new Set<number>(),
-      highestContiguousHostFrame: -1,
+      highestContiguousHostFrame: baseFrame,
       debugHashMismatchCount: 0,
       debugLastMismatchFrame: null,
       debugLastMismatchLocalHash: null,
@@ -168,6 +169,7 @@ export class NetplayStateSyncController {
     if (!state) {
       return;
     }
+    const baseFrame = Math.max(-1, Math.floor(this.deps.game.simTick));
     state.inputHistory.clear();
     state.lastInputs.clear();
     state.pendingLocalInputs.clear();
@@ -177,7 +179,7 @@ export class NetplayStateSyncController {
     state.expectedHashProbeByFrame.clear();
     state.receivedHostFrames.clear();
     state.pendingHostFrameReceipts.clear();
-    state.highestContiguousHostFrame = -1;
+    state.highestContiguousHostFrame = baseFrame;
     state.debugHashMismatchCount = 0;
     state.debugLastMismatchFrame = null;
     state.debugLastMismatchLocalHash = null;
@@ -208,11 +210,16 @@ export class NetplayStateSyncController {
     state.stageReadySentMs = null;
     state.stageReadyTimeoutMs = null;
     state.lastAckedLocalFrame = -1;
-    state.lastReceivedHostFrame = this.deps.game.simTick;
+    state.lastReceivedHostFrame = baseFrame;
     state.hostFrameBuffer.clear();
     for (const clientState of state.clientStates.values()) {
       clientState.lastAckedHostFrame = -1;
-      clientState.lastAckedClientInput = -1;
+      clientState.lastAckedClientInput = baseFrame;
+      if (clientState.pendingClientInputReceipts?.clear) {
+        clientState.pendingClientInputReceipts.clear();
+      } else {
+        clientState.pendingClientInputReceipts = new Set<number>();
+      }
       clientState.lastSnapshotMs = null;
       clientState.lastSnapshotRequestMs = null;
     }
