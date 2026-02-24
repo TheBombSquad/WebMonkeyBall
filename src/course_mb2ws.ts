@@ -202,19 +202,35 @@ export const MB2WS_CHALLENGE_ORDER = Object.fromEntries(
   Object.entries(MB2WS_CHALLENGE_ENTRIES).map(([key, list]) => [key, list.map((entry) => entry.id)])
 ) as Record<keyof typeof MB2WS_CHALLENGE_ENTRIES, number[]>;
 
+const MB2WS_CHALLENGE_BONUS_FLOORS = {
+  'beginner': [5, 10],
+  'advanced': [5, 10, 20, 30],
+  'expert': [5, 10, 20, 30, 40, 50],
+  'beginner-extra': [],
+  'advanced-extra': [],
+  'expert-extra': [],
+  'master': [],
+  'master-extra': [],
+} as const;
+
+function buildChallengeBonusFlags(list: readonly number[], bonusFloors: readonly number[]) {
+  const flags = list.map(() => false);
+  for (let i = 0; i < bonusFloors.length; i += 1) {
+    const floorIndex = bonusFloors[i] - 1;
+    if (floorIndex >= 0 && floorIndex < flags.length) {
+      flags[floorIndex] = true;
+    }
+  }
+  return flags;
+}
+
 export const MB2WS_CHALLENGE_BONUS = Object.fromEntries(
   Object.entries(MB2WS_CHALLENGE_ORDER).map(([key, list]) => [
     key,
-    list.map((_id, index) => {
-      const stageNumber = index + 1;
-      if (stageNumber === 5) {
-        return true;
-      }
-      if (stageNumber % 10 === 0) {
-        return stageNumber !== list.length;
-      }
-      return false;
-    }),
+    buildChallengeBonusFlags(
+      list,
+      MB2WS_CHALLENGE_BONUS_FLOORS[key as keyof typeof MB2WS_CHALLENGE_BONUS_FLOORS] ?? []
+    ),
   ])
 ) as Record<keyof typeof MB2WS_CHALLENGE_ORDER, boolean[]>;
 
@@ -288,7 +304,7 @@ function computeChallengeBonusFlags(list: StageEntry[]) {
 }
 
 function normalizeBonusFlags(list: StageEntry[], flags: boolean[] | null | undefined) {
-  if (!flags || flags.length === 0) {
+  if (!flags) {
     return computeChallengeBonusFlags(list);
   }
   const normalized = flags.slice(0, list.length);
