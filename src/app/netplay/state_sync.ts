@@ -28,6 +28,7 @@ type NetplayStateDeps = {
 
 export class NetplayStateSyncController {
   private readonly deps: NetplayStateDeps;
+  private static readonly HOST_STAGE_START_INACTIVITY_KICK_GRACE_MS = 5000;
 
   constructor(deps: NetplayStateDeps) {
     this.deps = deps;
@@ -143,6 +144,7 @@ export class NetplayStateSyncController {
       stageSeq: this.createNetplayId(),
       stageReadySentMs: null,
       stageReadyTimeoutMs: null,
+      hostInactivityKickGraceUntilMs: null,
       currentCourse: null,
       currentGameSource: null,
       currentGameMode: null,
@@ -209,6 +211,7 @@ export class NetplayStateSyncController {
     state.awaitingStageSync = false;
     state.stageReadySentMs = null;
     state.stageReadyTimeoutMs = null;
+    state.hostInactivityKickGraceUntilMs = null;
     state.lastAckedLocalFrame = -1;
     state.lastReceivedHostFrame = baseFrame;
     state.hostFrameBuffer.clear();
@@ -282,6 +285,18 @@ export class NetplayStateSyncController {
     const nowMs = performance.now();
     state.stageReadySentMs = state.role === 'client' ? nowMs : null;
     state.stageReadyTimeoutMs = state.role === 'host' ? nowMs : null;
+    if (state.role === 'host') {
+      state.hostInactivityKickGraceUntilMs = nowMs + NetplayStateSyncController.HOST_STAGE_START_INACTIVITY_KICK_GRACE_MS;
+      for (const clientState of state.clientStates.values()) {
+        if (!clientState) {
+          continue;
+        }
+        clientState.lastInboundMessageMs = nowMs;
+        clientState.timeoutKickSentMs = null;
+      }
+    } else {
+      state.hostInactivityKickGraceUntilMs = null;
+    }
     if (state.role === 'client') {
       this.deps.getClientPeer()?.send({
         type: 'stage_ready',

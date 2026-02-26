@@ -285,7 +285,10 @@ export class NetplayMessageFlowController {
       state.receivedHostFrames?.clear?.();
       state.pendingHostFrameReceipts?.clear?.();
       state.highestContiguousHostFrame = Math.max(-1, Math.floor(msg.frame));
-      if (msg.frame > state.session.getFrame()) {
+      // Don't immediately snapshot just because stage_sync arrives a few frames late.
+      // Under high RTT/loss, the client can often catch up deterministically during intro.
+      // Reserve forced snapshot for gaps beyond rollback reach.
+      if ((msg.frame - state.session.getFrame()) > Math.max(0, Math.floor(state.maxRollback ?? 0))) {
         this.deps.requestSnapshot('lag', msg.frame, true);
       }
       return;

@@ -296,6 +296,10 @@ export class NetplayRuntimeController {
     if (!state || state.role !== 'host') {
       return;
     }
+    const graceUntil = Number(state.hostInactivityKickGraceUntilMs);
+    if (Number.isFinite(graceUntil) && nowMs < graceUntil) {
+      return;
+    }
     const timeoutMs = this.deps.constants.clientInactivityTimeoutMs;
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       return;
