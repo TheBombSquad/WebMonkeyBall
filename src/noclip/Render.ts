@@ -1,5 +1,5 @@
 import { Camera, CameraController } from './Camera.js';
-import { mat4, vec3 } from 'gl-matrix';
+import { mat4, vec3, vec4 } from 'gl-matrix';
 import type { BallAppearanceProfile } from '../shared/ball_appearance.js';
 import { transformVec3Mat4w0, transformVec3Mat4w1 } from './MathHelpers.js';
 import type { Color } from './Color.js';
@@ -9,6 +9,7 @@ import {
   opaqueBlackFullClearRenderPassDescriptor,
 } from './gfx/helpers/RenderGraphHelpers.js';
 import {
+  GfxClipSpaceNearZ,
   GfxDevice,
   GfxFormat,
 } from './gfx/platform/GfxPlatform.js';
@@ -198,8 +199,77 @@ const scratchWormholeClipFromWorld = mat4.create();
 const scratchWormholeWorldFromView = mat4.create();
 const scratchWormholeClipPlanePoint = vec3.create();
 const scratchWormholeClipPlaneNormal = vec3.create();
+const scratchObliquePlanePointView = vec3.create();
+const scratchObliquePlaneNormalView = vec3.create();
+const scratchObliqueProjectionInverse = mat4.create();
+const scratchObliqueCorner = vec4.create();
+const scratchObliqueQ = vec4.create();
 const mirrorFlipX = mat4.fromScaling(mat4.create(), [-1, 1, 1]);
 const WAVY_MIRROR_ALPHA = 0x60 / 0xff;
+const OBLIQUE_CLIP_EPSILON = 1e-8;
+
+function signNoZero(v: number): number {
+  return v >= 0 ? 1 : -1;
+}
+
+function applyObliqueClipNearPlane(camera: Camera, planePointWorld: vec3, planeNormalWorld: vec3): boolean {
+  transformVec3Mat4w1(scratchObliquePlanePointView, camera.viewMatrix, planePointWorld);
+  transformVec3Mat4w0(scratchObliquePlaneNormalView, camera.viewMatrix, planeNormalWorld);
+
+  if (vec3.squaredLength(scratchObliquePlaneNormalView) <= OBLIQUE_CLIP_EPSILON) {
+    return false;
+  }
+  vec3.normalize(scratchObliquePlaneNormalView, scratchObliquePlaneNormalView);
+
+  // Keep camera-forward geometry (negative view-space Z) on the positive side.
+  let planeX = scratchObliquePlaneNormalView[0];
+  let planeY = scratchObliquePlaneNormalView[1];
+  let planeZ = scratchObliquePlaneNormalView[2];
+  let planeW = -vec3.dot(scratchObliquePlaneNormalView, scratchObliquePlanePointView);
+  const forwardDist = -planeZ + planeW;
+  if (forwardDist < 0.0) {
+    planeX = -planeX;
+    planeY = -planeY;
+    planeZ = -planeZ;
+    planeW = -planeW;
+  }
+
+  if (!mat4.invert(scratchObliqueProjectionInverse, camera.projectionMatrix)) {
+    return false;
+  }
+
+  vec4.set(scratchObliqueCorner, signNoZero(planeX), signNoZero(planeY), 1.0, 1.0);
+  vec4.transformMat4(scratchObliqueQ, scratchObliqueCorner, scratchObliqueProjectionInverse);
+  const planeDotQ =
+    planeX * scratchObliqueQ[0] +
+    planeY * scratchObliqueQ[1] +
+    planeZ * scratchObliqueQ[2] +
+    planeW * scratchObliqueQ[3];
+  if (Math.abs(planeDotQ) <= OBLIQUE_CLIP_EPSILON) {
+    return false;
+  }
+
+  if (camera.clipSpaceNearZ === GfxClipSpaceNearZ.NegativeOne) {
+    const scale = 2.0 / planeDotQ;
+    const clipX = planeX * scale;
+    const clipY = planeY * scale;
+    const clipZ = planeZ * scale;
+    const clipW = planeW * scale;
+    camera.projectionMatrix[2] = clipX - camera.projectionMatrix[3];
+    camera.projectionMatrix[6] = clipY - camera.projectionMatrix[7];
+    camera.projectionMatrix[10] = clipZ - camera.projectionMatrix[11];
+    camera.projectionMatrix[14] = clipW - camera.projectionMatrix[15];
+  } else {
+    const scale = 1.0 / planeDotQ;
+    camera.projectionMatrix[2] = planeX * scale;
+    camera.projectionMatrix[6] = planeY * scale;
+    camera.projectionMatrix[10] = planeZ * scale;
+    camera.projectionMatrix[14] = planeW * scale;
+  }
+
+  camera.worldMatrixUpdated();
+  return true;
+}
 
 function computeReflectionMatrix(out: mat4, planePoint: vec3, planeNormal: vec3): void {
   vec3.normalize(scratchMirrorPlaneNormal, planeNormal);
@@ -495,6 +565,14 @@ export class Renderer {
           }
           mat4.copy(this.wormholeCamera.worldMatrix, scratchWormholeWorldFromView);
           this.wormholeCamera.worldMatrixUpdated();
+          let useLegacyClipPlane = hasWormholeClipPlane;
+          if (hasWormholeClipPlane) {
+            useLegacyClipPlane = !applyObliqueClipNearPlane(
+              this.wormholeCamera,
+              scratchWormholeClipPlanePoint,
+              scratchWormholeClipPlaneNormal
+            );
+          }
 
           const wormholeViewerInput: RenderContext['viewerInput'] = {
             ...viewerInput,
@@ -515,8 +593,8 @@ export class Renderer {
             skipStageTilt: true,
             skipWormholeSurfaces: true,
             skipWormholeIds,
-            clipPlanePoint: hasWormholeClipPlane ? scratchWormholeClipPlanePoint : undefined,
-            clipPlaneNormal: hasWormholeClipPlane ? scratchWormholeClipPlaneNormal : undefined,
+            clipPlanePoint: useLegacyClipPlane ? scratchWormholeClipPlanePoint : undefined,
+            clipPlaneNormal: useLegacyClipPlane ? scratchWormholeClipPlaneNormal : undefined,
           };
           this.world.prepareToRender(wormholeCaptureCtx);
           this.renderHelper.renderInstManager.popTemplate();
