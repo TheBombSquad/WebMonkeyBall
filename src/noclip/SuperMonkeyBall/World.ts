@@ -205,6 +205,17 @@ const WORMHOLE_NEAR_FADE_INNER_RADIUS_SCALE = 0.8;
 const WORMHOLE_NEAR_FADE_OUTER_RADIUS_SCALE = 2.0;
 const OVERLAY_RAYCAST_EPSILON = 1.1920928955078125e-7;
 const OVERLAY_RAYCAST_EDGE_EPSILON = 0.01;
+const SMB2_STAGE_340_ID = 340;
+const SMB2_STAGE_340_FORCE_DRAW_FLAG = 0x01;
+const SMB2_STAGE_340_MODEL_DRAWS: readonly Smb2Stage340ModelDraw[] = [
+    [3, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0x00],
+    [7, 0.0, 3.75, 0.0, 0.0, 1.0, 0.0, 0x00],
+    [8, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0x00],
+    [9, 0.0, -3.75, 0.0, 0.0, -1.0, 0.0, 0x00],
+    [10, 0.0, 0.0, 5.0, 0.0, 0.0, 1.0, 0x00],
+    [11, 0.0, 0.0, -5.0, 0.0, 0.0, -1.0, 0x00],
+    [12, 0.0, -3.75, 0.0, 0.0, -1.0, 0.0, 0x00],
+];
 const SMB2_REVOLUTION_STAGE_ID = 348;
 const REVOLUTION_WALL_THRESHOLD = 40.0;
 const REVOLUTION_FLOOR_LOW_Y = -8.0;
@@ -219,6 +230,9 @@ const scratchOverlayRayDirTri = vec3.create();
 const scratchOverlayRayHitTri = vec3.create();
 const scratchOverlayRayHitAg = vec3.create();
 const scratchOverlayRayHitWorld = vec3.create();
+const scratchStage340AgFromWorld = mat4.create();
+const scratchStage340CameraWorld = vec3.create();
+const scratchStage340CameraLocal = vec3.create();
 const scratchRevolutionAgFromWorld = mat4.create();
 const scratchRevolutionCameraWorld = vec3.create();
 const scratchRevolutionCameraLocal = vec3.create();
@@ -252,6 +266,17 @@ type WormholeRenderInfo = {
     pos: vec3;
     rot: vec3;
 };
+
+type Smb2Stage340ModelDraw = readonly [
+    modelIndex: number,
+    pointX: number,
+    pointY: number,
+    pointZ: number,
+    normalX: number,
+    normalY: number,
+    normalZ: number,
+    flags: number,
+];
 
 type RevolutionStageModels = {
     floor1: ModelInst | null;
@@ -1138,6 +1163,7 @@ export class World {
     private wormholeSurfaceModel: ModelInst | null = null;
     private wormholeInfos: WormholeRenderInfo[] = [];
     private wormholeInfoById = new Map<number, WormholeRenderInfo>();
+    private smb2Stage340Models: (ModelInst | null)[] | null = null;
     private revolutionModels: RevolutionStageModels | null = null;
     private mirrorFlatMegaState = makeMegaState(
         setAttachmentStateSimple({ depthWrite: false }, {
@@ -1464,6 +1490,12 @@ export class World {
                 if ("setForceCullMode" in this.bonusWaveModel) {
                     this.bonusWaveModel.setForceCullMode(GfxCullMode.None);
                 }
+            }
+        }
+        if (stageData.stageInfo.id === SMB2_STAGE_340_ID) {
+            this.smb2Stage340Models = new Array(SMB2_STAGE_340_MODEL_DRAWS.length);
+            for (let i = 0; i < SMB2_STAGE_340_MODEL_DRAWS.length; i++) {
+                this.smb2Stage340Models[i] = this.worldState.modelCache.getModel(SMB2_STAGE_340_MODEL_DRAWS[i][0], GmaSrc.Stage);
             }
         }
         if (stageData.stageInfo.id === SMB2_REVOLUTION_STAGE_ID) {
@@ -1812,6 +1844,7 @@ export class World {
                 );
             }
             this.drawRevolutionSpecialStageModels(stageCtx, viewFromWorldTilted);
+            this.drawSmb2Stage340SpecialStageModels(stageCtx, viewFromWorldTilted);
             if (this.bonusWaveModel && !ctx.mirrorCapture) {
                 const rp = scratchRenderParams;
                 rp.reset();
@@ -1951,6 +1984,48 @@ export class World {
             scratchRevolutionBallLocal[1],
             false
         );
+    }
+
+    private drawSmb2Stage340SpecialStageModels(ctx: RenderContext, viewFromWorld: mat4): void {
+        const models = this.smb2Stage340Models;
+        const stage340Ag = this.animGroups[2];
+        if (!models || !stage340Ag) {
+            return;
+        }
+        const worldFromAg = stage340Ag.getWorldFromAg();
+        if (!mat4.invert(scratchStage340AgFromWorld, worldFromAg)) {
+            return;
+        }
+        mat4.getTranslation(scratchStage340CameraWorld, ctx.viewerInput.camera.worldMatrix);
+        transformVec3Mat4w1(scratchStage340CameraLocal, scratchStage340AgFromWorld, scratchStage340CameraWorld);
+        const cameraX = scratchStage340CameraLocal[0];
+        const cameraY = scratchStage340CameraLocal[1];
+        const cameraZ = scratchStage340CameraLocal[2];
+
+        const rp = scratchRenderParams;
+        rp.reset();
+        rp.sort = RenderSort.None;
+        rp.lighting = this.worldState.lighting;
+        mat4.mul(rp.viewFromModel, viewFromWorld, worldFromAg);
+
+        for (let i = 0; i < SMB2_STAGE_340_MODEL_DRAWS.length; i++) {
+            const model = models[i];
+            if (!model) {
+                continue;
+            }
+            const draw = SMB2_STAGE_340_MODEL_DRAWS[i];
+            const forceDraw = (draw[7] & SMB2_STAGE_340_FORCE_DRAW_FLAG) !== 0;
+            if (!forceDraw) {
+                const dot =
+                    (cameraZ - draw[3]) * draw[6] +
+                    (cameraX - draw[1]) * draw[4] +
+                    (cameraY - draw[2]) * draw[5];
+                if (dot < 0.0) {
+                    continue;
+                }
+            }
+            model.prepareToRender(ctx, rp);
+        }
     }
 
     private raycastStageDown(pos: vec3): number | null {
