@@ -2057,17 +2057,15 @@ export function collideBallWithStage(ball, stage, animGroups, options = null) {
   const triPhaseMask = options?.trianglePhaseMask ?? TRI_PHASE_FULL;
   const includePrimitives = options?.includePrimitives !== false;
   const precomputedCellTrisByAnimGroup = options?.precomputedCellTrisByAnimGroup ?? null;
-  const stageGroupBounds = getStageAnimGroupBounds(stage);
+  // Collision parity mode checks every anim group in order; broadphase culling changes traversal order.
+  const useAnimGroupBroadphase = options?.useAnimGroupBroadphase ?? false;
+  const stageGroupBounds = useAnimGroupBroadphase ? getStageAnimGroupBounds(stage) : [];
   for (let animGroupId = 0; animGroupId < stage.animGroupCount; animGroupId += 1) {
     const stageAg = stage.animGroups[animGroupId];
     if (!stageAg) {
       continue;
     }
     const seesawState = animGroups[animGroupId]?.seesawState;
-    const groupBounds = stageGroupBounds[animGroupId];
-    if (!seesawState && !groupBounds) {
-      continue;
-    }
     if (animGroupId !== ball.animGroupId) {
       tfPhysballToAnimGroupSpace(ball, animGroupId, animGroups);
     }
@@ -2075,8 +2073,11 @@ export function collideBallWithStage(ball, stage, animGroups, options = null) {
     if (seesawState && stage.format !== 'smb2') {
       applySeesawCollision(ball, seesawState);
     }
-    if (!groupBounds || !broadphaseHitsAnimGroup(ball, groupBounds)) {
-      continue;
+    if (useAnimGroupBroadphase) {
+      const groupBounds = stageGroupBounds[animGroupId];
+      if (!groupBounds || !broadphaseHitsAnimGroup(ball, groupBounds)) {
+        continue;
+      }
     }
 
     const cellTris = precomputedCellTrisByAnimGroup

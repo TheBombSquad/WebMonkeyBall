@@ -707,14 +707,6 @@ export class Renderer {
         });
       });
     }
-    builder.pushPass((pass) => {
-      pass.setDebugName('Main Translucent');
-      pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
-      pass.attachRenderTargetID(GfxrAttachmentSlot.DepthStencil, mainDepthTargetID);
-      pass.exec((passRenderer) => {
-        this.translucentInstList.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
-      });
-    });
     if (this.activeWormholeSourceId !== null && wormholeColorResolveID !== null) {
       builder.pushPass((pass) => {
         pass.setDebugName('Wormhole Overlay');
@@ -732,6 +724,14 @@ export class Renderer {
         });
       });
     }
+    builder.pushPass((pass) => {
+      pass.setDebugName('Main Translucent');
+      pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
+      pass.attachRenderTargetID(GfxrAttachmentSlot.DepthStencil, mainDepthTargetID);
+      pass.exec((passRenderer) => {
+        this.translucentInstList.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
+      });
+    });
     this.renderHelper.antialiasingSupport.pushPasses(
       builder,
       viewerInput,

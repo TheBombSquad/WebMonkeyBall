@@ -769,16 +769,27 @@ export function getMb2wsStageInfo(stageId: number): StageInfo {
 export function convertSmb2StageDef(stage: any): Stage {
   const wormholeIdMap = new Map<any, number>();
   let nextWormholeId = 1;
-  const getWormholeId = (wormhole: any): number => {
+  const getWormholeKey = (wormhole: any): any => {
     if (!wormhole) {
+      return null;
+    }
+    const fileOffset = wormhole._fileOffset;
+    if (typeof fileOffset === 'number' && Number.isFinite(fileOffset)) {
+      return fileOffset;
+    }
+    return wormhole;
+  };
+  const getWormholeId = (wormhole: any): number => {
+    const key = getWormholeKey(wormhole);
+    if (key === null) {
       return 0;
     }
-    const existing = wormholeIdMap.get(wormhole);
+    const existing = wormholeIdMap.get(key);
     if (existing !== undefined) {
       return existing;
     }
     const id = nextWormholeId++;
-    wormholeIdMap.set(wormhole, id);
+    wormholeIdMap.set(key, id);
     return id;
   };
   const convertWormhole = (wormhole: any, defaultAnimGroupIndex: number) => ({
@@ -865,11 +876,21 @@ export function convertSmb2StageDef(stage: any): Stage {
   }));
 
   const stageWormholes = (stage.wormholes ?? []).map((wormhole: any) => convertWormhole(wormhole, 0));
-  if (stage.wormholes?.length) {
-    const ag0Wormholes = animGroups[0]?.wormholes ?? [];
-    const ag0WormholeIds = new Set<number>(ag0Wormholes.map((wormhole: any) => wormhole.wormholeId ?? 0));
+  if (stage.wormholes?.length && animGroups.length > 0) {
+    const knownWormholeIds = new Set<number>();
+    for (const group of animGroups) {
+      for (const wormhole of group.wormholes ?? []) {
+        const id = wormhole.wormholeId ?? 0;
+        if (id !== 0) {
+          knownWormholeIds.add(id);
+        }
+      }
+    }
     animGroups[0].wormholes.push(
-      ...stageWormholes.filter((wormhole: any) => !ag0WormholeIds.has(wormhole.wormholeId ?? 0))
+      ...stageWormholes.filter((wormhole: any) => {
+        const id = wormhole.wormholeId ?? 0;
+        return id === 0 || !knownWormholeIds.has(id);
+      })
     );
   }
 

@@ -39,6 +39,7 @@ import type { TextureInputGX } from "../gx/gx_texture.js";
 import { fillMatrix4x4, fillVec4 } from "../gfx/helpers/UniformBufferHelpers.js";
 import { makeMegaState, setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers.js";
 import { makeSolidColorTexture2D } from "../gfx/helpers/TextureHelpers.js";
+import { reverseDepthForCompareMode } from "../gfx/helpers/ReversedDepthHelpers.js";
 import type {
     BananaRenderState,
     ConfettiRenderState,
@@ -777,17 +778,14 @@ layout(std140) uniform ub_WormholeParams {
 };
 
 layout(location = 0) in vec4 a_Position;
-layout(location = 6) in vec4 a_Color;
 
 out vec4 v_PortalClip;
-out vec4 v_Color;
 
 void main() {
     mat4 viewFromModel = UnpackMatrix(u_ViewFromModel);
     vec4 posView = viewFromModel * vec4(a_Position.xyz, 1.0);
     gl_Position = UnpackMatrix(u_Projection) * posView;
     v_PortalClip = UnpackMatrix(u_PortalClipFromModel) * vec4(a_Position.xyz, 1.0);
-    v_Color = a_Color;
 }
 `;
 
@@ -805,7 +803,6 @@ layout(std140) uniform ub_WormholeParams {
 uniform sampler2D u_PortalTexture;
 
 in vec4 v_PortalClip;
-in vec4 v_Color;
 
 out vec4 o_Color;
 
@@ -820,7 +817,7 @@ void main() {
     }
     vec2 uv = clamp(Project(v_PortalClip), 0.0, 1.0);
     vec4 tex = texture(u_PortalTexture, uv);
-    float alpha = clamp(u_Params.x * v_Color.a, 0.0, 1.0);
+    float alpha = clamp(u_Params.x, 0.0, 1.0);
     if (alpha <= 0.0) {
         discard;
     }
@@ -1190,7 +1187,7 @@ export class World {
         })
     );
     private wormholeSurfaceMegaState = makeMegaState(
-        setAttachmentStateSimple({ depthWrite: false, cullMode: GfxCullMode.Front }, {
+        setAttachmentStateSimple({ depthWrite: false, depthCompare: reverseDepthForCompareMode(GfxCompareMode.LessEqual), cullMode: GfxCullMode.None }, {
             blendMode: GfxBlendMode.Add,
             blendSrcFactor: GfxBlendFactor.SrcAlpha,
             blendDstFactor: GfxBlendFactor.OneMinusSrcAlpha,

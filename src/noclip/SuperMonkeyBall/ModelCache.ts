@@ -97,8 +97,13 @@ export class ModelCache {
         this.jamabarModel =
             this.findModelBySubstring(["JAMABAR"]) ?? this.getModel(CommonModelID.mb_jamabar, GmaSrc.Common);
         if (usesSmb2Models) {
-            this.wormholeModel = this.findModelBySubstring(["WORMHOLE"]);
-            this.wormholeSurfaceModel = this.findModelBySubstring(["WORM_SURFACE"]);
+            this.wormholeModel =
+                this.findModelByName("WORMHOLE") ??
+                this.findModelBySubstring(["WORMHOLE"]);
+            this.wormholeSurfaceModel =
+                this.findModelByName("WORM_SURFACE") ??
+                this.findModelBySubstring(["WORM_SURFACE"]) ??
+                this.wormholeModel;
         }
     }
 
@@ -116,6 +121,16 @@ export class ModelCache {
                 if (substrings.some((substr) => gma.name.includes(substr))) {
                     return this.getModelFromEntry(gma.name, entry);
                 }
+            }
+        }
+        return null;
+    }
+
+    private findModelByName(modelName: string): ModelInst | null {
+        for (let i = 0; i < this.allEntries.length; i++) {
+            const model = this.getModelFromEntry(modelName, this.allEntries[i]);
+            if (model) {
+                return model;
             }
         }
         return null;
