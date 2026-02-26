@@ -860,6 +860,25 @@ class StageParserSmb2 extends StageParser {
     return objs;
   }
 
+  parseBoundSphere(offset) {
+    if (offset === null || offset < 0 || offset + 0x10 > this.data.length) {
+      return null;
+    }
+    const center = this.readVec3(offset);
+    const radius = this.readF32(offset + 0x0c);
+    if (!Number.isFinite(center.x)
+      || !Number.isFinite(center.y)
+      || !Number.isFinite(center.z)
+      || !Number.isFinite(radius)
+      || radius <= 0) {
+      return null;
+    }
+    return {
+      center,
+      radius,
+    };
+  }
+
   parseAnimGroup(offset) {
     const origin = this.readVec3(offset);
     const initRot = this.readS16Vec(offset + 0x0c);
@@ -898,8 +917,10 @@ class StageParserSmb2 extends StageParser {
     const stageModelCount = this.readS32(offset + 0x94);
     const stageModelPtrB = this.readPtr(offset + 0x98);
     const animGroupId = this.readS16(offset + 0xa4);
+    const collisionMask = this.readU16(offset + 0xa6);
     const switchCount = this.readS32(offset + 0xa8);
     const switchesPtr = this.readPtr(offset + 0xac);
+    const boundSpherePtr = this.readPtr(offset + 0xb4);
     const seesawSensitivity = this.readF32(offset + 0xb8);
     const seesawFriction = this.readF32(offset + 0xbc);
     const seesawSpring = this.readF32(offset + 0xc0);
@@ -958,8 +979,10 @@ class StageParserSmb2 extends StageParser {
       stageModelPtrB,
       stageModelNames,
       animGroupId,
+      collisionMask,
       switchCount,
       switches: this.parseSwitches(switchesPtr, switchCount),
+      boundSphere: this.parseBoundSphere(boundSpherePtr),
       seesawSensitivity,
       seesawFriction,
       seesawSpring,

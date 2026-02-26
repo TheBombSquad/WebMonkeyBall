@@ -202,6 +202,8 @@ const bonusWaveSurfaceScratch = {
 const triBoundsVert2Scratch = { x: 0, y: 0, z: 0 };
 const triBoundsVert3Scratch = { x: 0, y: 0, z: 0 };
 const groupBoundDeltaScratch = { x: 0, y: 0, z: 0 };
+const igRangeSnapshotPosScratch = { x: 0, y: 0, z: 0 };
+const igRangeBallPosScratch = { x: 0, y: 0, z: 0 };
 const gridLookupLocalPos = { x: 0, y: 0, z: 0 };
 const stageAnimGroupBoundsCache = new WeakMap<object, Array<{ center: { x: number; y: number; z: number }; radius: number } | null>>();
 
@@ -679,6 +681,49 @@ function broadphaseHitsAnimGroup(ball, groupBounds) {
     ball.radius,
     groupBounds.radius,
   );
+}
+
+function broadphaseHitsAnimGroupFromSnapshot(
+  snapshotPos,
+  snapshotRadius,
+  animGroupId,
+  stageAg,
+  animGroups,
+  fallbackGroupBounds,
+) {
+  igRangeBallPosScratch.x = snapshotPos.x;
+  igRangeBallPosScratch.y = snapshotPos.y;
+  igRangeBallPosScratch.z = snapshotPos.z;
+  if (animGroupId !== 0) {
+    const group = animGroups?.[animGroupId];
+    if (!group) {
+      return false;
+    }
+    boundsStack.fromMtx(group.transform);
+    boundsStack.rigidInvTfPoint(igRangeBallPosScratch, igRangeBallPosScratch);
+  }
+
+  const boundSphere = stageAg.boundSphere;
+  if (boundSphere) {
+    const combinedRadius = snapshotRadius + boundSphere.radius;
+    const combinedRadiusSq = combinedRadius * combinedRadius;
+    groupBoundDeltaScratch.x = igRangeBallPosScratch.x - boundSphere.center.x;
+    groupBoundDeltaScratch.y = igRangeBallPosScratch.y - boundSphere.center.y;
+    groupBoundDeltaScratch.z = igRangeBallPosScratch.z - boundSphere.center.z;
+    return sumSq3(groupBoundDeltaScratch.x, groupBoundDeltaScratch.y, groupBoundDeltaScratch.z) <= combinedRadiusSq;
+  }
+
+  if (fallbackGroupBounds) {
+    const combinedRadius = snapshotRadius + fallbackGroupBounds.radius;
+    const combinedRadiusSq = combinedRadius * combinedRadius;
+    groupBoundDeltaScratch.x = igRangeBallPosScratch.x - fallbackGroupBounds.center.x;
+    groupBoundDeltaScratch.y = igRangeBallPosScratch.y - fallbackGroupBounds.center.y;
+    groupBoundDeltaScratch.z = igRangeBallPosScratch.z - fallbackGroupBounds.center.z;
+    return sumSq3(groupBoundDeltaScratch.x, groupBoundDeltaScratch.y, groupBoundDeltaScratch.z) <= combinedRadiusSq;
+  }
+
+  // SMB2 treats a missing itemgroup bound sphere as "in range".
+  return true;
 }
 
 export function precomputeStageCollisionCellTris(pos, stage, animGroups, out = null) {
@@ -2053,13 +2098,16 @@ export function collideBallWithBonusWave(ball, stageRuntime) {
   collideBallWithPlane(ball, surface);
 }
 
-export function collideBallWithStage(ball, stage, animGroups, options = null) {
-  const triPhaseMask = options?.trianglePhaseMask ?? TRI_PHASE_FULL;
-  const includePrimitives = options?.includePrimitives !== false;
-  const precomputedCellTrisByAnimGroup = options?.precomputedCellTrisByAnimGroup ?? null;
-  // Collision parity mode checks every anim group in order; broadphase culling changes traversal order.
-  const useAnimGroupBroadphase = options?.useAnimGroupBroadphase ?? false;
-  const stageGroupBounds = useAnimGroupBroadphase ? getStageAnimGroupBounds(stage) : [];
+function collideBallWithStageSmb1Traversal(
+  ball,
+  stage,
+  animGroups,
+  triPhaseMask,
+  includePrimitives,
+  precomputedCellTrisByAnimGroup,
+  useAnimGroupBroadphase,
+  stageGroupBounds,
+) {
   for (let animGroupId = 0; animGroupId < stage.animGroupCount; animGroupId += 1) {
     const stageAg = stage.animGroups[animGroupId];
     if (!stageAg) {
@@ -2117,6 +2165,185 @@ export function collideBallWithStage(ball, stage, animGroups, options = null) {
       collideBallWithGoal(ball, goal);
     }
   }
+}
+
+function collideBallWithStageSmb2TrianglePhase(
+  ball,
+  stage,
+  animGroups,
+  triPhase,
+  precomputedCellTrisByAnimGroup,
+  useAnimGroupBroadphase,
+  stageGroupBounds,
+  broadphaseSnapshotPos,
+  broadphaseSnapshotRadius,
+) {
+  for (let animGroupId = 0; animGroupId < stage.animGroupCount; animGroupId += 1) {
+    const stageAg = stage.animGroups[animGroupId];
+    if (!stageAg) {
+      continue;
+    }
+    if (useAnimGroupBroadphase) {
+      const groupBounds = stageGroupBounds[animGroupId];
+      if (!broadphaseHitsAnimGroupFromSnapshot(
+        broadphaseSnapshotPos,
+        broadphaseSnapshotRadius,
+        animGroupId,
+        stageAg,
+        animGroups,
+        groupBounds,
+      )) {
+        continue;
+      }
+    }
+    if (animGroupId !== ball.animGroupId) {
+      tfPhysballToAnimGroupSpace(ball, animGroupId, animGroups);
+    }
+    const cellTris = precomputedCellTrisByAnimGroup
+      ? (precomputedCellTrisByAnimGroup[animGroupId] ?? null)
+      : coligridLookup(stageAg, ball.pos.x, ball.pos.z);
+    if (!cellTris) {
+      continue;
+    }
+    for (const triIndex of cellTris) {
+      const tri = stageAg.triangles[triIndex];
+      if (triPhase === TRI_PHASE_FACE) {
+        collideBallWithTriFace(ball, tri);
+      } else if (triPhase === TRI_PHASE_EDGE) {
+        collideBallWithTriEdges(ball, tri);
+      } else {
+        collideBallWithTriVerts(ball, tri);
+      }
+    }
+  }
+}
+
+function collideBallWithStageSmb2Traversal(
+  ball,
+  stage,
+  animGroups,
+  triPhaseMask,
+  includePrimitives,
+  precomputedCellTrisByAnimGroup,
+  useAnimGroupBroadphase,
+  stageGroupBounds,
+) {
+  igRangeSnapshotPosScratch.x = ball.pos.x;
+  igRangeSnapshotPosScratch.y = ball.pos.y;
+  igRangeSnapshotPosScratch.z = ball.pos.z;
+  const broadphaseSnapshotRadius = ball.radius;
+
+  if (triPhaseMask & TRI_PHASE_FACE) {
+    collideBallWithStageSmb2TrianglePhase(
+      ball,
+      stage,
+      animGroups,
+      TRI_PHASE_FACE,
+      precomputedCellTrisByAnimGroup,
+      useAnimGroupBroadphase,
+      stageGroupBounds,
+      igRangeSnapshotPosScratch,
+      broadphaseSnapshotRadius,
+    );
+  }
+  if (triPhaseMask & TRI_PHASE_EDGE) {
+    collideBallWithStageSmb2TrianglePhase(
+      ball,
+      stage,
+      animGroups,
+      TRI_PHASE_EDGE,
+      precomputedCellTrisByAnimGroup,
+      useAnimGroupBroadphase,
+      stageGroupBounds,
+      igRangeSnapshotPosScratch,
+      broadphaseSnapshotRadius,
+    );
+  }
+  if (triPhaseMask & TRI_PHASE_VERT) {
+    collideBallWithStageSmb2TrianglePhase(
+      ball,
+      stage,
+      animGroups,
+      TRI_PHASE_VERT,
+      precomputedCellTrisByAnimGroup,
+      useAnimGroupBroadphase,
+      stageGroupBounds,
+      igRangeSnapshotPosScratch,
+      broadphaseSnapshotRadius,
+    );
+  }
+
+  if (!includePrimitives) {
+    return;
+  }
+  for (let animGroupId = 0; animGroupId < stage.animGroupCount; animGroupId += 1) {
+    const stageAg = stage.animGroups[animGroupId];
+    if (!stageAg) {
+      continue;
+    }
+    if (useAnimGroupBroadphase) {
+      const groupBounds = stageGroupBounds[animGroupId];
+      if (!broadphaseHitsAnimGroupFromSnapshot(
+        igRangeSnapshotPosScratch,
+        broadphaseSnapshotRadius,
+        animGroupId,
+        stageAg,
+        animGroups,
+        groupBounds,
+      )) {
+        continue;
+      }
+    }
+    if (animGroupId !== ball.animGroupId) {
+      tfPhysballToAnimGroupSpace(ball, animGroupId, animGroups);
+    }
+    for (const cone of stageAg.coliCones) {
+      collideBallWithCone(ball, cone);
+    }
+    for (const sphere of stageAg.coliSpheres) {
+      collideBallWithSphere(ball, sphere);
+    }
+    for (const cylinder of stageAg.coliCylinders) {
+      collideBallWithCylinder(ball, cylinder);
+    }
+    for (const goal of stageAg.goals) {
+      collideBallWithGoal(ball, goal);
+    }
+  }
+}
+
+export function collideBallWithStage(ball, stage, animGroups, options = null) {
+  const triPhaseMask = options?.trianglePhaseMask ?? TRI_PHASE_FULL;
+  const includePrimitives = options?.includePrimitives !== false;
+  const precomputedCellTrisByAnimGroup = options?.precomputedCellTrisByAnimGroup ?? null;
+  const useSmb2Traversal = stage.format === 'smb2' || stage.format === 'mb2ws';
+  const useAnimGroupBroadphase = options?.useAnimGroupBroadphase ?? useSmb2Traversal;
+  const stageGroupBounds = useAnimGroupBroadphase ? getStageAnimGroupBounds(stage) : [];
+
+  if (useSmb2Traversal) {
+    collideBallWithStageSmb2Traversal(
+      ball,
+      stage,
+      animGroups,
+      triPhaseMask,
+      includePrimitives,
+      precomputedCellTrisByAnimGroup,
+      useAnimGroupBroadphase,
+      stageGroupBounds,
+    );
+  } else {
+    collideBallWithStageSmb1Traversal(
+      ball,
+      stage,
+      animGroups,
+      triPhaseMask,
+      includePrimitives,
+      precomputedCellTrisByAnimGroup,
+      useAnimGroupBroadphase,
+      stageGroupBounds,
+    );
+  }
+
   if (ball.animGroupId !== 0) {
     tfPhysballToAnimGroupSpace(ball, 0, animGroups);
   }
