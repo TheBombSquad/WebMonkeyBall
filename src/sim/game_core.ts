@@ -341,6 +341,7 @@ export class GameCore {
   public lives: number;
   public stageTimeLimitFrames: number;
   public stageTimerFrames: number;
+  public latchedClearTimerFrames: number | null;
   public statusText: string;
   public loadToken: number;
   public pendingAdvance: boolean;
@@ -487,6 +488,7 @@ export class GameCore {
     this.lives = DEFAULT_LIVES;
     this.stageTimeLimitFrames = DEFAULT_STAGE_TIME;
     this.stageTimerFrames = 0;
+    this.latchedClearTimerFrames = null;
     this.statusText = '';
     this.loadToken = 0;
     this.pendingAdvance = false;
@@ -2446,6 +2448,13 @@ export class GameCore {
     return this.getAnimTimeFrames(alpha);
   }
 
+  getDisplayedStageTimerFrames(): number {
+    if (this.latchedClearTimerFrames !== null) {
+      return this.latchedClearTimerFrames;
+    }
+    return this.stageTimerFrames;
+  }
+
   getAnimTimeFrames(alpha = 1): number | null {
     const timerFrames = this.stageRuntime?.timerFrames ?? null;
     if (timerFrames === null) {
@@ -3168,6 +3177,7 @@ export class GameCore {
       }
       this.bananasLeft = this.stageRuntime.bananas.length;
       this.stageTimerFrames = 0;
+      this.latchedClearTimerFrames = null;
       this.stageTimeLimitFrames = this.course?.getTimeLimitFrames() ?? DEFAULT_STAGE_TIME;
       this.hudGoalEventTick = -1;
       this.hudRingoutEventTick = -1;
@@ -3280,6 +3290,7 @@ export class GameCore {
     this.wormholeScreenOverlayTimer = 0;
     this.wormholeScreenOverlayIntensity = 0;
     this.wormholeScreenOverlayStartPending = false;
+    this.latchedClearTimerFrames = null;
     const localPlayer = this.getLocalPlayer();
     if (localPlayer) {
       localPlayer.finished = false;
@@ -3716,7 +3727,7 @@ export class GameCore {
     return {
       flags,
       goalType: resolvedGoalType,
-      timerCurr: this.stageTimerFrames,
+      timerCurr: this.getDisplayedStageTimerFrames(),
       u_currStageId: this.course?.currentStageId ?? 0,
     };
   }
@@ -3899,6 +3910,9 @@ export class GameCore {
       ...goalHit,
       replayEntryVel: this.cloneVec3(localBall.vel),
     };
+    if (this.session.isSinglePlayer(this)) {
+      this.latchedClearTimerFrames = this.stageTimerFrames;
+    }
     this.hudGoalEventTick = this.simTick;
     localPlayer.finished = true;
     localPlayer.goalType = goalHit?.goalType ?? null;
@@ -4009,7 +4023,7 @@ export class GameCore {
       if (this.isInfiniteTimeActive()) {
         this.hud.timer.textContent = '';
       } else {
-        const timeLeft = Math.max(0, this.stageTimeLimitFrames - this.stageTimerFrames);
+        const timeLeft = Math.max(0, this.stageTimeLimitFrames - this.getDisplayedStageTimerFrames());
         this.hud.timer.textContent = formatTimer(timeLeft);
       }
     }

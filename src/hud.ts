@@ -447,6 +447,19 @@ function formatTimerSeconds(frames: number): { seconds: string; centis: string }
   };
 }
 
+function getDisplayedStageTimerFrames(game: any): number {
+  if (!game) {
+    return 0;
+  }
+  const displayTimer = typeof game.getDisplayedStageTimerFrames === 'function'
+    ? game.getDisplayedStageTimerFrames()
+    : game.stageTimerFrames;
+  if (!Number.isFinite(displayTimer)) {
+    return 0;
+  }
+  return Math.max(0, Math.trunc(displayTimer));
+}
+
 type TintSurface = {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -1169,7 +1182,7 @@ function getWarpJumpCount(game: any, goalType: 'B' | 'G' | 'R'): number {
   const preview = game?.course?.peekJumpCount?.({
     flags: INFO_FLAGS.GOAL,
     goalType,
-    timerCurr: game?.stageTimerFrames ?? 0,
+    timerCurr: getDisplayedStageTimerFrames(game),
     u_currStageId: game?.stage?.stageId ?? game?.course?.currentStageId ?? 0,
   });
   if (typeof preview === 'number' && Number.isFinite(preview) && preview > 0) {
@@ -1533,7 +1546,7 @@ export class HudRenderer {
 
     if (shouldStartGoalBanner) {
       this.beginBanner(this.goalBanner);
-      const timeRemaining = Math.max(0, (game.stageTimeLimitFrames ?? 0) - (game.stageTimerFrames ?? 0));
+      const timeRemaining = Math.max(0, (game.stageTimeLimitFrames ?? 0) - getDisplayedStageTimerFrames(game));
       const goalType = normalizeGoalType(goalInfo?.goalType ?? game.stage?.goals?.[0]?.type ?? 'B');
       let clearScore = Math.floor((timeRemaining * 100) / 60);
       if (goalType === 'G') {
@@ -1654,14 +1667,14 @@ export class HudRenderer {
 
     const infiniteTimeActive = !!game?.isInfiniteTimeActive?.();
     if (!infiniteTimeActive && game?.stageTimeLimitFrames > 0) {
-      const timeLeft = game.stageTimeLimitFrames - game.stageTimerFrames;
+      const timeLeft = game.stageTimeLimitFrames - getDisplayedStageTimerFrames(game);
       if (timeLeft === HURRY_UP_FRAMES) {
         this.beginBanner(this.hurryBanner);
       }
     }
 
     const timeLeft = !infiniteTimeActive && game?.stageTimeLimitFrames
-      ? game.stageTimeLimitFrames - game.stageTimerFrames
+      ? game.stageTimeLimitFrames - getDisplayedStageTimerFrames(game)
       : null;
     if (timeLeft !== null && timeLeft <= 0 && (this.lastTimeLeft ?? 1) > 0) {
       this.spawnBombFragments();
@@ -1809,7 +1822,7 @@ export class HudRenderer {
     const assets = this.assets;
     const fonts = assets.fonts;
 
-    const timeLeftRaw = (game?.stageTimeLimitFrames ?? 0) - (game?.stageTimerFrames ?? 0);
+    const timeLeftRaw = (game?.stageTimeLimitFrames ?? 0) - getDisplayedStageTimerFrames(game);
     const timeLeft = Math.max(0, timeLeftRaw);
     const { seconds, centis } = formatTimerSeconds(timeLeft);
     const localPlayer = this.getHudPlayer(game);

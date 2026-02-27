@@ -216,9 +216,12 @@ export function startRenderLoop(deps: FrameLoopDeps) {
 
     const interpolationAlpha = deps.getInterpolationEnabled() ? deps.game.getInterpolationAlpha() : 1;
     const baseTimeFrames = deps.game.getAnimTimeFrames(interpolationAlpha);
+    const displayStageTimerFrames = typeof deps.game.getDisplayedStageTimerFrames === 'function'
+      ? deps.game.getDisplayedStageTimerFrames()
+      : deps.game.stageTimerFrames;
     deps.syncState.timeFrames = baseTimeFrames === null ? null : baseTimeFrames;
-    deps.syncState.stageTimerFrames = Number.isFinite(deps.game.stageTimerFrames)
-      ? deps.game.stageTimerFrames
+    deps.syncState.stageTimerFrames = Number.isFinite(displayStageTimerFrames)
+      ? displayStageTimerFrames
       : null;
     deps.syncState.stageTimeLimitFrames = Number.isFinite(deps.game.stageTimeLimitFrames)
       ? deps.game.stageTimeLimitFrames
