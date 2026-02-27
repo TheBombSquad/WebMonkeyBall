@@ -37,6 +37,12 @@ export const GOAL_FLOAT_FRAMES = 90;
 const WORMHOLE_TRIGGER_HEIGHT = 4;
 const WORMHOLE_TRIGGER_WIDTH = 4;
 const WORMHOLE_TRIGGER_OFFSET_Y = 2;
+const SMB1_GOAL_TRIGGER_HEIGHT = 2;
+const SMB1_GOAL_TRIGGER_WIDTH = 2;
+const SMB1_GOAL_TRIGGER_OFFSET_Y = 1;
+const SMB2_GOAL_TRIGGER_HEIGHT = 3;
+const SMB2_GOAL_TRIGGER_WIDTH = 3;
+const SMB2_GOAL_TRIGGER_OFFSET_Y = 1.5;
 const WORMHOLE_OFFSET_Y = 2.2;
 const WORMHOLE_COOLDOWN_FRAMES = 30;
 const stack = new MatrixStack();
@@ -78,10 +84,10 @@ const wormholeTriggerScratch = {
   height: WORMHOLE_TRIGGER_HEIGHT,
 };
 const goalTriggerScratch = {
-  pos: { x: 0, y: 1, z: 0 },
+  pos: { x: 0, y: SMB1_GOAL_TRIGGER_OFFSET_Y, z: 0 },
   rot: { x: 0, y: 0, z: 0 },
-  width: 2,
-  height: 2,
+  width: SMB1_GOAL_TRIGGER_WIDTH,
+  height: SMB1_GOAL_TRIGGER_HEIGHT,
 };
 const apeForwardScratch = { x: 0, y: 0, z: -1 };
 const apeBasis64 = { x: 0, y: 0, z: 0 };
@@ -1163,6 +1169,10 @@ function checkBallEnteredWormhole(ball, stageRuntime) {
 export function checkBallEnteredGoal(ball, stageRuntime) {
   const stage = stageRuntime.stage;
   const animGroups = stageRuntime.animGroups;
+  const isSmb2GoalTrigger = stage.format === 'smb2';
+  const goalTriggerOffsetY = isSmb2GoalTrigger ? SMB2_GOAL_TRIGGER_OFFSET_Y : SMB1_GOAL_TRIGGER_OFFSET_Y;
+  const goalTriggerWidth = isSmb2GoalTrigger ? SMB2_GOAL_TRIGGER_WIDTH : SMB1_GOAL_TRIGGER_WIDTH;
+  const goalTriggerHeight = isSmb2GoalTrigger ? SMB2_GOAL_TRIGGER_HEIGHT : SMB1_GOAL_TRIGGER_HEIGHT;
   const physBall = ball.physBall;
   initPhysBallFromBall(ball, physBall, stage.format);
   let goalId = 0;
@@ -1175,11 +1185,13 @@ export function checkBallEnteredGoal(ball, stageRuntime) {
       for (const goal of stageAg.goals) {
         const trigger = goalTriggerScratch;
         trigger.pos.x = 0;
-        trigger.pos.y = 1;
+        trigger.pos.y = goalTriggerOffsetY;
         trigger.pos.z = 0;
         trigger.rot.x = goal.rot.x;
         trigger.rot.y = goal.rot.y;
         trigger.rot.z = goal.rot.z;
+        trigger.width = goalTriggerWidth;
+        trigger.height = goalTriggerHeight;
         stack.fromTranslate(goal.pos);
         stack.rotateZ(goal.rot.z);
         stack.rotateY(goal.rot.y);
