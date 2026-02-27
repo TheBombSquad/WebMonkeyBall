@@ -180,6 +180,7 @@ type CourseLike = {
     u_currStageId: number;
   }) => number | null;
   isBonusStage?: () => boolean;
+  advanceSingleStage: () => boolean;
   advance: (info: {
     flags: number;
     goalType: string | null;
@@ -3342,7 +3343,7 @@ export class GameCore {
       this.readyAnnouncerPlayed = false;
       this.goAnnouncerPlayed = false;
       this.goalWooshPlayed = false;
-      if (!isFirstAttempt) {
+      if (!isFirstAttempt && !this.suppressAudioEffects) {
         void this.audio?.playAnnouncerReady();
         this.readyAnnouncerPlayed = true;
       }
@@ -3872,22 +3873,12 @@ export class GameCore {
         isBonusStage: this.isBonusStageActive(),
       });
     }
-    const goalType = this.stage.goals?.[0]?.type ?? 'B';
-    const advanced = this.course.advance({
-      flags: INFO_FLAGS.GOAL,
-      goalType,
-      timerCurr: this.stageTimerFrames,
-      u_currStageId: this.course.currentStageId,
-    });
+    const info = this.makeAdvanceInfo(INFO_FLAGS.GOAL, this.stage.goals?.[0]?.type ?? 'B');
+    const advanced = this.course.advanceSingleStage();
     if (!advanced) {
       this.statusText = 'Course complete.';
       if (!this.rollbackSession?.suppressVisuals) {
-        this.onCourseComplete?.({
-          flags: INFO_FLAGS.GOAL,
-          goalType,
-          timerCurr: this.stageTimerFrames,
-          u_currStageId: this.course.currentStageId,
-        });
+        this.onCourseComplete?.(info);
       }
       return;
     }

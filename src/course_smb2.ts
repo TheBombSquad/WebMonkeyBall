@@ -316,4 +316,17 @@ export class Smb2Course {
     this.currentStageRulesetId = entry?.rulesetId ?? this.currentStageRulesetId;
     return true;
   }
+
+  advanceSingleStage() {
+    const nextIndex = this.currentIndex + 1;
+    if (nextIndex >= this.stageList.length) {
+      return false;
+    }
+    this.currentIndex = nextIndex;
+    const entry = this.stageList[this.currentIndex];
+    this.currentStageId = entry?.id ?? this.currentStageId;
+    this.currentStageParserId = entry?.parserId ?? this.currentStageParserId;
+    this.currentStageRulesetId = entry?.rulesetId ?? this.currentStageRulesetId;
+    return true;
+  }
 }

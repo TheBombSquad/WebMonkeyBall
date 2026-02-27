@@ -378,4 +378,13 @@ export class Course {
     this.stageIndex = nextIndex;
     return true;
   }
+
+  advanceSingleStage() {
+    const nextIndex = this.stageIndex + 1;
+    if (nextIndex >= this.stageList.length) {
+      return false;
+    }
+    this.setStageIndex(nextIndex);
+    return true;
+  }
 }
