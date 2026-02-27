@@ -222,6 +222,24 @@ body.gameplay-active {
   overscroll-behavior: contain;
 }
 
+#main-menu {
+  position: relative;
+  padding-bottom: 48px;
+}
+
+.menu-version {
+  position: absolute;
+  right: 18px;
+  bottom: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1;
+  color: rgba(183, 183, 194, 0.92);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: text;
+}
+
 #replay-library-menu {
   width: min(1024px, 96vw);
 }

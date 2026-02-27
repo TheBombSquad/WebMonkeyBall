@@ -5,6 +5,7 @@ export function collectMainDomRefs() {
   const hudCanvas = document.getElementById('hud-canvas') as HTMLCanvasElement;
   const overlay = document.getElementById('overlay') as HTMLElement;
   const mainMenuPanel = document.getElementById('main-menu') as HTMLElement | null;
+  const mainMenuVersionLabel = document.getElementById('main-menu-version') as HTMLElement | null;
   const singleplayerMenuPanel = document.getElementById('singleplayer-menu') as HTMLElement | null;
   const coursePlayMenuPanel = document.getElementById('course-play-menu') as HTMLElement | null;
   const replayLibraryMenuPanel = document.getElementById('replay-library-menu') as HTMLElement | null;
@@ -183,6 +184,7 @@ export function collectMainDomRefs() {
     hudCanvas,
     overlay,
     mainMenuPanel,
+    mainMenuVersionLabel,
     singleplayerMenuPanel,
     coursePlayMenuPanel,
     replayLibraryMenuPanel,

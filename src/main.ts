@@ -115,6 +115,7 @@ import {
 import type { LoadedPack } from './pack.js';
 
 const LEADERBOARDS_MENU_ENABLED = false;
+declare const __APP_COMMIT__: string | undefined;
 
 export function runMainApp() {
   
@@ -127,6 +128,7 @@ export function runMainApp() {
     hudCanvas,
     overlay,
     mainMenuPanel,
+    mainMenuVersionLabel,
     singleplayerMenuPanel,
     coursePlayMenuPanel,
     replayLibraryMenuPanel,
@@ -296,6 +298,15 @@ export function runMainApp() {
     hideRemoteBallTexturesToggle,
     nameplateLayer,
   } = refs;
+
+  const buildCommit = (typeof __APP_COMMIT__ !== 'undefined' && __APP_COMMIT__)
+    ? String(__APP_COMMIT__)
+    : 'dev';
+  const buildLabel = buildCommit.slice(0, 12).toUpperCase();
+  if (mainMenuVersionLabel) {
+    mainMenuVersionLabel.textContent = `Build ${buildLabel}`;
+    mainMenuVersionLabel.title = buildCommit;
+  }
   
   const packSelection = new PackSelectionController({ gameSourceSelect, packStatus });
   const netplayDebugOverlay = createNetplayDebugOverlay(document.body);
