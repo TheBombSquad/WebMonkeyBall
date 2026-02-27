@@ -2290,7 +2290,7 @@ export class GameCore {
   }
 
   getInterpolationAlpha(): number {
-    if (this.paused) {
+    if (this.paused || this.timeoverTimerFrames > 0) {
       return 1;
     }
     if (this.fixedStep <= 0) {
