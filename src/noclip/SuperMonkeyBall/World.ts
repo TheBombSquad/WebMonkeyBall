@@ -1035,6 +1035,8 @@ export class World {
     private ballVisible = false;
     private externalTimeFrames: number | null = null;
     private externalDeltaFrames: number = 0;
+    private externalStageTimerFrames: number | null = null;
+    private externalStageTimeLimitFrames: number | null = null;
     private bananas: BananaRenderState[] | null = null;
     private bananasByGroup: BananaRenderState[][] = [];
     private jamabars: JamabarRenderState[] | null = null;
@@ -1686,6 +1688,18 @@ export class World {
         this.externalDeltaFrames = deltaFrames;
     }
 
+    public setExternalStageClock(
+        stageTimerFrames: number | null | undefined,
+        stageTimeLimitFrames: number | null | undefined
+    ): void {
+        if (stageTimerFrames !== undefined) {
+            this.externalStageTimerFrames = stageTimerFrames;
+        }
+        if (stageTimeLimitFrames !== undefined) {
+            this.externalStageTimeLimitFrames = stageTimeLimitFrames;
+        }
+    }
+
     public setBananaCollectedByAnimGroup(collectedByAnimGroup: boolean[][]): void {
         for (let i = 0; i < this.animGroups.length; i++) {
             const collected = collectedByAnimGroup[i];
@@ -1766,6 +1780,7 @@ export class World {
         } else {
             this.worldState.time.updateDeltaTimeSeconds(viewerInput.deltaTime / 1000);
         }
+        this.worldState.time.setExternalStageClock(this.externalStageTimerFrames, this.externalStageTimeLimitFrames);
         if (this.hasPrevViewFromWorld) {
             mat4.copy(this.prevViewFromWorld, this.lastViewFromWorld);
         } else {

@@ -18,6 +18,8 @@ export class MkbTime {
     private stageTimeFrames: number = 0;
     // Time limit for beating the stage in frames (all stages are either 60 or 30)
     private stageTimeLimitFrames: number = 0;
+    private externalStageTimerFrames: number | null = null;
+    private externalStageTimeLimitFrames: number | null = null;
     // Set when a goal is activated
     private stageTimeFrozen: boolean = false;
 
@@ -29,26 +31,23 @@ export class MkbTime {
         this.deltaTimeFrames = deltaSeconds * MKB_FPS;
         this.animTimeFrames += this.deltaTimeFrames;
         this.animTimeSeconds = this.animTimeFrames / MKB_FPS;
-        if (!this.stageTimeFrozen) {
-            this.stageTimeFrames = clamp(
-                this.stageTimeLimitFrames - this.animTimeFrames + SPIN_IN_FRAMES,
-                0,
-                this.stageTimeLimitFrames
-            );
-        }
+        this.updateStageTimeFrames();
     }
 
     public overrideTimeFrames(timeFrames: number, deltaFrames: number): void {
         this.animTimeFrames = timeFrames;
         this.deltaTimeFrames = deltaFrames;
         this.animTimeSeconds = this.animTimeFrames / MKB_FPS;
-        if (!this.stageTimeFrozen) {
-            this.stageTimeFrames = clamp(
-                this.stageTimeLimitFrames - this.animTimeFrames + SPIN_IN_FRAMES,
-                0,
-                this.stageTimeLimitFrames
-            );
+        this.updateStageTimeFrames();
+    }
+
+    public setExternalStageClock(stageTimerFrames: number | null, stageTimeLimitFrames: number | null): void {
+        this.externalStageTimerFrames = stageTimerFrames;
+        this.externalStageTimeLimitFrames = stageTimeLimitFrames;
+        if (stageTimeLimitFrames !== null) {
+            this.stageTimeLimitFrames = stageTimeLimitFrames;
         }
+        this.updateStageTimeFrames();
     }
 
     public getAnimTimeFrames(): number {
@@ -69,6 +68,25 @@ export class MkbTime {
 
     public freezeStageTime(): void {
         this.stageTimeFrozen = true;
+    }
+
+    private updateStageTimeFrames(): void {
+        if (this.externalStageTimerFrames !== null) {
+            const stageTimeLimitFrames = this.externalStageTimeLimitFrames ?? this.stageTimeLimitFrames;
+            this.stageTimeFrames = clamp(
+                stageTimeLimitFrames - this.externalStageTimerFrames,
+                0,
+                stageTimeLimitFrames
+            );
+            return;
+        }
+        if (!this.stageTimeFrozen) {
+            this.stageTimeFrames = clamp(
+                this.stageTimeLimitFrames - this.animTimeFrames + SPIN_IN_FRAMES,
+                0,
+                this.stageTimeLimitFrames
+            );
+        }
     }
 }
 

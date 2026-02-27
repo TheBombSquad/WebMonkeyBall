@@ -217,6 +217,12 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     const interpolationAlpha = deps.getInterpolationEnabled() ? deps.game.getInterpolationAlpha() : 1;
     const baseTimeFrames = deps.game.getAnimTimeFrames(interpolationAlpha);
     deps.syncState.timeFrames = baseTimeFrames === null ? null : baseTimeFrames;
+    deps.syncState.stageTimerFrames = Number.isFinite(deps.game.stageTimerFrames)
+      ? deps.game.stageTimerFrames
+      : null;
+    deps.syncState.stageTimeLimitFrames = Number.isFinite(deps.game.stageTimeLimitFrames)
+      ? deps.game.stageTimeLimitFrames
+      : null;
     deps.syncState.bananas = deps.game.getBananaRenderState(interpolationAlpha);
     deps.syncState.jamabars = deps.game.getJamabarRenderState(interpolationAlpha);
     deps.syncState.bananaCollectedByAnimGroup = null;

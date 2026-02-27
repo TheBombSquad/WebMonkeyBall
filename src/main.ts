@@ -560,6 +560,8 @@ export function runMainApp() {
   let interpolationEnabled = true;
   const syncState: GameplaySyncState = {
     timeFrames: null,
+    stageTimerFrames: null,
+    stageTimeLimitFrames: null,
     bananas: null,
     jamabars: null,
     bananaCollectedByAnimGroup: null,

@@ -182,6 +182,8 @@ export type StageTiltRenderState = {
 
 export type GameplaySyncState = {
   timeFrames?: number | null;
+  stageTimerFrames?: number | null;
+  stageTimeLimitFrames?: number | null;
   bananaCollectedByAnimGroup?: boolean[][] | null;
   bananas?: BananaRenderState[] | null;
   jamabars?: JamabarRenderState[] | null;
@@ -1025,6 +1027,9 @@ export class Renderer {
         : Math.max(0, state.timeFrames - this.lastExternalTimeFrames);
       this.lastExternalTimeFrames = state.timeFrames;
       this.world.setExternalTimeFrames(state.timeFrames, delta);
+    }
+    if (state.stageTimerFrames !== undefined || state.stageTimeLimitFrames !== undefined) {
+      this.world.setExternalStageClock(state.stageTimerFrames, state.stageTimeLimitFrames);
     }
     if (state.bananas !== undefined) {
       this.world.setBananas(state.bananas ?? null);
