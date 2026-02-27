@@ -10,6 +10,7 @@ import { BALL_HEMI1_DEFAULT_COLOR, BALL_HEMI2_DEFAULT_COLOR } from '../../shared
 const RENDER_FRAME_MS = 1000 / 60;
 const FRAME_STATS_REFRESH_MS = 100;
 const FRAME_STATS_WINDOW_MS = 2000;
+const RENDER_FREEZE_HOLD_MS = 200;
 
 export function resizeCanvasToDisplaySize(canvasElem: HTMLCanvasElement) {
   const dpr = window.devicePixelRatio || 1;
@@ -91,6 +92,83 @@ export function startRenderLoop(deps: FrameLoopDeps) {
   let frameStatsFrameTotalMs = 0;
   let frameStatsLastPresentMs: number | null = null;
   let frameStatsLastUiUpdateMs = 0;
+  const freezeCtx = deps.hudCanvas.getContext('2d');
+  const freezeCaptureCanvas = document.createElement('canvas');
+  const freezeCaptureCtx = freezeCaptureCanvas.getContext('2d');
+  let renderFreezeOverlayActive = false;
+  // Keep rendering frozen briefly after unblocking to hide transition clear-color frames.
+  let renderFreezeHoldUntilMs = 0;
+
+  const captureFrozenFrame = () => {
+    if (!freezeCtx || !freezeCaptureCtx) {
+      renderFreezeOverlayActive = false;
+      return;
+    }
+
+    resizeCanvasToDisplaySize(deps.canvas);
+    resizeCanvasToDisplaySize(deps.hudCanvas);
+
+    const srcWidth = deps.canvas.width;
+    const srcHeight = deps.canvas.height;
+    const dstWidth = deps.hudCanvas.width;
+    const dstHeight = deps.hudCanvas.height;
+    if (srcWidth <= 0 || srcHeight <= 0 || dstWidth <= 0 || dstHeight <= 0) {
+      renderFreezeOverlayActive = false;
+      return;
+    }
+
+    if (freezeCaptureCanvas.width !== dstWidth || freezeCaptureCanvas.height !== dstHeight) {
+      freezeCaptureCanvas.width = dstWidth;
+      freezeCaptureCanvas.height = dstHeight;
+    }
+
+    freezeCaptureCtx.globalCompositeOperation = 'copy';
+    freezeCaptureCtx.drawImage(
+      deps.canvas,
+      0,
+      0,
+      srcWidth,
+      srcHeight,
+      0,
+      0,
+      dstWidth,
+      dstHeight,
+    );
+    freezeCaptureCtx.globalCompositeOperation = 'source-over';
+    freezeCaptureCtx.drawImage(
+      deps.hudCanvas,
+      0,
+      0,
+      dstWidth,
+      dstHeight,
+      0,
+      0,
+      dstWidth,
+      dstHeight,
+    );
+
+    freezeCtx.globalCompositeOperation = 'copy';
+    freezeCtx.drawImage(
+      freezeCaptureCanvas,
+      0,
+      0,
+      dstWidth,
+      dstHeight,
+      0,
+      0,
+      dstWidth,
+      dstHeight,
+    );
+    freezeCtx.globalCompositeOperation = 'source-over';
+    renderFreezeOverlayActive = true;
+  };
+
+  const clearFrozenFrame = () => {
+    if (freezeCtx) {
+      freezeCtx.clearRect(0, 0, deps.hudCanvas.width, deps.hudCanvas.height);
+    }
+    renderFreezeOverlayActive = false;
+  };
 
   const resetFrameStats = () => {
     frameStatsWindowStartMs = 0;
@@ -159,10 +237,32 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     const renderer = deps.getRenderer();
     const gfxDevice = deps.getGfxDevice();
     const swapChain = deps.getSwapChain();
-    if (!renderer || !gfxDevice || !swapChain || !deps.isRenderReady()) {
+    if (!renderer || !gfxDevice || !swapChain) {
       deps.setLastTime(now);
       return;
     }
+
+    let bootstrapFreezeCapture = false;
+    if (deps.game.loadingStage || !deps.isRenderReady()) {
+      renderFreezeHoldUntilMs = now + RENDER_FREEZE_HOLD_MS;
+      if (renderFreezeOverlayActive) {
+        deps.setLastHudTime(now);
+        return;
+      }
+      bootstrapFreezeCapture = true;
+    }
+    if (!bootstrapFreezeCapture && now < renderFreezeHoldUntilMs) {
+      deps.setLastHudTime(now);
+      return;
+    }
+    if (!bootstrapFreezeCapture && renderFreezeOverlayActive) {
+      clearFrozenFrame();
+      deps.setLastHudTime(now);
+    }
+
+    resizeCanvasToDisplaySize(deps.canvas);
+    resizeCanvasToDisplaySize(deps.hudCanvas);
+    deps.hudRenderer.resize(deps.hudCanvas.width, deps.hudCanvas.height);
 
     deps.setLastRenderTime(now);
 
@@ -187,24 +287,7 @@ export function startRenderLoop(deps: FrameLoopDeps) {
       }
     }
 
-    resizeCanvasToDisplaySize(deps.canvas);
-    resizeCanvasToDisplaySize(deps.hudCanvas);
-    deps.hudRenderer.resize(deps.hudCanvas.width, deps.hudCanvas.height);
     const hideGameplayHud = !!deps.game.shouldHideGameplayHud?.();
-
-    if (deps.game.loadingStage) {
-      if (hideGameplayHud) {
-        deps.setLastHudTime(now);
-        deps.hudRenderer.clear();
-        return;
-      }
-      const hudDelta = now - deps.getLastHudTime();
-      deps.setLastHudTime(now);
-      const hudDtFrames = deps.game.paused ? 0 : (hudDelta / 1000) * 60;
-      deps.hudRenderer.update(deps.game, hudDtFrames);
-      deps.hudRenderer.render(deps.game, dtSeconds);
-      return;
-    }
 
     const aspect = deps.canvas.width / deps.canvas.height;
     camera.clipSpaceNearZ = gfxDevice.queryVendorInfo().clipSpaceNearZ;
@@ -286,9 +369,16 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     gfxDevice.endFrame();
     if (hideGameplayHud) {
       deps.hudRenderer.clear();
+      if (bootstrapFreezeCapture) {
+        captureFrozenFrame();
+      }
       return;
     }
     deps.hudRenderer.render(deps.game, dtSeconds);
+    if (bootstrapFreezeCapture) {
+      captureFrozenFrame();
+      deps.setLastHudTime(now);
+    }
   };
 
   requestAnimationFrame(renderFrame);

@@ -1,11 +1,54 @@
 import { Camera } from '../../noclip/Camera.js';
-import { GfxDevice } from '../../noclip/gfx/platform/GfxPlatform.js';
+import {
+  GfxDevice,
+  GfxFormat,
+  GfxTextureUsage,
+  makeTextureDescriptor2D,
+  type GfxTexture,
+} from '../../noclip/gfx/platform/GfxPlatform.js';
 import {
   GfxPlatformWebGL2Config,
   createSwapChainForWebGL2,
 } from '../../noclip/gfx/platform/GfxPlatformWebGL2.js';
 import { AntialiasingMode } from '../../noclip/gfx/helpers/RenderGraphHelpers.js';
 import { Renderer } from '../../noclip/Render.js';
+
+type PrewarmTargetState = {
+  device: GfxDevice | null;
+  texture: GfxTexture | null;
+  width: number;
+  height: number;
+};
+
+// Keep prewarm draws off-screen so stage instantiation cannot flash on the visible canvas.
+const prewarmTargetState: PrewarmTargetState = {
+  device: null,
+  texture: null,
+  width: 0,
+  height: 0,
+};
+
+function getPrewarmTargetTexture(device: GfxDevice, width: number, height: number): GfxTexture {
+  if (
+    prewarmTargetState.texture
+    && prewarmTargetState.device === device
+    && prewarmTargetState.width === width
+    && prewarmTargetState.height === height
+  ) {
+    return prewarmTargetState.texture;
+  }
+  if (prewarmTargetState.texture && prewarmTargetState.device) {
+    prewarmTargetState.device.destroyTexture(prewarmTargetState.texture);
+  }
+  const desc = makeTextureDescriptor2D(GfxFormat.U8_RGBA_RT, width, height, 1);
+  desc.usage = GfxTextureUsage.RenderTarget | GfxTextureUsage.Sampled;
+  const texture = device.createTexture(desc);
+  prewarmTargetState.device = device;
+  prewarmTargetState.texture = texture;
+  prewarmTargetState.width = width;
+  prewarmTargetState.height = height;
+  return texture;
+}
 
 export type ViewerInputState = {
   camera: Camera;
@@ -75,11 +118,19 @@ export function prewarmConfettiRenderer(
     return;
   }
   resizeCanvasToDisplaySize(canvas);
-  viewerInput.backbufferWidth = canvas.width;
-  viewerInput.backbufferHeight = canvas.height;
-  swapChain.configureSwapChain(canvas.width, canvas.height);
+  const renderWidth = Math.max(1, canvas.width);
+  const renderHeight = Math.max(1, canvas.height);
+  viewerInput.backbufferWidth = renderWidth;
+  viewerInput.backbufferHeight = renderHeight;
+  swapChain.configureSwapChain(renderWidth, renderHeight);
+  const prewarmTarget = getPrewarmTargetTexture(gfxDevice, renderWidth, renderHeight);
+  const prevOnscreenTexture = viewerInput.onscreenTexture;
   gfxDevice.beginFrame();
-  viewerInput.onscreenTexture = swapChain.getOnscreenTexture();
-  renderer.prewarmConfetti(gfxDevice, viewerInput);
-  gfxDevice.endFrame();
+  try {
+    viewerInput.onscreenTexture = prewarmTarget;
+    renderer.prewarmConfetti(gfxDevice, viewerInput);
+  } finally {
+    viewerInput.onscreenTexture = prevOnscreenTexture;
+    gfxDevice.endFrame();
+  }
 }
