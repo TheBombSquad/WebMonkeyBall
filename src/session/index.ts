@@ -9,7 +9,8 @@ class SessionRouter implements SessionController {
   private multi = new MultiplayerSession();
 
   private select(game: GameCore): SessionController {
-    if (game.players.length > 1) {
+    const hasMultiplePlayers = game.players.length > 1;
+    if (game.netplaySessionActive || hasMultiplePlayers) {
       return this.multi;
     }
     return this.single;

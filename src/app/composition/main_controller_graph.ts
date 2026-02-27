@@ -253,6 +253,7 @@ const peerSession = new PeerSessionController({
   getNetplayState: () => state.netplayState,
   setNetplayEnabled: (enabled) => {
     state.netplayEnabled = enabled;
+    game.setNetplaySessionActive(enabled);
   },
   getRoomGameMode: (room) => roomMeta.getRoomGameMode(room),
   getRoomGameModeOptions: (room, mode) => gamemodeOptions.getRoomMetaOptions(room?.meta, mode),
@@ -541,6 +542,7 @@ netplayConnectionState = new NetplayConnectionStateController({
   },
   setNetplayEnabled: (enabled) => {
     state.netplayEnabled = enabled;
+    game.setNetplaySessionActive(enabled);
   },
   setNetplayState: (nextState) => {
     state.netplayState = nextState;

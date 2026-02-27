@@ -703,6 +703,7 @@ export function runMainApp() {
       },
       set netplayEnabled(value: boolean) {
         netplayEnabled = value;
+        game.setNetplaySessionActive(value);
       },
       get localProfile() {
         return localProfile;

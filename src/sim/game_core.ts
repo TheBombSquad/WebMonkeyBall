@@ -320,6 +320,7 @@ export class GameCore {
   public noCollidePairs: Set<string>;
   public cameraController: GameplayCamera | null;
   public multiplayerGameMode: MultiplayerGameMode;
+  public netplaySessionActive: boolean;
 
   public tmpPhysBall: {
     pos: Vec3;
@@ -467,6 +468,7 @@ export class GameCore {
     this.noCollidePairs = new Set();
     this.cameraController = null;
     this.multiplayerGameMode = 'standard';
+    this.netplaySessionActive = false;
     this.tmpPhysBall = {
       pos: { x: 0, y: 0, z: 0 },
       prevPos: { x: 0, y: 0, z: 0 },
@@ -581,6 +583,10 @@ export class GameCore {
       return;
     }
     this.multiplayerGameMode = normalized;
+  }
+
+  setNetplaySessionActive(active: boolean) {
+    this.netplaySessionActive = !!active;
   }
 
   setPracticeMode(enabled: boolean) {
