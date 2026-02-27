@@ -561,6 +561,9 @@ export class GameCore {
   }
 
   setGameSource(source: GameSource) {
+    if (this.gameSource === source) {
+      return;
+    }
     this.gameSource = source;
     this.stageBasePath = STAGE_BASE_PATHS[source] ?? STAGE_BASE_PATH;
     this.audio?.stopMusic();
