@@ -4360,6 +4360,9 @@ export class GameCore {
                 // Keep interpolation history in the same portal space to prevent a one-frame camera lerp pop.
                 this.syncCameraPose();
                 this.wormholeScreenOverlayStartPending = true;
+                if (allowAudio) {
+                  void this.audio?.playWormholeTeleport(this.gameSource);
+                }
               }
               ball.wormholeTransform = null;
             }

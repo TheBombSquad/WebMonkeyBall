@@ -726,6 +726,7 @@ export class Renderer {
 
     const template = this.renderHelper.pushTemplateRenderInst();
     fillSceneParamsDataOnTemplate(template, viewerInput, 0, this.world.getAnimTimeFrames());
+    const skipWormholeSurfaceId = this.activeWormholeSourceId ?? undefined;
 
     const renderCtx: RenderContext = {
       device,
@@ -733,6 +734,7 @@ export class Renderer {
       viewerInput,
       opaqueInstList,
       translucentInstList,
+      skipWormholeSurfaceId,
       skipStageGeometry: this.sceneOverrides?.skipStageGeometry,
       skipBackground: this.sceneOverrides?.skipBackground,
     };

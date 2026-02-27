@@ -1190,7 +1190,7 @@ export class World {
         })
     );
     private wormholeSurfaceMegaState = makeMegaState(
-        setAttachmentStateSimple({ depthWrite: false, depthCompare: reverseDepthForCompareMode(GfxCompareMode.LessEqual), cullMode: GfxCullMode.None }, {
+        setAttachmentStateSimple({ depthWrite: true, depthCompare: reverseDepthForCompareMode(GfxCompareMode.LessEqual), cullMode: GfxCullMode.None }, {
             blendMode: GfxBlendMode.Add,
             blendSrcFactor: GfxBlendFactor.SrcAlpha,
             blendDstFactor: GfxBlendFactor.OneMinusSrcAlpha,

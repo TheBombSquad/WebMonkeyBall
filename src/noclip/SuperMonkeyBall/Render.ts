@@ -32,6 +32,7 @@ export type RenderContext = {
   clipPlanePoint?: vec3;
   clipPlaneNormal?: vec3;
   skipWormholeSurfaces?: boolean;
+  skipWormholeSurfaceId?: number;
   skipWormholeIds?: Set<number>;
   wormholeCapture?: boolean;
   skipStageGeometry?: boolean;

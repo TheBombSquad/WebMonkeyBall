@@ -944,7 +944,9 @@ class Wormhole {
             rp.megaStateFlags = disableDepthWriteForFade ? { depthWrite: false } : undefined;
             this.model?.prepareToRender(ctx, rp);
         }
-        if (!ctx.skipWormholeSurfaces && this.surfaceModel) {
+        const skipSurfaceForWormholeId =
+            wormholeId !== undefined && ctx.skipWormholeSurfaceId === wormholeId;
+        if (!skipSurfaceForWormholeId && !ctx.skipWormholeSurfaces && this.surfaceModel) {
             mat4.copy(rp.viewFromModel, base);
             rp.alpha = nearAlpha;
             rp.megaStateFlags = disableDepthWriteForFade ? { depthWrite: false } : undefined;

@@ -22,6 +22,7 @@ const TIME_OVER_ANNOUNCER_NAME = 'an_timeover';
 const BANANA_SFX_NAME = 'banana_collect';
 const BANANA_BUNCH_SFX_NAME = 'banana_bunch_collect';
 const FALLOUT_SFX_NAME = 'fallout';
+const WORMHOLE_TELEPORT_SFX_NAME = 'wormhole_teleport';
 
 const SMB1_BG_MUSIC: Record<string, string> = {
   bg_jun: 'jungle',
@@ -183,6 +184,10 @@ export class AudioManager {
 
   async playFallout(gameSource: GameSource) {
     await this.playSfx(FALLOUT_SFX_NAME, gameSource, 0.9);
+  }
+
+  async playWormholeTeleport(gameSource: GameSource) {
+    await this.playSfx(WORMHOLE_TELEPORT_SFX_NAME, gameSource, 0.9);
   }
 
   async playBumper(gameSource: GameSource) {
