@@ -221,24 +221,18 @@ function applyObliqueClipNearPlane(camera: Camera, planePointWorld: vec3, planeN
   }
   vec3.normalize(scratchObliquePlaneNormalView, scratchObliquePlaneNormalView);
 
-  // Keep camera-forward geometry (negative view-space Z) on the positive side.
   let planeX = scratchObliquePlaneNormalView[0];
   let planeY = scratchObliquePlaneNormalView[1];
   let planeZ = scratchObliquePlaneNormalView[2];
   let planeW = -vec3.dot(scratchObliquePlaneNormalView, scratchObliquePlanePointView);
-  const forwardDist = -planeZ + planeW;
-  if (forwardDist < 0.0) {
-    planeX = -planeX;
-    planeY = -planeY;
-    planeZ = -planeZ;
-    planeW = -planeW;
-  }
 
   if (!mat4.invert(scratchObliqueProjectionInverse, camera.projectionMatrix)) {
     return false;
   }
 
-  vec4.set(scratchObliqueCorner, signNoZero(planeX), signNoZero(planeY), 1.0, 1.0);
+  // Reversed depth maps camera-near depth to the opposite clip boundary, so target that boundary here.
+  const oppositeBoundaryZ = camera.clipSpaceNearZ === GfxClipSpaceNearZ.NegativeOne ? -1.0 : 0.0;
+  vec4.set(scratchObliqueCorner, signNoZero(planeX), signNoZero(planeY), oppositeBoundaryZ, 1.0);
   vec4.transformMat4(scratchObliqueQ, scratchObliqueCorner, scratchObliqueProjectionInverse);
   const planeDotQ =
     planeX * scratchObliqueQ[0] +
@@ -255,16 +249,16 @@ function applyObliqueClipNearPlane(camera: Camera, planePointWorld: vec3, planeN
     const clipY = planeY * scale;
     const clipZ = planeZ * scale;
     const clipW = planeW * scale;
-    camera.projectionMatrix[2] = clipX - camera.projectionMatrix[3];
-    camera.projectionMatrix[6] = clipY - camera.projectionMatrix[7];
-    camera.projectionMatrix[10] = clipZ - camera.projectionMatrix[11];
-    camera.projectionMatrix[14] = clipW - camera.projectionMatrix[15];
+    camera.projectionMatrix[2] = camera.projectionMatrix[3] - clipX;
+    camera.projectionMatrix[6] = camera.projectionMatrix[7] - clipY;
+    camera.projectionMatrix[10] = camera.projectionMatrix[11] - clipZ;
+    camera.projectionMatrix[14] = camera.projectionMatrix[15] - clipW;
   } else {
     const scale = 1.0 / planeDotQ;
-    camera.projectionMatrix[2] = planeX * scale;
-    camera.projectionMatrix[6] = planeY * scale;
-    camera.projectionMatrix[10] = planeZ * scale;
-    camera.projectionMatrix[14] = planeW * scale;
+    camera.projectionMatrix[2] = camera.projectionMatrix[3] - planeX * scale;
+    camera.projectionMatrix[6] = camera.projectionMatrix[7] - planeY * scale;
+    camera.projectionMatrix[10] = camera.projectionMatrix[11] - planeZ * scale;
+    camera.projectionMatrix[14] = camera.projectionMatrix[15] - planeW * scale;
   }
 
   camera.worldMatrixUpdated();

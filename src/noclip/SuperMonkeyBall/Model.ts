@@ -121,7 +121,7 @@ export class ModelInst implements ModelInterface {
         if (clipPlaneNormal && clipPlanePoint) {
             vec3.sub(scratchVec3b, centerWorldSpace, clipPlanePoint);
             const dist = vec3.dot(scratchVec3b, clipPlaneNormal);
-            if (dist < 0.0) {
+            if (dist < -(this.modelData.boundSphereRadius * maxScale)) {
                 return;
             }
         }
@@ -162,7 +162,7 @@ export class ModelInst implements ModelInterface {
         if (clipPlaneNormal && clipPlanePoint) {
             vec3.sub(scratchVec3b, centerWorldSpace, clipPlanePoint);
             const dist = vec3.dot(scratchVec3b, clipPlaneNormal);
-            if (dist < 0.0) {
+            if (dist < -(this.modelData.boundSphereRadius * maxScale)) {
                 return;
             }
         }

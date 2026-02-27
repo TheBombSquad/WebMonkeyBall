@@ -2193,7 +2193,7 @@ export class World {
             return false;
         }
         transformVec3Mat4w1(outPoint, worldFromModel, WORMHOLE_OFFSET_LOCAL);
-        // Clip against the exit portal plane, keeping the side in front of the portal.
+        // Clip against the exit portal plane, using the same side convention as legacy wormhole capture culling.
         transformVec3Mat4w0(outNormal, worldFromModel, WORMHOLE_FORWARD_SOURCE_LOCAL);
         if (vec3.squaredLength(outNormal) <= 1e-8) {
             return false;
