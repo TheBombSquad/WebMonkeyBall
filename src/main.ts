@@ -556,6 +556,7 @@ export function runMainApp() {
   let lastRenderTime = lastTime;
   let lastHudTime = lastTime;
   let renderReady = false;
+  let renderDrawEnabled = true;
   let frameStatsEnabled = false;
   let activeGameSource: GameSource = GAME_SOURCES.SMB1;
   let levelSelectSingleplayerMode: 'practice' | null = null;
@@ -1966,13 +1967,21 @@ export function runMainApp() {
   });
 
   window.addEventListener('keydown', (event) => {
-    if (event.key !== 'F8' || event.repeat) {
+    if (event.repeat) {
       return;
     }
-    event.preventDefault();
-    frameStatsEnabled = !frameStatsEnabled;
-    if (!frameStatsEnabled) {
-      frameStatsOverlay.hide();
+    if (event.key === 'F8') {
+      event.preventDefault();
+      frameStatsEnabled = !frameStatsEnabled;
+      if (!frameStatsEnabled) {
+        frameStatsOverlay.hide();
+      }
+      return;
+    }
+    if (event.key === 'F9') {
+      event.preventDefault();
+      renderDrawEnabled = !renderDrawEnabled;
+      console.info(`Render draw ${renderDrawEnabled ? 'enabled' : 'disabled'}`);
     }
   });
 
@@ -2287,6 +2296,7 @@ export function runMainApp() {
     getGfxDevice: () => gfxDevice,
     getSwapChain: () => swapChain,
     isRenderReady: () => renderReady,
+    isRenderDrawEnabled: () => renderDrawEnabled,
     isNetplayEnabled: () => netplayEnabled,
     getLocalPlayerId: () => game.localPlayerId,
     getProfileForPlayer: (playerId) => {

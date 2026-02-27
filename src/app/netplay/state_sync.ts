@@ -123,6 +123,10 @@ export class NetplayStateSyncController {
       debugLastMismatchExpectedHash: null,
       debugLastMismatchAtMs: null,
       debugLastMismatchParts: null,
+      lastMismatchSignatureFrame: null,
+      lastMismatchSignatureExpectedHash: null,
+      lastMismatchSignatureLocalHash: null,
+      lastMismatchSignatureAtMs: null,
       debugSnapshotRequestsMismatch: 0,
       debugSnapshotRequestsLag: 0,
       debugLastSnapshotRequestReason: null,
@@ -188,6 +192,10 @@ export class NetplayStateSyncController {
     state.debugLastMismatchExpectedHash = null;
     state.debugLastMismatchAtMs = null;
     state.debugLastMismatchParts = null;
+    state.lastMismatchSignatureFrame = null;
+    state.lastMismatchSignatureExpectedHash = null;
+    state.lastMismatchSignatureLocalHash = null;
+    state.lastMismatchSignatureAtMs = null;
     state.debugSnapshotRequestsMismatch = 0;
     state.debugSnapshotRequestsLag = 0;
     state.debugLastSnapshotRequestReason = null;

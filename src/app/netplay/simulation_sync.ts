@@ -172,6 +172,9 @@ export class NetplaySimulationSyncController {
     }
     const targetFrame = state?.session.getFrame() ?? this.deps.game.simTick;
     const snapshotFrame = pendingSnapshot.frame;
+    const prevContiguous = state && Number.isFinite(state.highestContiguousHostFrame)
+      ? Math.floor(state.highestContiguousHostFrame)
+      : -1;
     this.deps.game.loadRollbackState(pendingSnapshot.state);
     this.deps.resetNetplaySession();
     if (state) {
@@ -179,9 +182,22 @@ export class NetplaySimulationSyncController {
       state.awaitingSnapshot = false;
       state.hashHistory.clear();
       state.hashBreakdownHistory?.clear?.();
-      state.receivedHostFrames?.clear?.();
-      state.pendingHostFrameReceipts?.clear?.();
-      state.highestContiguousHostFrame = Math.max(-1, snapshotFrame | 0);
+      const contiguous = Math.max(prevContiguous, Math.max(-1, snapshotFrame | 0));
+      for (const key of state.receivedHostFrames?.keys?.() ?? []) {
+        if (key <= contiguous) {
+          state.receivedHostFrames.delete(key);
+        }
+      }
+      for (const key of state.pendingHostFrameReceipts?.keys?.() ?? []) {
+        if (key <= contiguous) {
+          state.pendingHostFrameReceipts.delete(key);
+        }
+      }
+      state.highestContiguousHostFrame = contiguous;
+      state.lastMismatchSignatureFrame = null;
+      state.lastMismatchSignatureExpectedHash = null;
+      state.lastMismatchSignatureLocalHash = null;
+      state.lastMismatchSignatureAtMs = null;
       for (const key of state.expectedHashes.keys()) {
         if (key <= snapshotFrame) {
           state.expectedHashes.delete(key);

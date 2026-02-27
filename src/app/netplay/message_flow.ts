@@ -98,16 +98,28 @@ export class NetplayMessageFlowController {
   }
 
   private recordHashMismatch(state: any, frame: number, expectedHash: number, localHash: number, nowMs: number) {
+    const normalizedExpected = expectedHash >>> 0;
+    const normalizedLocal = localHash >>> 0;
+    const sameSignature = state.lastMismatchSignatureFrame === frame
+      && (Number(state.lastMismatchSignatureExpectedHash) >>> 0) === normalizedExpected
+      && (Number(state.lastMismatchSignatureLocalHash) >>> 0) === normalizedLocal;
+    if (sameSignature) {
+      return false;
+    }
+    state.lastMismatchSignatureFrame = frame;
+    state.lastMismatchSignatureExpectedHash = normalizedExpected;
+    state.lastMismatchSignatureLocalHash = normalizedLocal;
+    state.lastMismatchSignatureAtMs = nowMs;
     state.debugHashMismatchCount = (state.debugHashMismatchCount ?? 0) + 1;
     state.debugLastMismatchFrame = frame;
-    state.debugLastMismatchExpectedHash = expectedHash >>> 0;
-    state.debugLastMismatchLocalHash = localHash >>> 0;
+    state.debugLastMismatchExpectedHash = normalizedExpected;
+    state.debugLastMismatchLocalHash = normalizedLocal;
     state.debugLastMismatchAtMs = nowMs;
     const localParts = state.hashBreakdownHistory?.get?.(frame) ?? null;
     const expectedParts = state.expectedHashProbeByFrame?.get?.(frame) ?? null;
     if (!localParts || !expectedParts) {
       state.debugLastMismatchParts = null;
-      return;
+      return true;
     }
     state.debugLastMismatchParts = {
       ballsLocal: localParts.ballsHash >>> 0,
@@ -119,6 +131,7 @@ export class NetplayMessageFlowController {
       detLocal: localParts.detHash >>> 0,
       detHost: expectedParts.detHash >>> 0,
     };
+    return true;
   }
 
   private markHostFrameReceived(state: any, frame: number) {
@@ -179,8 +192,10 @@ export class NetplayMessageFlowController {
       if (localHash === undefined || localHash === expected) {
         continue;
       }
-      this.recordHashMismatch(state, frame, expected, localHash, nowMs);
-      this.deps.requestSnapshot('mismatch', frame);
+      state.expectedHashes.delete(frame);
+      if (this.recordHashMismatch(state, frame, expected, localHash, nowMs)) {
+        this.deps.requestSnapshot('mismatch', frame);
+      }
       return;
     }
   }
@@ -454,6 +469,10 @@ export class NetplayMessageFlowController {
         currentState.hashHistory.clear();
         currentState.hashBreakdownHistory?.clear?.();
         currentState.expectedHashProbeByFrame?.clear?.();
+        currentState.lastMismatchSignatureFrame = null;
+        currentState.lastMismatchSignatureExpectedHash = null;
+        currentState.lastMismatchSignatureLocalHash = null;
+        currentState.lastMismatchSignatureAtMs = null;
         currentState.receivedHostFrames?.clear?.();
         currentState.pendingHostFrameReceipts?.clear?.();
         currentState.highestContiguousHostFrame = this.getContiguousBaseFrame(currentState);

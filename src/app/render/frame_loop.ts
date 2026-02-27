@@ -45,6 +45,7 @@ type FrameLoopDeps = {
   getGfxDevice: () => GfxDevice | null;
   getSwapChain: () => ReturnType<typeof createSwapChainForWebGL2> | null;
   isRenderReady: () => boolean;
+  isRenderDrawEnabled: () => boolean;
   isNetplayEnabled: () => boolean;
   getLocalPlayerId: () => number;
   getProfileForPlayer: (playerId: number) => any;
@@ -97,6 +98,7 @@ export function startRenderLoop(deps: FrameLoopDeps) {
   const freezeCaptureCanvas = document.createElement('canvas');
   const freezeCaptureCtx = freezeCaptureCanvas.getContext('2d');
   let renderFreezeOverlayActive = false;
+  let renderDrawEnabledPrev = true;
   // Keep rendering frozen briefly after unblocking to hide transition clear-color frames.
   let renderFreezeHoldUntilMs = 0;
   let renderFreezePendingReleaseEvent = false;
@@ -243,6 +245,16 @@ export function startRenderLoop(deps: FrameLoopDeps) {
       renderFreezePendingReleaseEvent = true;
     }
     deps.updateNetplayDebugOverlay(now);
+    const renderDrawEnabled = deps.isRenderDrawEnabled();
+    if (!renderDrawEnabled) {
+      if (renderDrawEnabledPrev) {
+        clearFrozenFrame();
+        deps.hudRenderer.clear();
+      }
+      renderDrawEnabledPrev = false;
+      return;
+    }
+    renderDrawEnabledPrev = true;
 
     const shouldRender = deps.getInterpolationEnabled() || (now - deps.getLastRenderTime()) >= RENDER_FRAME_MS;
     if (!shouldRender) {
