@@ -92,7 +92,7 @@ export function createMainControllerGraph(args: any) {
     prewarmConfettiRenderer,
     applyGameCamera,
     updateMobileMenuButtonVisibility,
-    maybeStartSmb2LikeStageFade,
+    queueSmb2LikeStageFadeAfterRenderFreeze,
     loadRenderStage,
     loadRenderStageSmb2,
     prefetchPackSlice,
@@ -875,7 +875,7 @@ stageFlow = new StageFlowController({
   applyGameCamera,
   updateMobileMenuButtonVisibility,
   updateIngameChatVisibility,
-  maybeStartSmb2LikeStageFade,
+  queueSmb2LikeStageFadeAfterRenderFreeze,
   markStageReady: (stageId) => {
     netplaySync?.markStageReady(stageId);
   },

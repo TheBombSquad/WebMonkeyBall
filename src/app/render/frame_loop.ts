@@ -58,6 +58,7 @@ type FrameLoopDeps = {
   applyGameCamera: (interpolationAlpha: number) => void;
   updateNameplates: (interpolationAlpha: number) => void;
   onBeforeTick: (now: number) => void;
+  onRenderFreezeReleased: () => void;
 };
 
 function applyBallAppearanceFromProfile(
@@ -98,6 +99,7 @@ export function startRenderLoop(deps: FrameLoopDeps) {
   let renderFreezeOverlayActive = false;
   // Keep rendering frozen briefly after unblocking to hide transition clear-color frames.
   let renderFreezeHoldUntilMs = 0;
+  let renderFreezePendingReleaseEvent = false;
 
   const captureFrozenFrame = () => {
     if (!freezeCtx || !freezeCaptureCtx) {
@@ -215,17 +217,30 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     const dtSeconds = dt / 1000;
     deps.sendLobbyHeartbeat(now);
 
-    if (!deps.game.paused) {
+    let stageRenderBlocked = deps.game.loadingStage || !deps.isRenderReady();
+    const freezeForTickPre = stageRenderBlocked || now < renderFreezeHoldUntilMs || renderFreezeOverlayActive;
+
+    if (!deps.game.paused && !freezeForTickPre) {
       viewerInput.deltaTime = dt;
       viewerInput.time += dt;
     } else {
       viewerInput.deltaTime = 0;
     }
 
-    if (deps.isNetplayEnabled()) {
-      deps.netplayTick(dtSeconds);
-    } else {
-      deps.game.update(dtSeconds);
+    if (!freezeForTickPre) {
+      if (deps.isNetplayEnabled()) {
+        deps.netplayTick(dtSeconds);
+      } else {
+        deps.game.update(dtSeconds);
+      }
+    }
+    stageRenderBlocked = deps.game.loadingStage || !deps.isRenderReady();
+    if (stageRenderBlocked) {
+      renderFreezeHoldUntilMs = now + RENDER_FREEZE_HOLD_MS;
+    }
+    const freezeForTick = stageRenderBlocked || now < renderFreezeHoldUntilMs || renderFreezeOverlayActive;
+    if (freezeForTick) {
+      renderFreezePendingReleaseEvent = true;
     }
     deps.updateNetplayDebugOverlay(now);
 
@@ -243,8 +258,7 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     }
 
     let bootstrapFreezeCapture = false;
-    if (deps.game.loadingStage || !deps.isRenderReady()) {
-      renderFreezeHoldUntilMs = now + RENDER_FREEZE_HOLD_MS;
+    if (stageRenderBlocked) {
       if (renderFreezeOverlayActive) {
         deps.setLastHudTime(now);
         return;
@@ -258,6 +272,10 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     if (!bootstrapFreezeCapture && renderFreezeOverlayActive) {
       clearFrozenFrame();
       deps.setLastHudTime(now);
+    }
+    if (!bootstrapFreezeCapture && renderFreezePendingReleaseEvent) {
+      renderFreezePendingReleaseEvent = false;
+      deps.onRenderFreezeReleased();
     }
 
     resizeCanvasToDisplaySize(deps.canvas);

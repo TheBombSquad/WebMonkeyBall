@@ -373,6 +373,7 @@ export function runMainApp() {
   });
   
   let currentSmb2LikeMode: 'story' | 'challenge' | null = null;
+  let smb2LikeStageFadePendingAfterRenderFreeze = false;
   
   let overlayController: ReturnType<typeof createOverlayController> | null = null;
   
@@ -934,7 +935,9 @@ export function runMainApp() {
       prewarmConfettiRenderer,
       applyGameCamera,
       updateMobileMenuButtonVisibility,
-      maybeStartSmb2LikeStageFade,
+      queueSmb2LikeStageFadeAfterRenderFreeze: () => {
+        smb2LikeStageFadePendingAfterRenderFreeze = true;
+      },
       loadRenderStage,
       loadRenderStageSmb2,
       prefetchPackSlice,
@@ -2250,6 +2253,13 @@ export function runMainApp() {
         replayController.exitReplayPlaybackToMenu();
       }
       singleplayerPauseController?.tick(now);
+    },
+    onRenderFreezeReleased: () => {
+      if (!smb2LikeStageFadePendingAfterRenderFreeze) {
+        return;
+      }
+      smb2LikeStageFadePendingAfterRenderFreeze = false;
+      maybeStartSmb2LikeStageFade();
     },
   });
 }

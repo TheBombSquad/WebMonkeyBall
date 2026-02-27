@@ -18,7 +18,7 @@ type StageFlowDeps = {
   applyGameCamera: () => void;
   updateMobileMenuButtonVisibility: () => void;
   updateIngameChatVisibility: () => void;
-  maybeStartSmb2LikeStageFade: () => void;
+  queueSmb2LikeStageFadeAfterRenderFreeze: () => void;
   markStageReady: (stageId: number) => void;
   tryApplyPendingSnapshot: (stageId: number) => void;
   getLeaderboardSession: () => any | null;
@@ -140,7 +140,7 @@ export class StageFlowController {
     this.deps.setLastTime(performance.now());
     this.deps.updateMobileMenuButtonVisibility();
     this.deps.updateIngameChatVisibility();
-    this.deps.maybeStartSmb2LikeStageFade();
+    this.deps.queueSmb2LikeStageFadeAfterRenderFreeze();
     this.deps.markStageReady(stageId);
     this.deps.tryApplyPendingSnapshot(stageId);
     const localPlayer = this.deps.game.getLocalPlayer();
