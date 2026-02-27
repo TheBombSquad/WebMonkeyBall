@@ -8,6 +8,10 @@ const tmpVec = { x: 0, y: 0, z: 0 };
 const tmpVec2 = { x: 0, y: 0, z: 0 };
 const wormholeVec = vec3.create();
 const wormholeMat3 = mat3.create();
+const wormholeMtx = new Float32Array(12);
+const wormholeEulerY = { value: 0 };
+const wormholeEulerX = { value: 0 };
+const wormholeEulerZ = { value: 0 };
 const SMB2_FLY_IN_MIN_RADIUS = 31.25;
 const SMB2_SPIN_IN_PRESETS = [
   { zScale: 0.8, yScale: 0.4, yawOffset: -0xc000 },
@@ -47,6 +51,22 @@ function applyMat3ToVec(out, mtx) {
   out.x = wormholeVec[0];
   out.y = wormholeVec[1];
   out.z = wormholeVec[2];
+}
+
+function copyMat4ToMtxA(out, mtx) {
+  // gl-matrix mat4 is column-major; MatrixStack mtxA stores rows as [r0, tx, r1, ty, r2, tz].
+  out[0] = mtx[0];
+  out[1] = mtx[4];
+  out[2] = mtx[8];
+  out[3] = mtx[12];
+  out[4] = mtx[1];
+  out[5] = mtx[5];
+  out[6] = mtx[9];
+  out[7] = mtx[13];
+  out[8] = mtx[2];
+  out[9] = mtx[6];
+  out[10] = mtx[10];
+  out[11] = mtx[14];
 }
 
 function cameraFaceDirection(camera, lookDir) {
@@ -360,10 +380,15 @@ export class GameplayCamera {
     applyMat4ToPoint(this.unk74, wormholeTf);
     applyMat3ToVec(this.eyeVel, wormholeMat3);
     applyMat3ToVec(this.lookAtVel, wormholeMat3);
-    tmpVec.x = this.lookAt.x - this.eye.x;
-    tmpVec.y = this.lookAt.y - this.eye.y;
-    tmpVec.z = this.lookAt.z - this.eye.z;
-    cameraFaceDirection(this, tmpVec);
+    copyMat4ToMtxA(wormholeMtx, wormholeTf);
+    stack.fromMtx(wormholeMtx);
+    stack.rotateY(this.rotY);
+    stack.rotateX(this.rotX);
+    stack.rotateZ(this.rotZ);
+    stack.toEulerYXZ(wormholeEulerY, wormholeEulerX, wormholeEulerZ);
+    this.rotY = toS16(wormholeEulerY.value);
+    this.rotX = toS16(wormholeEulerX.value);
+    this.rotZ = toS16(wormholeEulerZ.value);
   }
 
   initForStage(ball, startRotY = 0, stageRuntime = null) {

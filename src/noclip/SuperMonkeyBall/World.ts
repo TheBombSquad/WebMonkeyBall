@@ -2528,6 +2528,13 @@ export class World {
         return this.worldState.time.getAnimTimeFrames();
     }
 
+    public getWormholeScreenOverlayWarpTextureMapping(): GXTextureMapping | null {
+        if (!this.mirrorGradMapping.gfxTexture || !this.mirrorGradMapping.gfxSampler) {
+            return null;
+        }
+        return this.mirrorGradMapping;
+    }
+
     public setMaterialHacks(hacks: GX_Material.GXMaterialHacks): void {
         this.worldState.modelCache.setMaterialHacks(hacks);
     }

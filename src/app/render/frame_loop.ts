@@ -252,6 +252,8 @@ export function startRenderLoop(deps: FrameLoopDeps) {
     deps.syncState.modPrimitives = deps.game.getModRenderPrimitiveState(interpolationAlpha);
     deps.syncState.switches = deps.game.getSwitchRenderState(interpolationAlpha);
     deps.syncState.stageTilt = deps.game.getStageTiltRenderState(interpolationAlpha);
+    deps.syncState.wormholeScreenOverlayTimer = deps.game.wormholeScreenOverlayTimer ?? 0;
+    deps.syncState.wormholeScreenOverlayIntensity = deps.game.wormholeScreenOverlayIntensity ?? 0;
     renderer.syncGameplayState(deps.syncState);
 
     deps.applyGameCamera(interpolationAlpha);

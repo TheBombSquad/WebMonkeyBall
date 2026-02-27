@@ -9,15 +9,25 @@ import {
   opaqueBlackFullClearRenderPassDescriptor,
 } from './gfx/helpers/RenderGraphHelpers.js';
 import {
+  GfxBlendFactor,
+  GfxBlendMode,
+  GfxChannelWriteMask,
   GfxClipSpaceNearZ,
+  GfxCompareMode,
   GfxDevice,
   GfxFormat,
+  type GfxProgram,
 } from './gfx/platform/GfxPlatform.js';
 import { GfxrAttachmentSlot, GfxrRenderTargetDescription } from './gfx/render/GfxRenderGraph.js';
+import type { GfxRenderCache } from './gfx/render/GfxRenderCache.js';
 import {
   GfxRenderInstList,
   GfxRenderInstManager,
 } from './gfx/render/GfxRenderInstManager.js';
+import { makeMegaState, setAttachmentStateSimple } from './gfx/helpers/GfxMegaStateDescriptorHelpers.js';
+import { GfxShaderLibrary } from './gfx/helpers/GfxShaderLibrary.js';
+import { preprocessProgram_GLSL } from './gfx/shaderc/GfxShaderCompiler.js';
+import { fillVec4 } from './gfx/helpers/UniformBufferHelpers.js';
 import {
   GXRenderHelperGfx,
   fillSceneParamsDataOnTemplate,
@@ -183,6 +193,8 @@ export type GameplaySyncState = {
   modPrimitives?: ModRenderPrimitiveState[] | null;
   switches?: SwitchRenderState[] | null;
   stageTilt?: StageTiltRenderState | null;
+  wormholeScreenOverlayTimer?: number;
+  wormholeScreenOverlayIntensity?: number;
 };
 
 const scratchMirrorPlaneNormal = vec3.create();
@@ -207,6 +219,48 @@ const scratchObliqueQ = vec4.create();
 const mirrorFlipX = mat4.fromScaling(mat4.create(), [-1, 1, 1]);
 const WAVY_MIRROR_ALPHA = 0x60 / 0xff;
 const OBLIQUE_CLIP_EPSILON = 1e-8;
+const WORMHOLE_SCREEN_OVERLAY_UBO_WORDS = 8;
+const WORMHOLE_SCREEN_OVERLAY_MAIN_LATE_BINDING = 'wormhole-screen-main';
+const WORMHOLE_SCREEN_OVERLAY_TINT_R = 0xdf / 0xff;
+const WORMHOLE_SCREEN_OVERLAY_TINT_G = 0xe1 / 0xff;
+const WORMHOLE_SCREEN_OVERLAY_TINT_B = 0xef / 0xff;
+
+function createWormholeScreenOverlayProgram(renderCache: GfxRenderCache): GfxProgram {
+  const vert = GfxShaderLibrary.fullscreenVS;
+
+  const frag = `
+precision highp float;
+
+layout(std140) uniform ub_WormholeScreenOverlayParams {
+    vec4 u_Params0;
+    vec4 u_TintColor;
+};
+
+uniform sampler2D u_MainTexture;
+uniform sampler2D u_WarpTexture;
+
+in vec2 v_TexCoord;
+
+out vec4 o_Color;
+
+void main() {
+    float intensity = u_Params0.x;
+    float timerScale = u_Params0.y;
+    float alphaBase = u_Params0.z;
+    vec2 uvMain = mix(vec2(intensity), vec2(1.0 - intensity), v_TexCoord);
+    vec2 uvWarp = mix(vec2(-timerScale), vec2(1.0 + timerScale), v_TexCoord);
+    vec3 color = texture(u_MainTexture, uvMain).rgb * u_TintColor.rgb;
+    float alpha = alphaBase * texture(u_WarpTexture, uvWarp).a;
+    if (alpha <= 0.0) {
+        discard;
+    }
+    o_Color = vec4(color, alpha);
+}
+`;
+
+  const program = preprocessProgram_GLSL(renderCache.device.queryVendorInfo(), vert, frag);
+  return renderCache.createProgramSimple(program);
+}
 
 function signNoZero(v: number): number {
   return v >= 0 ? 1 : -1;
@@ -341,6 +395,7 @@ export class Renderer {
   private wormholeCaptureOpaqueInstList = new GfxRenderInstList();
   private wormholeCaptureTranslucentInstList = new GfxRenderInstList();
   private wormholeOverlayInstList = new GfxRenderInstList();
+  private wormholeScreenOverlayInstList = new GfxRenderInstList();
   private mirrorCamera = new Camera();
   private wormholeCamera = new Camera();
   private mirrorMode: MirrorMode = 'none';
@@ -351,12 +406,29 @@ export class Renderer {
   private wormholeCaptureHeight = 0;
   private activeWormholeSourceId: number | null = null;
   private activeWormholeDestId: number | null = null;
+  private wormholeScreenOverlayProgram: GfxProgram;
+  private wormholeScreenOverlayMegaState = makeMegaState(
+    setAttachmentStateSimple(
+      { depthCompare: GfxCompareMode.Always, depthWrite: false },
+      {
+        blendMode: GfxBlendMode.Add,
+        blendSrcFactor: GfxBlendFactor.SrcAlpha,
+        blendDstFactor: GfxBlendFactor.OneMinusSrcAlpha,
+        channelWriteMask: GfxChannelWriteMask.RGBA,
+      }
+    )
+  );
+  private hasWormholeScreenOverlay = false;
+  private wormholeScreenOverlaySampler: any = null;
+  private wormholeScreenOverlayTimer = 0;
+  private wormholeScreenOverlayIntensity = 0;
   private lastExternalTimeFrames: number | null = null;
   private sceneOverrides: SceneRenderOverrides | null = null;
 
   constructor(device: GfxDevice, private stageData: StageData) {
     this.renderHelper = new GXRenderHelperGfx(device);
     this.world = new World(device, this.renderHelper.renderCache, stageData);
+    this.wormholeScreenOverlayProgram = createWormholeScreenOverlayProgram(this.renderHelper.renderCache);
   }
 
   private prepareToRender(
@@ -373,6 +445,7 @@ export class Renderer {
     this.wormholeCaptureOpaqueInstList.reset();
     this.wormholeCaptureTranslucentInstList.reset();
     this.wormholeOverlayInstList.reset();
+    this.wormholeScreenOverlayInstList.reset();
     this.world.update(viewerInput);
 
     viewerInput.camera.setClipPlanes(0.1);
@@ -385,6 +458,8 @@ export class Renderer {
     this.wormholeCaptureHeight = 0;
     this.activeWormholeSourceId = null;
     this.activeWormholeDestId = null;
+    this.hasWormholeScreenOverlay = false;
+    this.wormholeScreenOverlaySampler = null;
 
     const mirrorPlaneMatrix = scratchMirrorReflection;
     if (this.mirrorMode !== 'none') {
@@ -630,6 +705,38 @@ export class Renderer {
       skipBackground: this.sceneOverrides?.skipBackground,
     };
     this.world.prepareToRender(renderCtx);
+    if (this.wormholeScreenOverlayTimer > 0) {
+      const warpTextureMapping = this.world.getWormholeScreenOverlayWarpTextureMapping();
+      if (warpTextureMapping?.gfxTexture && warpTextureMapping.gfxSampler) {
+        const overlayTimer = Math.max(0, this.wormholeScreenOverlayTimer);
+        const overlayAlphaBase = Math.min(overlayTimer, 0xff) / 0xff;
+        const overlayIntensity = Number.isFinite(this.wormholeScreenOverlayIntensity)
+          ? this.wormholeScreenOverlayIntensity
+          : 0;
+        const overlayTimerScale = overlayAlphaBase * 0.5;
+        const renderInst = this.renderHelper.renderInstManager.newRenderInst();
+        renderInst.setUniformBuffer(this.renderHelper.uniformBuffer);
+        renderInst.setAllowSkippingIfPipelineNotReady(false);
+        renderInst.setBindingLayouts([{ numUniformBuffers: 1, numSamplers: 2 }]);
+        renderInst.setDrawCount(3);
+        renderInst.setGfxProgram(this.wormholeScreenOverlayProgram);
+        renderInst.setMegaStateFlags(this.wormholeScreenOverlayMegaState);
+        const d = renderInst.allocateUniformBufferF32(0, WORMHOLE_SCREEN_OVERLAY_UBO_WORDS);
+        fillVec4(d, 0, overlayIntensity, overlayTimerScale, overlayAlphaBase, 0);
+        fillVec4(d, 4, WORMHOLE_SCREEN_OVERLAY_TINT_R, WORMHOLE_SCREEN_OVERLAY_TINT_G, WORMHOLE_SCREEN_OVERLAY_TINT_B, 0);
+        this.wormholeScreenOverlaySampler = warpTextureMapping.gfxSampler;
+        renderInst.setSamplerBindingsFromTextureMappings([
+          {
+            gfxTexture: null,
+            gfxSampler: warpTextureMapping.gfxSampler,
+            lateBinding: WORMHOLE_SCREEN_OVERLAY_MAIN_LATE_BINDING,
+          },
+          warpTextureMapping,
+        ]);
+        this.wormholeScreenOverlayInstList.submitRenderInst(renderInst);
+        this.hasWormholeScreenOverlay = true;
+      }
+    }
     this.renderHelper.prepareToRender();
     this.renderHelper.renderInstManager.popTemplate();
   }
@@ -804,6 +911,23 @@ export class Renderer {
         this.translucentInstList.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
       });
     });
+    if (this.hasWormholeScreenOverlay && this.wormholeScreenOverlaySampler) {
+      const mainColorResolveID = builder.resolveRenderTarget(mainColorTargetID);
+      builder.pushPass((pass) => {
+        pass.setDebugName('Wormhole Screen Overlay');
+        pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
+        pass.attachResolveTexture(mainColorResolveID);
+        pass.exec((passRenderer, scope) => {
+          const mainColorTexture = scope.getResolveTextureForID(mainColorResolveID);
+          this.wormholeScreenOverlayInstList.resolveLateSamplerBinding(WORMHOLE_SCREEN_OVERLAY_MAIN_LATE_BINDING, {
+            gfxTexture: mainColorTexture,
+            gfxSampler: this.wormholeScreenOverlaySampler,
+            lateBinding: null,
+          });
+          this.wormholeScreenOverlayInstList.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
+        });
+      });
+    }
     this.renderHelper.antialiasingSupport.pushPasses(
       builder,
       viewerInput,
@@ -888,6 +1012,16 @@ export class Renderer {
     }
     if (state.animGroupTransforms !== undefined) {
       this.world.setAnimGroupTransforms(state.animGroupTransforms ?? null);
+    }
+    if (state.wormholeScreenOverlayTimer !== undefined) {
+      this.wormholeScreenOverlayTimer = Number.isFinite(state.wormholeScreenOverlayTimer)
+        ? Math.max(0, Math.trunc(state.wormholeScreenOverlayTimer))
+        : 0;
+    }
+    if (state.wormholeScreenOverlayIntensity !== undefined) {
+      this.wormholeScreenOverlayIntensity = Number.isFinite(state.wormholeScreenOverlayIntensity)
+        ? state.wormholeScreenOverlayIntensity
+        : 0;
     }
   }
 

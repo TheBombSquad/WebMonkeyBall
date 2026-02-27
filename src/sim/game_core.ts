@@ -103,6 +103,11 @@ const DEFAULT_LIVES = 3;
 const SPEED_MPH_SCALE = 134.21985;
 const SPEED_BAR_MAX_MPH = 70;
 const BONUS_SHOTTAIL_RENDER_SCALE = 52.68;
+const SMB2_WORMHOLE_OVERLAY_TIMER_START = 0xf0;
+const SMB2_WORMHOLE_OVERLAY_TIMER_STEP = 4;
+const SMB2_WORMHOLE_OVERLAY_TIMER_END_CUTOFF = 0x40;
+const SMB2_WORMHOLE_OVERLAY_INTENSITY_START = 0.1;
+const SMB2_WORMHOLE_OVERLAY_INTENSITY_DECAY = 0.99;
 const fallOutStack = new MatrixStack();
 const fallOutLocal = { x: 0, y: 0, z: 0 };
 
@@ -399,6 +404,9 @@ export class GameCore {
   public goalReplayStartArmed: boolean;
   public hudGoalEventTick: number;
   public hudRingoutEventTick: number;
+  public wormholeScreenOverlayTimer: number;
+  public wormholeScreenOverlayIntensity: number;
+  private wormholeScreenOverlayStartPending: boolean;
   public stageStartRollbackState: any | null;
   public stageViewRollbackState: any | null;
   public singleplayerStageViewActive: boolean;
@@ -542,6 +550,9 @@ export class GameCore {
     this.goalReplayStartArmed = false;
     this.hudGoalEventTick = -1;
     this.hudRingoutEventTick = -1;
+    this.wormholeScreenOverlayTimer = 0;
+    this.wormholeScreenOverlayIntensity = 0;
+    this.wormholeScreenOverlayStartPending = false;
     this.stageStartRollbackState = null;
     this.stageViewRollbackState = null;
     this.singleplayerStageViewActive = false;
@@ -1006,6 +1017,9 @@ export class GameCore {
     state.simTick = this.simTick;
     state.hudGoalEventTick = this.hudGoalEventTick;
     state.hudRingoutEventTick = this.hudRingoutEventTick;
+    state.wormholeScreenOverlayTimer = this.wormholeScreenOverlayTimer;
+    state.wormholeScreenOverlayIntensity = this.wormholeScreenOverlayIntensity;
+    state.wormholeScreenOverlayStartPending = this.wormholeScreenOverlayStartPending;
     state.stageTimerFrames = this.stageTimerFrames;
     state.stageTimeLimitFrames = this.stageTimeLimitFrames;
     state.bananasLeft = this.bananasLeft;
@@ -1329,6 +1343,13 @@ export class GameCore {
     }
     this.hudGoalEventTick = Number.isFinite(state.hudGoalEventTick) ? state.hudGoalEventTick : -1;
     this.hudRingoutEventTick = Number.isFinite(state.hudRingoutEventTick) ? state.hudRingoutEventTick : -1;
+    this.wormholeScreenOverlayTimer = Number.isFinite(state.wormholeScreenOverlayTimer)
+      ? Math.max(0, Math.trunc(state.wormholeScreenOverlayTimer))
+      : 0;
+    this.wormholeScreenOverlayIntensity = Number.isFinite(state.wormholeScreenOverlayIntensity)
+      ? state.wormholeScreenOverlayIntensity
+      : 0;
+    this.wormholeScreenOverlayStartPending = !!state.wormholeScreenOverlayStartPending;
     if (state.world && this.world) {
       this.world.xrot = state.world.xrot ?? this.world.xrot;
       this.world.zrot = state.world.zrot ?? this.world.zrot;
@@ -3146,6 +3167,9 @@ export class GameCore {
       this.stageTimeLimitFrames = this.course?.getTimeLimitFrames() ?? DEFAULT_STAGE_TIME;
       this.hudGoalEventTick = -1;
       this.hudRingoutEventTick = -1;
+      this.wormholeScreenOverlayTimer = 0;
+      this.wormholeScreenOverlayIntensity = 0;
+      this.wormholeScreenOverlayStartPending = false;
       this.timeoverTimerFrames = 0;
       this.multiplayerGoalTimerFrames = 0;
       this.multiplayerTimeoverHadGoal = false;
@@ -3249,6 +3273,9 @@ export class GameCore {
     this.resultReplayHistory.length = 0;
     this.hudGoalEventTick = -1;
     this.hudRingoutEventTick = -1;
+    this.wormholeScreenOverlayTimer = 0;
+    this.wormholeScreenOverlayIntensity = 0;
+    this.wormholeScreenOverlayStartPending = false;
     const localPlayer = this.getLocalPlayer();
     if (localPlayer) {
       localPlayer.finished = false;
@@ -3458,6 +3485,27 @@ export class GameCore {
     startGoal(localBall);
     if (!this.suppressAudioEffects) {
       void this.audio?.playAnnouncerPerfect();
+    }
+  }
+
+  private updateSmb2WormholeScreenOverlayState() {
+    if (this.stage?.format !== 'smb2') {
+      this.wormholeScreenOverlayTimer = 0;
+      this.wormholeScreenOverlayIntensity = 0;
+      this.wormholeScreenOverlayStartPending = false;
+      return;
+    }
+    if (this.wormholeScreenOverlayTimer > 0) {
+      this.wormholeScreenOverlayTimer = Math.max(0, this.wormholeScreenOverlayTimer - SMB2_WORMHOLE_OVERLAY_TIMER_STEP);
+      this.wormholeScreenOverlayIntensity *= SMB2_WORMHOLE_OVERLAY_INTENSITY_DECAY;
+      if (this.wormholeScreenOverlayTimer < SMB2_WORMHOLE_OVERLAY_TIMER_END_CUTOFF) {
+        this.wormholeScreenOverlayTimer = 0;
+      }
+    }
+    if (this.wormholeScreenOverlayStartPending) {
+      this.wormholeScreenOverlayTimer = SMB2_WORMHOLE_OVERLAY_TIMER_START;
+      this.wormholeScreenOverlayIntensity = SMB2_WORMHOLE_OVERLAY_INTENSITY_START;
+      this.wormholeScreenOverlayStartPending = false;
     }
   }
 
@@ -4311,6 +4359,7 @@ export class GameCore {
               if (player.id === this.localPlayerId) {
                 // Keep interpolation history in the same portal space to prevent a one-frame camera lerp pop.
                 this.syncCameraPose();
+                this.wormholeScreenOverlayStartPending = true;
               }
               ball.wormholeTransform = null;
             }
@@ -4602,6 +4651,7 @@ export class GameCore {
         }
         this.accumulator -= this.fixedStep;
         } finally {
+          this.updateSmb2WormholeScreenOverlayState();
           this.simTick += 1;
           this.emitModHook('onAfterSimTick', { game: this, tick: this.simTick });
           if (this.replayAutoFastForward && this.replayInputStartTick !== null) {

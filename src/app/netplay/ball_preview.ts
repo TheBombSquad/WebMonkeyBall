@@ -172,6 +172,8 @@ export class BallPreviewController {
       modPrimitives: this.previewFloor,
       switches: null,
       stageTilt: null,
+      wormholeScreenOverlayTimer: 0,
+      wormholeScreenOverlayIntensity: 0,
     };
   }
 
