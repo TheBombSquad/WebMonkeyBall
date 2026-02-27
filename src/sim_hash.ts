@@ -73,6 +73,9 @@ function hashWorlds(initialHash, worldOrWorlds) {
     if (world.gravity) {
       h = hashVec3(h, world.gravity);
     }
+    if (world.smb2SmoothedUp) {
+      h = hashVec3(h, world.smb2SmoothedUp);
+    }
   }
   return h >>> 0;
 }

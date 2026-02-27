@@ -1023,6 +1023,7 @@ export class GameCore {
       out.xrotPrev = world.xrotPrev;
       out.zrotPrev = world.zrotPrev;
       out.gravity = this.cloneVec3(world.gravity, out.gravity);
+      out.smb2SmoothedUp = this.cloneVec3(world.smb2SmoothedUp, out.smb2SmoothedUp);
       return out;
     };
     const state = reuseState ?? {};
@@ -1372,6 +1373,11 @@ export class GameCore {
         this.world.gravity.y = state.world.gravity.y;
         this.world.gravity.z = state.world.gravity.z;
       }
+      if (state.world.smb2SmoothedUp) {
+        this.world.smb2SmoothedUp.x = state.world.smb2SmoothedUp.x;
+        this.world.smb2SmoothedUp.y = state.world.smb2SmoothedUp.y;
+        this.world.smb2SmoothedUp.z = state.world.smb2SmoothedUp.z;
+      }
     }
     if (Array.isArray(state.players)) {
       for (let i = 0; i < state.players.length; i += 1) {
@@ -1411,6 +1417,11 @@ export class GameCore {
             player.world.gravity.x = saved.world.gravity.x;
             player.world.gravity.y = saved.world.gravity.y;
             player.world.gravity.z = saved.world.gravity.z;
+          }
+          if (saved.world.smb2SmoothedUp) {
+            player.world.smb2SmoothedUp.x = saved.world.smb2SmoothedUp.x;
+            player.world.smb2SmoothedUp.y = saved.world.smb2SmoothedUp.y;
+            player.world.smb2SmoothedUp.z = saved.world.smb2SmoothedUp.z;
           }
         }
         if (saved.ball) {
@@ -4223,6 +4234,7 @@ export class GameCore {
         let avgGravX = 0;
         let avgGravY = 0;
         let avgGravZ = 0;
+        const stageFormat = this.stage?.format ?? 'smb1';
         for (const player of simPlayers) {
           if (player.isSpectator || player.pendingSpawn) {
             continue;
@@ -4232,7 +4244,7 @@ export class GameCore {
             && player.ringoutTimerFrames <= 0
             && !player.finished;
           const stick = this.readDeterministicStickForPlayer(player, playerInputEnabled);
-          player.world.updateInput(stick, player.cameraRotY);
+          player.world.updateInput(stick, player.cameraRotY, stageFormat);
           if (!player.finished) {
             tiltCount += 1;
             avgGravX += player.world.gravity.x;
