@@ -16,6 +16,8 @@ import {
   GfxCompareMode,
   GfxDevice,
   GfxFormat,
+  GfxTextureUsage,
+  makeTextureDescriptor2D,
   type GfxProgram,
 } from './gfx/platform/GfxPlatform.js';
 import { GfxrAttachmentSlot, GfxrRenderTargetDescription } from './gfx/render/GfxRenderGraph.js';
@@ -250,7 +252,7 @@ void main() {
     vec2 uvMain = mix(vec2(intensity), vec2(1.0 - intensity), v_TexCoord);
     vec2 uvWarp = mix(vec2(-timerScale), vec2(1.0 + timerScale), v_TexCoord);
     vec3 color = texture(u_MainTexture, uvMain).rgb * u_TintColor.rgb;
-    float alpha = alphaBase * texture(u_WarpTexture, uvWarp).a;
+    float alpha = alphaBase * (1.0 - texture(u_WarpTexture, uvWarp).r);
     if (alpha <= 0.0) {
         discard;
     }
@@ -422,6 +424,10 @@ export class Renderer {
   private wormholeScreenOverlaySampler: any = null;
   private wormholeScreenOverlayTimer = 0;
   private wormholeScreenOverlayIntensity = 0;
+  private wormholeScreenCaptureTexture: any = null;
+  private wormholeScreenCaptureWidth = 0;
+  private wormholeScreenCaptureHeight = 0;
+  private wormholeScreenCaptureReady = false;
   private lastExternalTimeFrames: number | null = null;
   private sceneOverrides: SceneRenderOverrides | null = null;
 
@@ -429,6 +435,27 @@ export class Renderer {
     this.renderHelper = new GXRenderHelperGfx(device);
     this.world = new World(device, this.renderHelper.renderCache, stageData);
     this.wormholeScreenOverlayProgram = createWormholeScreenOverlayProgram(this.renderHelper.renderCache);
+  }
+
+  private ensureWormholeScreenCaptureTexture(device: GfxDevice, width: number, height: number): void {
+    const captureWidth = Math.max(1, width | 0);
+    const captureHeight = Math.max(1, height | 0);
+    if (
+      this.wormholeScreenCaptureTexture !== null &&
+      this.wormholeScreenCaptureWidth === captureWidth &&
+      this.wormholeScreenCaptureHeight === captureHeight
+    ) {
+      return;
+    }
+    if (this.wormholeScreenCaptureTexture !== null) {
+      device.destroyTexture(this.wormholeScreenCaptureTexture);
+    }
+    const captureDesc = makeTextureDescriptor2D(GfxFormat.U8_RGBA_RT, captureWidth, captureHeight, 1);
+    captureDesc.usage = GfxTextureUsage.Sampled | GfxTextureUsage.RenderTarget;
+    this.wormholeScreenCaptureTexture = device.createTexture(captureDesc);
+    this.wormholeScreenCaptureWidth = captureWidth;
+    this.wormholeScreenCaptureHeight = captureHeight;
+    this.wormholeScreenCaptureReady = false;
   }
 
   private prepareToRender(
@@ -460,6 +487,11 @@ export class Renderer {
     this.activeWormholeDestId = null;
     this.hasWormholeScreenOverlay = false;
     this.wormholeScreenOverlaySampler = null;
+    if (this.wormholeScreenOverlayTimer > 0) {
+      this.ensureWormholeScreenCaptureTexture(device, viewerInput.backbufferWidth, viewerInput.backbufferHeight);
+    } else {
+      this.wormholeScreenCaptureReady = false;
+    }
 
     const mirrorPlaneMatrix = scratchMirrorReflection;
     if (this.mirrorMode !== 'none') {
@@ -705,7 +737,11 @@ export class Renderer {
       skipBackground: this.sceneOverrides?.skipBackground,
     };
     this.world.prepareToRender(renderCtx);
-    if (this.wormholeScreenOverlayTimer > 0) {
+    if (
+      this.wormholeScreenOverlayTimer > 0 &&
+      this.wormholeScreenCaptureReady &&
+      this.wormholeScreenCaptureTexture !== null
+    ) {
       const warpTextureMapping = this.world.getWormholeScreenOverlayWarpTextureMapping();
       if (warpTextureMapping?.gfxTexture && warpTextureMapping.gfxSampler) {
         const overlayTimer = Math.max(0, this.wormholeScreenOverlayTimer);
@@ -911,16 +947,16 @@ export class Renderer {
         this.translucentInstList.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
       });
     });
-    if (this.hasWormholeScreenOverlay && this.wormholeScreenOverlaySampler) {
-      const mainColorResolveID = builder.resolveRenderTarget(mainColorTargetID);
+    if (
+      this.hasWormholeScreenOverlay &&
+      this.wormholeScreenOverlaySampler
+    ) {
       builder.pushPass((pass) => {
         pass.setDebugName('Wormhole Screen Overlay');
         pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
-        pass.attachResolveTexture(mainColorResolveID);
-        pass.exec((passRenderer, scope) => {
-          const mainColorTexture = scope.getResolveTextureForID(mainColorResolveID);
+        pass.exec((passRenderer) => {
           this.wormholeScreenOverlayInstList.resolveLateSamplerBinding(WORMHOLE_SCREEN_OVERLAY_MAIN_LATE_BINDING, {
-            gfxTexture: mainColorTexture,
+            gfxTexture: this.wormholeScreenCaptureTexture,
             gfxSampler: this.wormholeScreenOverlaySampler,
             lateBinding: null,
           });
@@ -928,14 +964,28 @@ export class Renderer {
         });
       });
     }
-    this.renderHelper.antialiasingSupport.pushPasses(
-      builder,
-      viewerInput,
-      mainColorTargetID
-    );
-    builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
+    const wormholeScreenCaptureActive =
+      this.wormholeScreenOverlayTimer > 0 &&
+      this.wormholeScreenCaptureTexture !== null;
+    if (!wormholeScreenCaptureActive) {
+      this.renderHelper.antialiasingSupport.pushPasses(
+        builder,
+        viewerInput,
+        mainColorTargetID
+      );
+      builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
+    } else {
+      builder.resolveRenderTargetToExternalTexture(mainColorTargetID, this.wormholeScreenCaptureTexture);
+    }
 
     this.renderHelper.renderGraph.execute(builder);
+    if (
+      wormholeScreenCaptureActive &&
+      viewerInput.onscreenTexture !== null
+    ) {
+      device.copySubTexture2D(viewerInput.onscreenTexture, 0, 0, this.wormholeScreenCaptureTexture, 0, 0);
+      this.wormholeScreenCaptureReady = true;
+    }
   }
 
   public setSceneOverrides(overrides: SceneRenderOverrides | null): void {
@@ -1017,6 +1067,9 @@ export class Renderer {
       this.wormholeScreenOverlayTimer = Number.isFinite(state.wormholeScreenOverlayTimer)
         ? Math.max(0, Math.trunc(state.wormholeScreenOverlayTimer))
         : 0;
+      if (this.wormholeScreenOverlayTimer <= 0) {
+        this.wormholeScreenCaptureReady = false;
+      }
     }
     if (state.wormholeScreenOverlayIntensity !== undefined) {
       this.wormholeScreenOverlayIntensity = Number.isFinite(state.wormholeScreenOverlayIntensity)
@@ -1026,6 +1079,10 @@ export class Renderer {
   }
 
   public destroy(device: GfxDevice): void {
+    if (this.wormholeScreenCaptureTexture !== null) {
+      device.destroyTexture(this.wormholeScreenCaptureTexture);
+      this.wormholeScreenCaptureTexture = null;
+    }
     this.renderHelper.destroy();
     this.world.destroy(device);
   }

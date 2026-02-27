@@ -202,6 +202,8 @@ const WORMHOLE_UP_LOCAL = vec3.fromValues(0, 1, 0);
 const WORMHOLE_FORWARD_SOURCE_LOCAL = vec3.fromValues(0, 0, -1);
 const WORMHOLE_FORWARD_DEST_LOCAL = vec3.fromValues(0, 0, 1);
 const WORMHOLE_LOCAL_THROUGH = mat4.fromYRotation(mat4.create(), Math.PI);
+const SMB2_WORMHOLE_OVERLAY_WARP_MODEL_ID = 0x5e;
+const SMB2_WORMHOLE_OVERLAY_WARP_MODEL_NAME = "circle_white";
 const WORMHOLE_NEAR_FADE_INNER_RADIUS_SCALE = 0.8;
 const WORMHOLE_NEAR_FADE_OUTER_RADIUS_SCALE = 2.0;
 const OVERLAY_RAYCAST_EPSILON = 1.1920928955078125e-7;
@@ -1153,6 +1155,7 @@ export class World {
     private mirrorColorMapping = new GXTextureMapping();
     private mirrorDistortMapping = new GXTextureMapping();
     private mirrorGradMapping = new GXTextureMapping();
+    private wormholeScreenOverlayWarpMapping = new GXTextureMapping();
     private mirrorGradOwnsTexture = false;
     private mirrorModelNames = new Set<string>();
     private wormholeSurfaceProgram!: GfxProgram;
@@ -1633,6 +1636,7 @@ export class World {
         this.wormholeColorMapping.gfxSampler = device.createSampler(mirrorSamplerDesc);
         this.wormholeColorMapping.lateBinding = "wormhole-color";
         this.mirrorGradMapping.gfxSampler = device.createSampler(mirrorSamplerDesc);
+        this.wormholeScreenOverlayWarpMapping.gfxSampler = device.createSampler(mirrorSamplerDesc);
         const mirrorGradModel = stageData.commonGma.idMap.get(CommonModelID.gb_grad);
         const mirrorGradTex = mirrorGradModel?.tevLayers[0]?.gxTexture ?? null;
         if (mirrorGradTex) {
@@ -1642,6 +1646,16 @@ export class World {
             this.mirrorGradMapping.width = 1;
             this.mirrorGradMapping.height = 1;
             this.mirrorGradOwnsTexture = true;
+        }
+        const wormholeOverlayWarpModel =
+            stageData.commonGma.nameMap.get(SMB2_WORMHOLE_OVERLAY_WARP_MODEL_NAME) ??
+            stageData.commonGma.idMap.get(SMB2_WORMHOLE_OVERLAY_WARP_MODEL_ID);
+        const wormholeOverlayWarpTex = wormholeOverlayWarpModel?.tevLayers[0]?.gxTexture ?? null;
+        if (wormholeOverlayWarpTex) {
+            this.worldState.modelCache.fillTextureMappingFromGxTexture(
+                wormholeOverlayWarpTex,
+                this.wormholeScreenOverlayWarpMapping,
+            );
         }
         collectStreakTextures(this.streakTextureSources, stageData.stageGma);
         collectStreakTextures(this.streakTextureSources, stageData.bgGma);
@@ -2529,10 +2543,10 @@ export class World {
     }
 
     public getWormholeScreenOverlayWarpTextureMapping(): GXTextureMapping | null {
-        if (!this.mirrorGradMapping.gfxTexture || !this.mirrorGradMapping.gfxSampler) {
+        if (!this.wormholeScreenOverlayWarpMapping.gfxTexture || !this.wormholeScreenOverlayWarpMapping.gfxSampler) {
             return null;
         }
-        return this.mirrorGradMapping;
+        return this.wormholeScreenOverlayWarpMapping;
     }
 
     public setMaterialHacks(hacks: GX_Material.GXMaterialHacks): void {
@@ -3896,6 +3910,9 @@ export class World {
         }
         if (this.mirrorGradMapping.gfxSampler) {
             device.destroySampler(this.mirrorGradMapping.gfxSampler);
+        }
+        if (this.wormholeScreenOverlayWarpMapping.gfxSampler) {
+            device.destroySampler(this.wormholeScreenOverlayWarpMapping.gfxSampler);
         }
         if (this.mirrorGradOwnsTexture && this.mirrorGradMapping.gfxTexture) {
             device.destroyTexture(this.mirrorGradMapping.gfxTexture);

@@ -546,8 +546,12 @@ export class GfxrRenderGraphImpl implements GfxrRenderGraph, GfxrGraphBuilder, G
     public execute(builder: GfxrGraphBuilder): void {
         assert(builder === this);
         const graph = assertExists(this.currentGraph);
-        this.execGraph(graph);
-        this.currentGraph = null;
+        try {
+            this.execGraph(graph);
+        } finally {
+            // Ensure graph-builder state is always released, even if a pass assertion throws.
+            this.currentGraph = null;
+        }
     }
 
     public destroy(): void {
