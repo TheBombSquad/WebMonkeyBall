@@ -33,6 +33,7 @@ type PlayerRecord = {
   joinedAt: number;
   lastActiveAt: number;
   connected: boolean;
+  connectionVersion?: number;
 };
 
 type RoomRecord = {
@@ -55,7 +56,7 @@ type LobbyState = {
 };
 
 const ROOM_TTL_MS = 1000 * 60 * 5;
-const PLAYER_JOIN_GRACE_MS = 1000 * 12;
+const PLAYER_JOIN_GRACE_MS = 1000 * 20;
 const PLAYER_CONNECTED_STALE_MS = 1000 * 35;
 const MAX_PLAYERS = 16;
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -262,6 +263,14 @@ function clampInt(value: number, min: number, max: number) {
 
 function randomToken(): string {
   return crypto.randomUUID().replace(/-/g, "");
+}
+
+function parseConnectionVersion(input: unknown): number | null {
+  const value = Number(input ?? 0);
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.trunc(value);
 }
 
 function randomPlayerId(existing: Set<number>): number {
@@ -510,14 +519,19 @@ export class Lobby implements DurableObject {
     await this.state.storage.put("lobby", this.data);
   }
 
-  private cleanupExpired(): boolean {
+  private cleanupExpired(): {
+    dirty: boolean;
+    revocations: Array<{ roomId: string; players: PlayerRecord[] }>;
+  } {
     const now = nowMs();
     let dirty = false;
+    const revocations: Array<{ roomId: string; players: PlayerRecord[] }> = [];
     for (const roomId of Object.keys(this.data.rooms)) {
       const room = this.data.rooms[roomId];
       if (!room) {
         continue;
       }
+      const playersForRevocation = Object.values(room.players ?? {});
       let roomDirty = false;
       for (const [playerKey, player] of Object.entries(room.players ?? {})) {
         const neverConnected = !player.connected && player.lastActiveAt <= player.joinedAt;
@@ -543,6 +557,7 @@ export class Lobby implements DurableObject {
         if (room.roomCode) {
           delete this.data.codes[room.roomCode];
         }
+        revocations.push({ roomId, players: playersForRevocation });
         dirty = true;
         continue;
       }
@@ -551,6 +566,7 @@ export class Lobby implements DurableObject {
         if (room.roomCode) {
           delete this.data.codes[room.roomCode];
         }
+        revocations.push({ roomId, players: playersForRevocation });
         dirty = true;
         continue;
       }
@@ -559,10 +575,11 @@ export class Lobby implements DurableObject {
         if (room.roomCode) {
           delete this.data.codes[room.roomCode];
         }
+        revocations.push({ roomId, players: playersForRevocation });
         dirty = true;
       }
     }
-    return dirty;
+    return { dirty, revocations };
   }
 
   private isRateLimited(key: string, limit: { windowMs: number; max: number }): boolean {
@@ -597,6 +614,23 @@ export class Lobby implements DurableObject {
     }
   }
 
+  private async revokeRoomSignals(revocations: Array<{ roomId: string; players: PlayerRecord[] }>): Promise<void> {
+    const tasks: Promise<void>[] = [];
+    for (const revocation of revocations) {
+      const roomId = revocation.roomId;
+      if (!roomId) {
+        continue;
+      }
+      for (const player of revocation.players) {
+        tasks.push(this.revokeRoomPlayerSignal(roomId, player));
+      }
+    }
+    if (tasks.length === 0) {
+      return;
+    }
+    await Promise.all(tasks);
+  }
+
   async fetch(request: Request): Promise<Response> {
     if (!isRequestOriginAllowed(request, this.env)) {
       return jsonResponse({ error: "forbidden" }, 403, null);
@@ -604,8 +638,11 @@ export class Lobby implements DurableObject {
     await this.load();
     const origin = getCorsOrigin(request, this.env);
     const cleaned = this.cleanupExpired();
-    if (cleaned) {
+    if (cleaned.dirty) {
       await this.save();
+      if (cleaned.revocations.length > 0) {
+        await this.revokeRoomSignals(cleaned.revocations);
+      }
     }
     const url = new URL(request.url);
 
@@ -665,6 +702,7 @@ export class Lobby implements DurableObject {
         joinedAt: createdAt,
         lastActiveAt: createdAt,
         connected: false,
+        connectionVersion: 0,
       };
       const record: RoomRecord = {
         roomId,
@@ -764,6 +802,7 @@ export class Lobby implements DurableObject {
         joinedAt,
         lastActiveAt: joinedAt,
         connected: false,
+        connectionVersion: 0,
       };
       room.lastActiveAt = now;
       this.data.rooms[roomId] = room;
@@ -826,11 +865,13 @@ export class Lobby implements DurableObject {
       if (body.hostToken !== room.hostToken) {
         return jsonResponse({ ok: false, error: "unauthorized" }, 401, origin);
       }
+      const playersForRevocation = Object.values(room.players ?? {});
       delete this.data.rooms[roomId];
       if (room.roomCode) {
         delete this.data.codes[room.roomCode];
       }
       await this.save();
+      await this.revokeRoomSignals([{ roomId, players: playersForRevocation }]);
       return jsonResponse({ ok: true }, 200, origin);
     }
 
@@ -854,11 +895,13 @@ export class Lobby implements DurableObject {
       const now = nowMs();
       player.connected = true;
       player.lastActiveAt = now;
+      const connectionVersion = (parseConnectionVersion(player.connectionVersion) ?? 0) + 1;
+      player.connectionVersion = connectionVersion;
       room.lastActiveAt = now;
       room.players[playerKey(playerId)] = player;
       this.data.rooms[roomId] = room;
       await this.save();
-      return jsonResponse({ ok: true }, 200, origin);
+      return jsonResponse({ ok: true, connectionVersion }, 200, origin);
     }
 
     if (request.method === "POST" && url.pathname === "/rooms/kick") {
@@ -911,22 +954,35 @@ export class Lobby implements DurableObject {
       if (!player || player.token !== token) {
         return jsonResponse({ ok: false, error: "unauthorized" }, 401, origin);
       }
+      const playersForRevocation = Object.values(room.players ?? {});
       const leavingHost = playerId === room.hostId;
       delete room.players[playerKey(playerId)];
+      let deletedRoom = false;
       if (leavingHost || Object.keys(room.players ?? {}).length === 0) {
         delete this.data.rooms[roomId];
         if (room.roomCode) {
           delete this.data.codes[room.roomCode];
         }
+        deletedRoom = true;
       } else {
         this.data.rooms[roomId] = room;
       }
       await this.save();
+      if (deletedRoom) {
+        await this.revokeRoomSignals([{ roomId, players: playersForRevocation }]);
+      } else {
+        await this.revokeRoomPlayerSignal(roomId, player);
+      }
       return jsonResponse({ ok: true }, 200, origin);
     }
 
     if (request.method === "POST" && url.pathname === "/rooms/disconnect") {
-      const body = await parseJson<{ roomId?: string; playerId?: number; token?: string }>(request, SMALL_JSON_BODY_MAX_BYTES);
+      const body = await parseJson<{
+        roomId?: string;
+        playerId?: number;
+        token?: string;
+        connectionVersion?: number;
+      }>(request, SMALL_JSON_BODY_MAX_BYTES);
       if (!body) {
         return jsonResponse({ ok: false, error: "bad_request" }, 400, origin);
       }
@@ -942,12 +998,23 @@ export class Lobby implements DurableObject {
       if (!player || player.token !== token) {
         return jsonResponse({ ok: false, error: "unauthorized" }, 401, origin);
       }
+      const currentConnectionVersion = parseConnectionVersion(player.connectionVersion);
+      const disconnectConnectionVersion = parseConnectionVersion(body.connectionVersion);
+      if (
+        currentConnectionVersion !== null
+        && disconnectConnectionVersion !== null
+        && disconnectConnectionVersion !== currentConnectionVersion
+      ) {
+        return jsonResponse({ ok: true, ignored: true }, 200, origin);
+      }
       if (playerId === room.hostId) {
+        const playersForRevocation = Object.values(room.players ?? {});
         delete this.data.rooms[roomId];
         if (room.roomCode) {
           delete this.data.codes[room.roomCode];
         }
         await this.save();
+        await this.revokeRoomSignals([{ roomId, players: playersForRevocation }]);
         return jsonResponse({ ok: true }, 200, origin);
       }
       const now = nowMs();
@@ -968,6 +1035,7 @@ type Connection = {
   socket: WebSocket;
   playerId: number;
   token: string;
+  connectionVersion: number;
   windowStart: number;
   windowCount: number;
   windowBytes: number;
@@ -983,7 +1051,7 @@ export class Room implements DurableObject {
     this.env = env;
   }
 
-  private async verifyPlayer(roomId: string, playerId: number, token: string): Promise<boolean> {
+  private async verifyPlayer(roomId: string, playerId: number, token: string): Promise<number | null> {
     try {
       const id = this.env.LOBBY.idFromName("lobby");
       const stub = this.env.LOBBY.get(id);
@@ -993,19 +1061,22 @@ export class Room implements DurableObject {
         body: JSON.stringify({ roomId, playerId, token }),
       });
       if (!res.ok) {
-        return false;
+        return null;
       }
-      const data = await res.json<{ ok?: boolean }>();
-      return !!data?.ok;
+      const data = await res.json<{ ok?: boolean; connectionVersion?: number }>();
+      if (!data?.ok) {
+        return null;
+      }
+      return parseConnectionVersion(data.connectionVersion);
     } catch {
-      return false;
+      return null;
     }
   }
 
-  private async disconnectPlayer(roomId: string, playerId: number, token: string): Promise<void> {
+  private async disconnectPlayer(roomId: string, playerId: number, token: string, connectionVersion: number): Promise<void> {
     const id = this.env.LOBBY.idFromName("lobby");
     const stub = this.env.LOBBY.get(id);
-    const body = JSON.stringify({ roomId, playerId, token });
+    const body = JSON.stringify({ roomId, playerId, token, connectionVersion });
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const res = await stub.fetch("https://lobby.internal/rooms/disconnect", {
@@ -1100,8 +1171,8 @@ export class Room implements DurableObject {
       return new Response("Unauthorized", { status: 401 });
     }
     const roomId = this.state.id.toString();
-    const verified = await this.verifyPlayer(roomId, playerId, token);
-    if (!verified) {
+    const connectionVersion = await this.verifyPlayer(roomId, playerId, token);
+    if (connectionVersion === null) {
       return new Response("Unauthorized", { status: 401 });
     }
     const [client, server] = new WebSocketPair();
@@ -1113,6 +1184,7 @@ export class Room implements DurableObject {
       socket: server,
       playerId,
       token,
+      connectionVersion,
       windowStart: nowMs(),
       windowCount: 0,
       windowBytes: 0,
@@ -1177,7 +1249,7 @@ export class Room implements DurableObject {
       const conn = this.connections.get(connId);
       this.connections.delete(connId);
       if (conn) {
-        void this.disconnectPlayer(roomId, conn.playerId, conn.token);
+        void this.disconnectPlayer(roomId, conn.playerId, conn.token, conn.connectionVersion);
       }
       if (this.connections.size === 0) {
         this.state.storage.deleteAll();

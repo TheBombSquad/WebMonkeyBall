@@ -137,7 +137,7 @@ export class LobbyBrowserController {
       this.deps.setLobbySelfId(result.playerId);
       this.deps.setLobbyPlayerToken(result.playerToken);
       this.deps.setLobbyHostToken(result.hostToken ?? null);
-      lobbyStatus.textContent = `Lobby: hosting ${result.room.roomCode ?? result.room.roomId}`;
+      lobbyStatus.textContent = 'Lobby: hosting room';
       this.deps.startHost(result.room, result.playerToken);
     } catch (err) {
       console.error(err);
@@ -167,7 +167,7 @@ export class LobbyBrowserController {
       this.deps.setLobbySelfId(result.playerId);
       this.deps.setLobbyPlayerToken(result.playerToken);
       this.deps.setLobbyHostToken(null);
-      lobbyStatus.textContent = `Lobby: joining ${result.room.roomCode ?? result.room.roomId}`;
+      lobbyStatus.textContent = 'Lobby: joining room';
       await this.deps.startClient(result.room, result.playerId, result.playerToken);
     } catch (err) {
       console.error(err);
@@ -210,7 +210,7 @@ export class LobbyBrowserController {
       this.deps.setLobbySelfId(result.playerId);
       this.deps.setLobbyPlayerToken(result.playerToken);
       this.deps.setLobbyHostToken(null);
-      lobbyStatus.textContent = `Lobby: joining ${result.room.roomCode ?? result.room.roomId}`;
+      lobbyStatus.textContent = 'Lobby: joining room';
       await this.deps.startClient(result.room, result.playerId, result.playerToken);
     } catch (err) {
       console.error(err);

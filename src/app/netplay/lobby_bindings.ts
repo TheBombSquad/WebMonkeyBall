@@ -2,6 +2,7 @@ type LobbyBindingsOptions = {
   lobbyRefreshButton: HTMLButtonElement | null;
   lobbyCreateButton: HTMLButtonElement | null;
   lobbyJoinButton: HTMLButtonElement | null;
+  lobbyCopyCodeButton: HTMLButtonElement | null;
   lobbyLeaveButton: HTMLButtonElement | null;
   lobbyGameModeSelect: HTMLSelectElement | null;
   lobbyGamemodeOptionsRoot: HTMLElement | null;
@@ -32,6 +33,7 @@ type LobbyBindingsOptions = {
   onRefreshLobbyList: () => void;
   onCreateRoom: () => void;
   onJoinRoomByCode: () => void;
+  onCopyRoomCode: () => void;
   onLeaveRoom: () => void;
   onApplyLobbyGameModeFromInputs: () => void;
   onApplyLobbySettingsFromInputs: () => void;
@@ -68,6 +70,9 @@ export function bindLobbyEventHandlers(options: LobbyBindingsOptions) {
   });
   options.lobbyJoinButton?.addEventListener('click', () => {
     options.onJoinRoomByCode();
+  });
+  options.lobbyCopyCodeButton?.addEventListener('click', () => {
+    options.onCopyRoomCode();
   });
   options.lobbyLeaveButton?.addEventListener('click', () => {
     options.onLeaveRoom();

@@ -129,6 +129,7 @@ export function collectMainDomRefs() {
   const lobbyPublicCheckbox = document.getElementById('lobby-public') as HTMLInputElement | null;
   const lobbyNameInput = document.getElementById('lobby-name') as HTMLInputElement | null;
   const lobbyCodeInput = document.getElementById('lobby-code') as HTMLInputElement | null;
+  const lobbyCopyCodeButton = document.getElementById('lobby-copy-code') as HTMLButtonElement | null;
   const lobbyLeaveButton = document.getElementById('lobby-leave') as HTMLButtonElement | null;
   const lobbyStatus = document.getElementById('lobby-status') as HTMLElement | null;
   const lobbyList = document.getElementById('lobby-list') as HTMLElement | null;
@@ -305,6 +306,7 @@ export function collectMainDomRefs() {
     lobbyPublicCheckbox,
     lobbyNameInput,
     lobbyCodeInput,
+    lobbyCopyCodeButton,
     lobbyLeaveButton,
     lobbyStatus,
     lobbyList,

@@ -12,6 +12,7 @@ type LobbyUiDeps = {
   multiplayerBrowser: HTMLElement | null;
   multiplayerLobby: HTMLElement | null;
   multiplayerBackButton: HTMLButtonElement | null;
+  lobbyCopyCodeButton: HTMLButtonElement | null;
   lobbyLeaveButton: HTMLButtonElement | null;
   lobbyPlayerList: HTMLElement | null;
   ingamePlayerList: HTMLElement | null;
@@ -167,6 +168,10 @@ export class LobbyUiController {
       return;
     }
     if (!inLobby || !lobbyRoom) {
+      if (this.deps.lobbyCopyCodeButton) {
+        this.deps.lobbyCopyCodeButton.classList.add('hidden');
+        this.deps.lobbyCopyCodeButton.disabled = true;
+      }
       this.deps.lobbyLeaveButton.classList.add('hidden');
       if (this.deps.lobbyPlayerList) {
         this.deps.lobbyPlayerList.innerHTML = '';
@@ -218,6 +223,11 @@ export class LobbyUiController {
       return;
     }
 
+    if (this.deps.lobbyCopyCodeButton) {
+      const canCopyRoomCode = typeof lobbyRoom.roomCode === 'string' && lobbyRoom.roomCode.length > 0;
+      this.deps.lobbyCopyCodeButton.classList.toggle('hidden', !canCopyRoomCode);
+      this.deps.lobbyCopyCodeButton.disabled = !canCopyRoomCode;
+    }
     this.deps.lobbyLeaveButton.classList.remove('hidden');
     const roomLabel = this.deps.formatRoomInfoLabel(lobbyRoom);
     const statusLabel = lobbyRoom.meta?.status === 'in_game' ? 'In Game' : 'Waiting';

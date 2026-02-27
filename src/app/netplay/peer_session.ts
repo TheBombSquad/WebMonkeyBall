@@ -263,7 +263,7 @@ export class PeerSessionController {
     this.deps.updateLobbyUi();
     this.deps.startLobbyHeartbeat(room.roomId);
     if (this.deps.lobbyStatus) {
-      this.deps.lobbyStatus.textContent = `Lobby: hosting ${room.roomCode ?? room.roomId}`;
+      this.deps.lobbyStatus.textContent = 'Lobby: hosting';
     }
     this.deps.broadcastLocalProfile();
   }
@@ -341,7 +341,7 @@ export class PeerSessionController {
     this.deps.getLobbySignal()?.send({ type: 'signal', from: playerId, to: room.hostId, payload: { join: true } });
     this.deps.startLobbyHeartbeat(room.roomId);
     if (this.deps.lobbyStatus) {
-      this.deps.lobbyStatus.textContent = `Lobby: connected ${room.roomCode ?? room.roomId}`;
+      this.deps.lobbyStatus.textContent = 'Lobby: connected';
     }
     this.deps.updateLobbyUi();
   }

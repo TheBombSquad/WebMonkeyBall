@@ -303,7 +303,7 @@
             <h2>Join Private Room</h2>
           </div>
           <div class="multiplayer-row">
-            <input id="lobby-code" class="text-input" type="text" placeholder="Room code" />
+            <input id="lobby-code" class="text-input" type="password" placeholder="Room code" autocomplete="off" />
             <button id="lobby-join" class="ghost compact" type="button">Join</button>
           </div>
         </div>
@@ -327,6 +327,7 @@
         <div class="panel-section">
           <div class="panel-section-header">
             <h2>Lobby</h2>
+            <button id="lobby-copy-code" class="ghost compact hidden" type="button">Copy Room Code</button>
             <button id="lobby-leave" class="ghost compact hidden" type="button">Leave Room</button>
           </div>
           <div id="lobby-room-info" class="lobby-room-info"></div>

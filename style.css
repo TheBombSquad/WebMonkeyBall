@@ -791,6 +791,11 @@ body.gameplay-active {
   font-size: 14px;
 }
 
+input[type='password']::-ms-reveal,
+input[type='password']::-ms-clear {
+  display: none;
+}
+
 .lobby-list {
   display: grid;
   gap: 8px;

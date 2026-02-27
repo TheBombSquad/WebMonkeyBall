@@ -250,6 +250,7 @@ export function runMainApp() {
     lobbyPublicCheckbox,
     lobbyNameInput,
     lobbyCodeInput,
+    lobbyCopyCodeButton,
     lobbyLeaveButton,
     lobbyStatus,
     lobbyList,
@@ -848,6 +849,7 @@ export function runMainApp() {
       multiplayerOnlineCount,
       lobbyPublicCheckbox,
       lobbyCodeInput,
+      lobbyCopyCodeButton,
       roomMeta,
       formatMultiplayerGameModeLabel,
       formatGameSourceLabel,
@@ -1991,10 +1993,41 @@ export function runMainApp() {
     lobbyState.scheduleProfileBroadcast();
   }
   
+  async function copyRoomCodeToClipboard() {
+    const roomCode = lobbyRoom?.roomCode?.trim();
+    if (!roomCode) {
+      return;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(roomCode);
+      } else {
+        const temp = document.createElement('textarea');
+        temp.value = roomCode;
+        temp.setAttribute('readonly', '');
+        temp.style.position = 'fixed';
+        temp.style.left = '-9999px';
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        temp.remove();
+      }
+      if (lobbyStatus) {
+        lobbyStatus.textContent = 'Lobby: room code copied';
+      }
+    } catch (err) {
+      console.error(err);
+      if (lobbyStatus) {
+        lobbyStatus.textContent = 'Lobby: copy failed';
+      }
+    }
+  }
+
   bindLobbyEventHandlers({
     lobbyRefreshButton,
     lobbyCreateButton,
     lobbyJoinButton,
+    lobbyCopyCodeButton,
     lobbyLeaveButton,
     lobbyGameModeSelect,
     lobbyGamemodeOptionsRoot,
@@ -2030,6 +2063,9 @@ export function runMainApp() {
     },
     onJoinRoomByCode: () => {
       void lobbyBrowser.joinRoomByCode();
+    },
+    onCopyRoomCode: () => {
+      void copyRoomCodeToClipboard();
     },
     onLeaveRoom: () => {
       void lobbyBrowser.leaveRoom();

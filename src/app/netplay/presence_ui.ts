@@ -30,7 +30,7 @@ export function createPresenceUiHelpers(options: PresenceUiOptions) {
   function getRoomDisplayName(room: RoomInfo) {
     const roomName = room.meta?.roomName?.trim() ?? '';
     if (!roomName) {
-      return room.roomCode ? `Room ${room.roomCode}` : `Room ${room.roomId.slice(0, 8)}`;
+      return room.roomCode ? 'Private Room' : `Room ${room.roomId.slice(0, 8)}`;
     }
     const privacySettings = options.getPrivacySettings();
     if (!privacySettings.hideLobbyNames) {
@@ -40,7 +40,7 @@ export function createPresenceUiHelpers(options: PresenceUiOptions) {
   }
 
   function formatRoomInfoLabel(room: RoomInfo) {
-    const codeLabel = room.roomCode ? `Room ${room.roomCode}` : `Room ${room.roomId.slice(0, 8)}`;
+    const codeLabel = room.roomCode ? 'Private Room' : `Room ${room.roomId.slice(0, 8)}`;
     const roomName = room.meta?.roomName?.trim();
     const privacySettings = options.getPrivacySettings();
     const displayName = roomName
