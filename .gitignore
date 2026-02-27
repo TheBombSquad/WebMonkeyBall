@@ -142,3 +142,31 @@ vite.config.ts.timestamp-*
 
 # Local diagnostics/scripts
 tools/
+
+# Local top-level untracked files/folders
+/.wranglerignore
+/AGENTS.md
+/APE_PORT_PLAN.md
+/DETERMINISM-PLAN.md
+/LOCAL_COUCH_SPLITSCREEN_PLAN.md
+/MULTIPLAYER_GAMEMODES_CHAINED_TOGETHER_PLAN.md
+/NOTES_UV_SCROLL.md
+/OVERLAY_PARITY_NOTES.md
+/POTENTIAL_USER_COMMANDS.md
+/REFACTOR_PLAN.md
+/ROLLBACK_MULTIPLAYER_PLAN.md
+/ROLLBACK_OPTIMIZATION_PLAN.md
+/ROM_PACK_NOTES.md
+/SIM_CORE_WASM_MIGRATION_PLAN.md
+/SMB2_HUD_IMPLEMENTATION_NOTES.md
+/SMB2_WORLD3_BG_PARITY_NOTES.md
+/WORMHOLE_INFO.md
+/assets/
+/audio/
+/dist_tmp/
+/docs/
+/mb2ws_content/
+/native/
+/packs/
+/smb1_content/
+/smb2_content/
