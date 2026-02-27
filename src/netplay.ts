@@ -464,12 +464,42 @@ function isChannelWritable(channel: RTCDataChannel | null | undefined) {
   return channel.bufferedAmount <= getChannelBufferedLimit(channel);
 }
 
+function readApiErrorCode(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const error = (payload as { error?: unknown }).error;
+  if (typeof error !== 'string' || !error) {
+    return null;
+  }
+  return error;
+}
+
+async function parseApiJson<T>(res: Response): Promise<T | null> {
+  try {
+    return await res.json() as T;
+  } catch {
+    return null;
+  }
+}
+
+async function assertApiSuccess(res: Response, fallbackCode: string): Promise<any> {
+  const data = await parseApiJson<any>(res);
+  if (!res.ok) {
+    throw new Error(readApiErrorCode(data) ?? `${fallbackCode}_${res.status}`);
+  }
+  if (data && typeof data === 'object' && data.ok === false) {
+    throw new Error(readApiErrorCode(data) ?? fallbackCode);
+  }
+  return data ?? {};
+}
+
 export class LobbyClient {
   constructor(private baseUrl: string) {}
 
   async listRooms(): Promise<RoomInfo[]> {
     const res = await fetch(`${this.baseUrl}/rooms`);
-    const data = await res.json();
+    const data = await assertApiSuccess(res, 'list_rooms');
     return data.rooms ?? [];
   }
 
@@ -479,10 +509,7 @@ export class LobbyClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(room),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data?.error ?? `create_room_${res.status}`);
-    }
+    const data = await assertApiSuccess(res, 'create_room');
     return {
       room: data.room,
       playerId: data.playerId,
@@ -502,10 +529,7 @@ export class LobbyClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(roomIdOrCode),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data?.error ?? `join_room_${res.status}`);
-    }
+    const data = await assertApiSuccess(res, 'join_room');
     return {
       room: data.room,
       playerId: data.playerId,
@@ -521,35 +545,39 @@ export class LobbyClient {
     meta?: RoomMeta,
     settings?: RoomSettings,
   ): Promise<void> {
-    await fetch(`${this.baseUrl}/rooms/heartbeat`, {
+    const res = await fetch(`${this.baseUrl}/rooms/heartbeat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ roomId, playerId, token, meta, settings }),
     });
+    await assertApiSuccess(res, 'heartbeat');
   }
 
   async closeRoom(roomId: string, hostToken: string): Promise<void> {
-    await fetch(`${this.baseUrl}/rooms/close`, {
+    const res = await fetch(`${this.baseUrl}/rooms/close`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ roomId, hostToken }),
     });
+    await assertApiSuccess(res, 'close_room');
   }
 
   async leaveRoom(roomId: string, playerId: number, token: string): Promise<void> {
-    await fetch(`${this.baseUrl}/rooms/leave`, {
+    const res = await fetch(`${this.baseUrl}/rooms/leave`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ roomId, playerId, token }),
     });
+    await assertApiSuccess(res, 'leave_room');
   }
 
   async kickPlayer(roomId: string, hostToken: string, playerId: number): Promise<void> {
-    await fetch(`${this.baseUrl}/rooms/kick`, {
+    const res = await fetch(`${this.baseUrl}/rooms/kick`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ roomId, hostToken, playerId }),
     });
+    await assertApiSuccess(res, 'kick_player');
   }
 
   openSignal(

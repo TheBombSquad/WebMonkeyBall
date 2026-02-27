@@ -2157,6 +2157,7 @@ export function runMainApp() {
       if (sanitized !== input.value) {
         input.value = sanitized;
       }
+      lobbyState.scheduleLobbyNameUpdate();
     },
     onLobbyRoomNameCommit: () => {
       lobbyState.scheduleLobbyNameUpdate();
@@ -2187,6 +2188,40 @@ export function runMainApp() {
 
   window.addEventListener('beforeunload', () => {
     ballPreview.destroy();
+    if (!lobbyBaseUrl || !lobbyRoom) {
+      return;
+    }
+    const shouldCloseRoom = netplayState?.role === 'host' && !!lobbyHostToken;
+    const path = shouldCloseRoom ? '/rooms/close' : '/rooms/leave';
+    const body = shouldCloseRoom
+      ? JSON.stringify({
+        roomId: lobbyRoom.roomId,
+        hostToken: lobbyHostToken,
+      })
+      : (lobbySelfId !== null && lobbyPlayerToken)
+        ? JSON.stringify({
+          roomId: lobbyRoom.roomId,
+          playerId: lobbySelfId,
+          token: lobbyPlayerToken,
+        })
+        : null;
+    if (!body) {
+      return;
+    }
+    const url = `${lobbyBaseUrl}${path}`;
+    const sent = typeof navigator.sendBeacon === 'function'
+      ? navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))
+      : false;
+    if (!sent) {
+      void fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        keepalive: true,
+      }).catch(() => {
+        // Ignore unload beacon failures.
+      });
+    }
   });
   
   startRenderLoop({

@@ -43,6 +43,17 @@ export class LobbyBrowserController {
     this.deps = deps;
   }
 
+  private getErrorCode(err: unknown): string {
+    if (err instanceof Error) {
+      return err.message;
+    }
+    return '';
+  }
+
+  private shouldTeardownAfterLeaveError(errorCode: string): boolean {
+    return errorCode === 'room_not_found' || errorCode === 'unauthorized';
+  }
+
   async refreshLobbyList() {
     const { lobbyClient, lobbyList, lobbyStatus, multiplayerOnlineCount } = this.deps;
     if (!lobbyClient || !lobbyList || !lobbyStatus) {
@@ -215,7 +226,7 @@ export class LobbyBrowserController {
   }
 
   async leaveRoom(skipConfirm = false) {
-    const { lobbyClient } = this.deps;
+    const { lobbyClient, lobbyStatus } = this.deps;
     if (!lobbyClient) {
       this.deps.resetNetplayConnections();
       return;
@@ -234,27 +245,41 @@ export class LobbyBrowserController {
         return;
       }
     }
+    const isHostClose = !!roomId && wasHost && !!hostToken;
+    if (roomId && wasHost && hostToken) {
+      try {
+        await lobbyClient.closeRoom(roomId, hostToken);
+      } catch (err) {
+        const errorCode = this.getErrorCode(err);
+        if (!this.shouldTeardownAfterLeaveError(errorCode)) {
+          console.error(err);
+          if (lobbyStatus) {
+            lobbyStatus.textContent = 'Lobby: close failed';
+          }
+          return;
+        }
+      }
+    } else if (roomId && playerId !== null && playerToken) {
+      try {
+        await lobbyClient.leaveRoom(roomId, playerId, playerToken);
+      } catch (err) {
+        const errorCode = this.getErrorCode(err);
+        if (!this.shouldTeardownAfterLeaveError(errorCode)) {
+          console.error(err);
+          if (lobbyStatus) {
+            lobbyStatus.textContent = isHostClose ? 'Lobby: close failed' : 'Lobby: leave failed';
+          }
+          return;
+        }
+      }
+    }
 
     this.deps.setLobbySignalShouldReconnect(false);
     this.deps.clearLobbySignalRetry();
     this.deps.resetNetplayConnections();
 
-    if (roomId && wasHost && hostToken) {
-      try {
-        await lobbyClient.closeRoom(roomId, hostToken);
-      } catch {
-        // Ignore.
-      }
-    } else if (roomId && playerId !== null && playerToken) {
-      try {
-        await lobbyClient.leaveRoom(roomId, playerId, playerToken);
-      } catch {
-        // Ignore.
-      }
-    }
-
-    if (this.deps.lobbyStatus) {
-      this.deps.lobbyStatus.textContent = 'Lobby: idle';
+    if (lobbyStatus) {
+      lobbyStatus.textContent = 'Lobby: idle';
     }
   }
 }

@@ -258,12 +258,14 @@ export class PeerSessionController {
 
     this.deps.getLobbySignalReconnectFn()?.();
     hostRelay.onSignal = (signal) => this.deps.getLobbySignal()?.send(signal);
+    // Sync host lobby UI (including room-name input) before first forced heartbeat.
+    // This preserves creation-time roomName metadata instead of overwriting it with blank input state.
+    this.deps.updateLobbyUi();
     this.deps.startLobbyHeartbeat(room.roomId);
     if (this.deps.lobbyStatus) {
       this.deps.lobbyStatus.textContent = `Lobby: hosting ${room.roomCode ?? room.roomId}`;
     }
     this.deps.broadcastLocalProfile();
-    this.deps.updateLobbyUi();
   }
 
   async startClient(room: LobbyRoom, playerId: number, playerToken: string) {

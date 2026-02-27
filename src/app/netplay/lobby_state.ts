@@ -194,10 +194,11 @@ export class LobbyStateController {
       this.deps.lobbyRoomNameInput.value = sanitized ?? '';
     }
     const nextName = sanitized ?? undefined;
-    const baseMeta = this.deps.buildRoomMeta() ?? lobbyRoom.meta ?? { status: 'lobby' };
-    if (baseMeta.roomName === nextName) {
+    const currentName = lobbyRoom.meta?.roomName;
+    if (currentName === nextName) {
       return;
     }
+    const baseMeta = this.deps.buildRoomMeta() ?? lobbyRoom.meta ?? { status: 'lobby' };
     lobbyRoom.meta = { ...baseMeta, roomName: nextName };
     this.deps.setLastLobbyNameUpdateMs(performance.now());
     this.deps.broadcastRoomUpdate();

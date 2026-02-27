@@ -73,6 +73,8 @@ export class LobbyHeartbeatController {
         }
       }
     }
-    void lobbyClient.heartbeat(roomId, playerId, token, meta, settings);
+    void lobbyClient.heartbeat(roomId, playerId, token, meta, settings).catch(() => {
+      // Keep heartbeat fire-and-forget, but avoid unhandled rejection noise.
+    });
   }
 }
