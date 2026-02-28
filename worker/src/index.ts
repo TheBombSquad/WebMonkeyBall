@@ -405,14 +405,20 @@ function normalizeMode(raw?: string | null): string | null {
 }
 
 function playerOccupiesSlot(player: PlayerRecord, now = nowMs()): boolean {
-  if (player.connected) {
-    return (now - player.lastActiveAt) <= PLAYER_CONNECTED_STALE_MS;
+  if (player.connected && (now - player.lastActiveAt) <= PLAYER_CONNECTED_STALE_MS) {
+    return true;
   }
   return (now - player.lastActiveAt) <= PLAYER_JOIN_GRACE_MS;
 }
 
 function roomPlayerCount(room: RoomRecord, now = nowMs()): number {
   return Object.values(room.players ?? {}).filter((player) => playerOccupiesSlot(player, now)).length;
+}
+
+function roomConnectedPlayerCount(room: RoomRecord, now = nowMs()): number {
+  return Object.values(room.players ?? {}).filter((player) =>
+    player.connected && (now - player.lastActiveAt) <= PLAYER_CONNECTED_STALE_MS,
+  ).length;
 }
 
 function roomPendingJoinCount(room: RoomRecord, now = nowMs()): number {
@@ -484,7 +490,7 @@ function publicRoomInfo(room: RoomRecord) {
   return {
     ...rest,
     settings: sanitizeSettings(room.settings),
-    playerCount: roomPlayerCount(room),
+    playerCount: roomConnectedPlayerCount(room),
     meta: room.meta ?? sanitizeMeta({}),
   };
 }

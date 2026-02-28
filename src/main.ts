@@ -1599,7 +1599,7 @@ export function runMainApp() {
       return;
     }
     if (lobbyStatus) {
-      lobbyStatus.textContent = 'Lobby: host left';
+      lobbyStatus.textContent = 'Lobby: disconnected';
     }
     if (running) {
       if (netplayState) {

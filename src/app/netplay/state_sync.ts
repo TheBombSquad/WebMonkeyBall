@@ -28,10 +28,24 @@ type NetplayStateDeps = {
 
 export class NetplayStateSyncController {
   private readonly deps: NetplayStateDeps;
-  private static readonly HOST_STAGE_START_INACTIVITY_KICK_GRACE_MS = 5000;
+  private static readonly HOST_STAGE_POST_SYNC_INACTIVITY_KICK_GRACE_MS = 10000;
 
   constructor(deps: NetplayStateDeps) {
     this.deps = deps;
+  }
+
+  private extendHostInactivityKickGrace(state: any, nowMs: number, durationMs: number) {
+    const clampedDurationMs = Math.max(0, Math.trunc(durationMs));
+    const next = nowMs + clampedDurationMs;
+    const current = Number(state.hostInactivityKickGraceUntilMs);
+    state.hostInactivityKickGraceUntilMs = Number.isFinite(current)
+      ? Math.max(current, next)
+      : next;
+  }
+
+  private getHostStageTransitionKickGraceMs() {
+    const stageReadyTimeoutMs = Math.max(0, Math.trunc(this.deps.stageReadyTimeoutMs));
+    return stageReadyTimeoutMs + NetplayStateSyncController.HOST_STAGE_POST_SYNC_INACTIVITY_KICK_GRACE_MS;
   }
 
   private clampInt(value: number, min: number, max: number) {
@@ -255,6 +269,11 @@ export class NetplayStateSyncController {
       return;
     }
     state.awaitingStageReady = false;
+    this.extendHostInactivityKickGrace(
+      state,
+      performance.now(),
+      NetplayStateSyncController.HOST_STAGE_POST_SYNC_INACTIVITY_KICK_GRACE_MS,
+    );
     state.stageReadyTimeoutMs = null;
     state.stageReadySentMs = null;
     const frame = state.session.getFrame();
@@ -294,7 +313,7 @@ export class NetplayStateSyncController {
     state.stageReadySentMs = state.role === 'client' ? nowMs : null;
     state.stageReadyTimeoutMs = state.role === 'host' ? nowMs : null;
     if (state.role === 'host') {
-      state.hostInactivityKickGraceUntilMs = nowMs + NetplayStateSyncController.HOST_STAGE_START_INACTIVITY_KICK_GRACE_MS;
+      this.extendHostInactivityKickGrace(state, nowMs, this.getHostStageTransitionKickGraceMs());
       for (const clientState of state.clientStates.values()) {
         if (!clientState) {
           continue;
@@ -367,6 +386,11 @@ export class NetplayStateSyncController {
       return;
     }
     state.awaitingStageReady = false;
+    this.extendHostInactivityKickGrace(
+      state,
+      nowMs,
+      NetplayStateSyncController.HOST_STAGE_POST_SYNC_INACTIVITY_KICK_GRACE_MS,
+    );
     state.stageReadyTimeoutMs = null;
     state.stageReadySentMs = null;
     const frame = state.session.getFrame();

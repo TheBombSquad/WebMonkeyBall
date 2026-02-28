@@ -313,6 +313,9 @@ export class NetplayRuntimeController {
     if (Number.isFinite(graceUntil) && nowMs < graceUntil) {
       return;
     }
+    if (state.awaitingStageReady) {
+      return;
+    }
     const timeoutMs = this.deps.constants.clientInactivityTimeoutMs;
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       return;

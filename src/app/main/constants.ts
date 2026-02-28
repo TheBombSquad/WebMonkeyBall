@@ -45,8 +45,8 @@ export const multiplayerModes: {
 export const netplayDebugStorageKey = 'smb_netplay_debug';
 
 export const lobbyHeartbeatTiming = {
-  intervalMs: 15000,
-  fallbackMs: 12000,
+  intervalMs: 5000,
+  fallbackMs: 4000,
 };
 
 export const netplayConstants = {
