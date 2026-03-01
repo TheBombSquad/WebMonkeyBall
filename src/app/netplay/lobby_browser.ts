@@ -54,6 +54,32 @@ export class LobbyBrowserController {
     return errorCode === 'room_not_found' || errorCode === 'unauthorized';
   }
 
+  private setJoinErrorStatus(lobbyStatus: HTMLElement, err: unknown) {
+    const message = err instanceof Error ? err.message : '';
+    if (message === 'room_locked') {
+      lobbyStatus.textContent = 'Lobby: room is locked';
+    } else if (message === 'room_full') {
+      lobbyStatus.textContent = 'Lobby: room is full';
+    } else {
+      lobbyStatus.textContent = 'Lobby: join failed';
+    }
+  }
+
+  private async cleanupFailedClientJoin(roomId: string, playerId: number, playerToken: string) {
+    this.deps.setLobbySignalShouldReconnect(false);
+    this.deps.clearLobbySignalRetry();
+    this.deps.resetNetplayConnections();
+    const lobbyClient = this.deps.lobbyClient;
+    if (!lobbyClient) {
+      return;
+    }
+    try {
+      await lobbyClient.leaveRoom(roomId, playerId, playerToken);
+    } catch {
+      // Ignore backend leave failures after client connection setup failure.
+    }
+  }
+
   async refreshLobbyList() {
     const { lobbyClient, lobbyList, lobbyStatus, multiplayerOnlineCount } = this.deps;
     if (!lobbyClient || !lobbyList || !lobbyStatus) {
@@ -160,25 +186,26 @@ export class LobbyBrowserController {
       return;
     }
     lobbyStatus.textContent = 'Lobby: joining...';
+    let result: { room: LobbyRoom; playerId: number; playerToken: string };
     try {
-      const result = await lobbyClient.joinRoom({ roomId });
-      this.deps.destroySingleplayerForNetplay();
-      this.deps.setLobbyRoom(result.room);
-      this.deps.setLobbySelfId(result.playerId);
-      this.deps.setLobbyPlayerToken(result.playerToken);
-      this.deps.setLobbyHostToken(null);
-      lobbyStatus.textContent = 'Lobby: joining room';
+      result = await lobbyClient.joinRoom({ roomId });
+    } catch (err) {
+      console.error(err);
+      this.setJoinErrorStatus(lobbyStatus, err);
+      return;
+    }
+    this.deps.destroySingleplayerForNetplay();
+    this.deps.setLobbyRoom(result.room);
+    this.deps.setLobbySelfId(result.playerId);
+    this.deps.setLobbyPlayerToken(result.playerToken);
+    this.deps.setLobbyHostToken(null);
+    lobbyStatus.textContent = 'Lobby: connecting...';
+    try {
       await this.deps.startClient(result.room, result.playerId, result.playerToken);
     } catch (err) {
       console.error(err);
-      const message = err instanceof Error ? err.message : '';
-      if (message === 'room_locked') {
-        lobbyStatus.textContent = 'Lobby: room is locked';
-      } else if (message === 'room_full') {
-        lobbyStatus.textContent = 'Lobby: room is full';
-      } else {
-        lobbyStatus.textContent = 'Lobby: join failed';
-      }
+      await this.cleanupFailedClientJoin(result.room.roomId, result.playerId, result.playerToken);
+      lobbyStatus.textContent = 'Lobby: connection failed';
     }
   }
 
@@ -203,25 +230,26 @@ export class LobbyBrowserController {
       return;
     }
     lobbyStatus.textContent = 'Lobby: joining...';
+    let result: { room: LobbyRoom; playerId: number; playerToken: string };
     try {
-      const result = await lobbyClient.joinRoom({ roomCode: code });
-      this.deps.destroySingleplayerForNetplay();
-      this.deps.setLobbyRoom(result.room);
-      this.deps.setLobbySelfId(result.playerId);
-      this.deps.setLobbyPlayerToken(result.playerToken);
-      this.deps.setLobbyHostToken(null);
-      lobbyStatus.textContent = 'Lobby: joining room';
+      result = await lobbyClient.joinRoom({ roomCode: code });
+    } catch (err) {
+      console.error(err);
+      this.setJoinErrorStatus(lobbyStatus, err);
+      return;
+    }
+    this.deps.destroySingleplayerForNetplay();
+    this.deps.setLobbyRoom(result.room);
+    this.deps.setLobbySelfId(result.playerId);
+    this.deps.setLobbyPlayerToken(result.playerToken);
+    this.deps.setLobbyHostToken(null);
+    lobbyStatus.textContent = 'Lobby: connecting...';
+    try {
       await this.deps.startClient(result.room, result.playerId, result.playerToken);
     } catch (err) {
       console.error(err);
-      const message = err instanceof Error ? err.message : '';
-      if (message === 'room_locked') {
-        lobbyStatus.textContent = 'Lobby: room is locked';
-      } else if (message === 'room_full') {
-        lobbyStatus.textContent = 'Lobby: room is full';
-      } else {
-        lobbyStatus.textContent = 'Lobby: join failed';
-      }
+      await this.cleanupFailedClientJoin(result.room.roomId, result.playerId, result.playerToken);
+      lobbyStatus.textContent = 'Lobby: connection failed';
     }
   }
 

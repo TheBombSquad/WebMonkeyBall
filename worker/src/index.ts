@@ -76,6 +76,7 @@ const LARGE_JSON_BODY_MAX_BYTES = 512 * 1024;
 const utf8Encoder = new TextEncoder();
 
 type RateLimit = { count: number; resetAt: number };
+const ENFORCE_ORIGIN_ALLOWLIST = false;
 
 function parseAllowedOrigins(env: Env): string[] {
   return env.ALLOWED_ORIGINS?.split(",")
@@ -84,6 +85,9 @@ function parseAllowedOrigins(env: Env): string[] {
 }
 
 function isRequestOriginAllowed(request: Request, env: Env): boolean {
+  if (!ENFORCE_ORIGIN_ALLOWLIST) {
+    return true;
+  }
   const allowlist = parseAllowedOrigins(env);
   if (allowlist.length === 0 || allowlist.includes("*")) {
     return true;

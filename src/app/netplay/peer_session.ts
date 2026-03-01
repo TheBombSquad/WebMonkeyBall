@@ -28,6 +28,7 @@ type NetplayState = {
 };
 
 type LobbyRoom = RoomInfo;
+const CLIENT_CONNECT_TIMEOUT_MS = 10000;
 
 type PeerSessionDeps = {
   lobbyClient: any;
@@ -270,15 +271,14 @@ export class PeerSessionController {
 
   async startClient(room: LobbyRoom, playerId: number, playerToken: string) {
     if (!this.deps.lobbyClient) {
-      return;
+      throw new Error('lobby_unavailable');
     }
     if (!playerToken) {
       if (this.deps.lobbyStatus) {
         this.deps.lobbyStatus.textContent = 'Lobby: auth failed';
       }
-      return;
+      throw new Error('auth_failed');
     }
-    this.deps.setNetplayEnabled(true);
     const state = this.deps.ensureNetplayState('client');
     const roomMode = this.deps.getRoomGameMode(room);
     const roomModeOptions = this.deps.getRoomGameModeOptions(room, roomMode);
@@ -301,8 +301,46 @@ export class PeerSessionController {
     this.deps.setClientPeer(clientPeer);
     clientPeer.playerId = playerId;
     clientPeer.hostId = room.hostId;
+    let connectionEstablished = false;
+    let connectionSettled = false;
+    let connectionTimeout: number | null = null;
+    let resolveConnection: (() => void) | null = null;
+    let rejectConnection: ((reason?: unknown) => void) | null = null;
+    const settleConnection = (error: Error | null) => {
+      if (connectionSettled) {
+        return;
+      }
+      connectionSettled = true;
+      if (connectionTimeout !== null) {
+        window.clearTimeout(connectionTimeout);
+        connectionTimeout = null;
+      }
+      if (error) {
+        rejectConnection?.(error);
+        return;
+      }
+      resolveConnection?.();
+    };
+    const connectedPromise = new Promise<void>((resolve, reject) => {
+      resolveConnection = resolve;
+      rejectConnection = reject;
+    });
+
     clientPeer.onConnect = () => {
+      connectionEstablished = true;
+      this.deps.setNetplayEnabled(true);
       this.deps.broadcastLocalProfile();
+      settleConnection(null);
+    };
+    clientPeer.onDisconnect = () => {
+      if (!connectionEstablished) {
+        settleConnection(new Error('connection_failed'));
+        return;
+      }
+      if (this.deps.lobbyStatus) {
+        this.deps.lobbyStatus.textContent = 'Lobby: disconnected';
+      }
+      void this.deps.handleHostDisconnect();
     };
     await clientPeer.createConnection();
 
@@ -332,13 +370,11 @@ export class PeerSessionController {
 
     this.deps.getLobbySignalReconnectFn()?.();
     clientPeer.onSignal = (signal) => this.deps.getLobbySignal()?.send(signal);
-    clientPeer.onDisconnect = () => {
-      if (this.deps.lobbyStatus) {
-        this.deps.lobbyStatus.textContent = 'Lobby: disconnected';
-      }
-      void this.deps.handleHostDisconnect();
-    };
+    connectionTimeout = window.setTimeout(() => {
+      settleConnection(new Error('connection_failed'));
+    }, CLIENT_CONNECT_TIMEOUT_MS);
     this.deps.getLobbySignal()?.send({ type: 'signal', from: playerId, to: room.hostId, payload: { join: true } });
+    await connectedPromise;
     this.deps.startLobbyHeartbeat(room.roomId);
     if (this.deps.lobbyStatus) {
       this.deps.lobbyStatus.textContent = 'Lobby: connected';
