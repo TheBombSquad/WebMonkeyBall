@@ -789,6 +789,7 @@ netplayMessageFlow = new NetplayMessageFlowController({
   hostMaxInputRollback: NETPLAY_HOST_MAX_INPUT_ROLLBACK,
   hostSnapshotCooldownMs: NETPLAY_HOST_SNAPSHOT_COOLDOWN_MS,
   snapshotCooldownMs: NETPLAY_SNAPSHOT_COOLDOWN_MS,
+  snapshotMismatchCooldownMs: NETPLAY_SNAPSHOT_MISMATCH_COOLDOWN_MS,
 });
 netplayRuntime = new NetplayRuntimeController({
   game,
@@ -850,6 +851,7 @@ netplayRuntime = new NetplayRuntimeController({
     lagFuseFrames: NETPLAY_LAG_FUSE_FRAMES,
     lagFuseMs: NETPLAY_LAG_FUSE_MS,
     snapshotCooldownMs: NETPLAY_SNAPSHOT_COOLDOWN_MS,
+    snapshotMismatchCooldownMs: NETPLAY_SNAPSHOT_MISMATCH_COOLDOWN_MS,
     hostSnapshotBehindFrames: NETPLAY_HOST_SNAPSHOT_BEHIND_FRAMES,
     hostSnapshotCooldownMs: NETPLAY_HOST_SNAPSHOT_COOLDOWN_MS,
     clientInactivityTimeoutMs: NETPLAY_CLIENT_INACTIVITY_TIMEOUT_MS,

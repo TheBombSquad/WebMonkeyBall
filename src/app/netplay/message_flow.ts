@@ -65,6 +65,7 @@ type MessageFlowDeps = {
   hostMaxInputRollback: number;
   hostSnapshotCooldownMs: number;
   snapshotCooldownMs: number;
+  snapshotMismatchCooldownMs: number;
 };
 
 export class NetplayMessageFlowController {
@@ -323,7 +324,9 @@ export class NetplayMessageFlowController {
       });
       const localHash = state.hashHistory.get(frame);
       if (localHash !== undefined && localHash !== expected && this.canValidateHashFrame(state, frame)) {
-        this.recordHashMismatch(state, frame, expected, localHash, performance.now());
+        if (this.recordHashMismatch(state, frame, expected, localHash, performance.now())) {
+          this.deps.requestSnapshot('mismatch', frame);
+        }
       }
       return;
     }
@@ -389,6 +392,13 @@ export class NetplayMessageFlowController {
       if (currentState) {
         currentState.lastReceivedHostFrame = Math.max(currentState.lastReceivedHostFrame, msg.frame);
         currentState.lastHostFrameTimeMs = performance.now();
+        currentState.debugSnapshotsReceived = (currentState.debugSnapshotsReceived ?? 0) + 1;
+        currentState.debugLastSnapshotReceivedFrame = msg.frame;
+        const localStageId = this.deps.game.stage?.stageId;
+        if (msg.stageId !== undefined && localStageId !== msg.stageId) {
+          currentState.debugSnapshotsDeferredStageId = (currentState.debugSnapshotsDeferredStageId ?? 0) + 1;
+          currentState.debugLastSnapshotApplyResult = 'deferred_stage_id';
+        }
       }
       if (!msg.stageId || this.deps.game.stage?.stageId === msg.stageId) {
         this.deps.tryApplyPendingSnapshot(this.deps.game.stage?.stageId ?? 0);
@@ -476,6 +486,13 @@ export class NetplayMessageFlowController {
         currentState.receivedHostFrames?.clear?.();
         currentState.pendingHostFrameReceipts?.clear?.();
         currentState.highestContiguousHostFrame = this.getContiguousBaseFrame(currentState);
+        currentState.debugSnapshotsReceived = 0;
+        currentState.debugSnapshotsApplied = 0;
+        currentState.debugSnapshotsDroppedStageSeq = 0;
+        currentState.debugSnapshotsDeferredStageId = 0;
+        currentState.debugLastSnapshotReceivedFrame = null;
+        currentState.debugLastSnapshotAppliedFrame = null;
+        currentState.debugLastSnapshotApplyResult = null;
       }
       if (msg.lateJoin && Number.isFinite(this.deps.game.localPlayerId) && this.deps.game.localPlayerId > 0) {
         this.deps.markPlayerPendingSpawn(this.deps.game.localPlayerId, msg.stageSeq);
@@ -618,9 +635,13 @@ export class NetplayMessageFlowController {
     }
     if (msg.type === 'snapshot_request') {
       const nowMs = performance.now();
+      const reason = msg.reason === 'mismatch' ? 'mismatch' : 'lag';
+      const cooldownMs = reason === 'mismatch'
+        ? this.deps.snapshotMismatchCooldownMs
+        : this.deps.snapshotCooldownMs;
       const lastRequest = clientState.lastSnapshotRequestMs ?? 0;
       if (clientState.lastSnapshotRequestMs !== null
-        && (nowMs - lastRequest) < this.deps.snapshotCooldownMs) {
+        && (nowMs - lastRequest) < cooldownMs) {
         return;
       }
       clientState.lastSnapshotRequestMs = nowMs;

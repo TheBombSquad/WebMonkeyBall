@@ -146,6 +146,13 @@ export class NetplayStateSyncController {
       debugLastSnapshotRequestReason: null,
       debugLastSnapshotRequestFrame: null,
       debugLastSnapshotRequestAtMs: null,
+      debugSnapshotsReceived: 0,
+      debugSnapshotsApplied: 0,
+      debugSnapshotsDroppedStageSeq: 0,
+      debugSnapshotsDeferredStageId: 0,
+      debugLastSnapshotReceivedFrame: null,
+      debugLastSnapshotAppliedFrame: null,
+      debugLastSnapshotApplyResult: null,
       lastAuthHashFrameSent: -1,
       pendingHostUpdates: new Set<number>(),
       lastHostFrameTimeMs: null,
@@ -215,6 +222,13 @@ export class NetplayStateSyncController {
     state.debugLastSnapshotRequestReason = null;
     state.debugLastSnapshotRequestFrame = null;
     state.debugLastSnapshotRequestAtMs = null;
+    state.debugSnapshotsReceived = 0;
+    state.debugSnapshotsApplied = 0;
+    state.debugSnapshotsDroppedStageSeq = 0;
+    state.debugSnapshotsDeferredStageId = 0;
+    state.debugLastSnapshotReceivedFrame = null;
+    state.debugLastSnapshotAppliedFrame = null;
+    state.debugLastSnapshotApplyResult = null;
     state.lastAuthHashFrameSent = -1;
     state.pendingHostUpdates.clear();
     state.pendingPings.clear();

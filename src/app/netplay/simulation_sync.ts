@@ -164,10 +164,16 @@ export class NetplaySimulationSyncController {
     }
     const state = this.deps.getNetplayState();
     if (state && pendingSnapshot.stageSeq !== undefined && pendingSnapshot.stageSeq !== state.stageSeq) {
+      state.debugSnapshotsDroppedStageSeq = (state.debugSnapshotsDroppedStageSeq ?? 0) + 1;
+      state.debugLastSnapshotApplyResult = 'dropped_stage_seq';
       this.deps.setPendingSnapshot(null);
       return;
     }
     if (pendingSnapshot.stageId !== undefined && pendingSnapshot.stageId !== stageId) {
+      if (state) {
+        state.debugSnapshotsDeferredStageId = (state.debugSnapshotsDeferredStageId ?? 0) + 1;
+        state.debugLastSnapshotApplyResult = 'deferred_stage_id';
+      }
       return;
     }
     const targetFrame = state?.session.getFrame() ?? this.deps.game.simTick;
@@ -208,6 +214,9 @@ export class NetplaySimulationSyncController {
           state.expectedHashProbeByFrame.delete(key);
         }
       }
+      state.debugSnapshotsApplied = (state.debugSnapshotsApplied ?? 0) + 1;
+      state.debugLastSnapshotAppliedFrame = snapshotFrame;
+      state.debugLastSnapshotApplyResult = 'applied';
     }
     this.resimFromSnapshot(snapshotFrame, targetFrame);
     if (state) {

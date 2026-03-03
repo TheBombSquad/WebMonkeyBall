@@ -886,7 +886,7 @@ export class HostRelay {
   }
 
   sendTo(playerId: number, msg: HostToClientMessage) {
-    this.sendPayload(playerId, JSON.stringify(msg), isFastMessage(msg));
+    return this.sendPayload(playerId, JSON.stringify(msg), isFastMessage(msg));
   }
 
   sendFrameBatch(playerId: number, lastAck: number, frames: FrameBundleMessage[]) {
@@ -1119,7 +1119,7 @@ export class ClientPeer {
       try {
         primary.send(payload);
         this.traffic.recordUp(size);
-        return;
+        return true;
       } catch {
         // Try fallback below.
       }
@@ -1128,14 +1128,16 @@ export class ClientPeer {
       try {
         fallback.send(payload);
         this.traffic.recordUp(size);
+        return true;
       } catch {
         // Ignore send failures from a stale/closing channel.
       }
     }
+    return false;
   }
 
   send(msg: ClientToHostMessage) {
-    this.sendPayload(JSON.stringify(msg), isFastMessage(msg));
+    return this.sendPayload(JSON.stringify(msg), isFastMessage(msg));
   }
 
   sendInputBatch(stageSeq: number, lastAck: number, entries: InputBatchEntry[]) {

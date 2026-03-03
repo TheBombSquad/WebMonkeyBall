@@ -3,8 +3,8 @@ import type { Game } from '../../game.js';
 type SnapshotFlowDeps = {
   game: Game;
   getNetplayState: () => any | null;
-  getClientPeer: () => { send: (msg: any) => void } | null;
-  getHostRelay: () => { sendTo: (playerId: number, msg: any) => void } | null;
+  getClientPeer: () => { send: (msg: any) => boolean | void } | null;
+  getHostRelay: () => { sendTo: (playerId: number, msg: any) => boolean | void } | null;
   rollbackAndResim: (startFrame: number) => boolean;
   snapshotCooldownMs: number;
   snapshotMismatchCooldownMs: number;
@@ -36,9 +36,19 @@ export class SnapshotFlowController {
     if (!cooldownOk) {
       return;
     }
+    const targetFrame = frame ?? state.session.getFrame();
+    const snapshotRequest = {
+      type: 'snapshot_request',
+      stageSeq: state.stageSeq,
+      frame: targetFrame,
+      reason,
+    };
+    const sendResult = clientPeer.send(snapshotRequest);
+    if (sendResult === false) {
+      return;
+    }
     state.lastSnapshotRequestTimeMs = nowMs;
     state.awaitingSnapshot = true;
-    const targetFrame = frame ?? state.session.getFrame();
     if (reason === 'mismatch') {
       state.debugSnapshotRequestsMismatch = (state.debugSnapshotRequestsMismatch ?? 0) + 1;
     } else {
@@ -47,12 +57,6 @@ export class SnapshotFlowController {
     state.debugLastSnapshotRequestReason = reason;
     state.debugLastSnapshotRequestFrame = targetFrame;
     state.debugLastSnapshotRequestAtMs = nowMs;
-    clientPeer.send({
-      type: 'snapshot_request',
-      stageSeq: state.stageSeq,
-      frame: targetFrame,
-      reason,
-    });
   }
 
   hostApplyPendingRollback() {
@@ -95,13 +99,15 @@ export class SnapshotFlowController {
     if (!snapshotState) {
       return;
     }
-    hostRelay.sendTo(playerId, {
+    const snapshot = {
       type: 'snapshot',
       stageSeq: state.stageSeq,
       frame: snapshotFrame,
       state: snapshotState,
       stageId: this.deps.game.stage?.stageId,
       gameSource: this.deps.game.gameSource,
-    });
+    };
+    const sendResult = hostRelay.sendTo(playerId, snapshot);
+    return sendResult !== false;
   }
 }

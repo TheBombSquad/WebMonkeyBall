@@ -21,6 +21,7 @@ type RuntimeConstants = {
   lagFuseFrames: number;
   lagFuseMs: number;
   snapshotCooldownMs: number;
+  snapshotMismatchCooldownMs: number;
   hostSnapshotBehindFrames: number;
   hostSnapshotCooldownMs: number;
   clientInactivityTimeoutMs: number;
@@ -513,10 +514,23 @@ export class NetplayRuntimeController {
         clientPeer.send({ type: 'ping', id: pingId });
       }
       const hostAge = state.lastHostFrameTimeMs === null ? null : nowMs - state.lastHostFrameTimeMs;
-      const lastRequest = state.lastSnapshotRequestTimeMs ?? 0;
-      const canRequest = state.lastSnapshotRequestTimeMs === null
+      let lastRequest = state.lastSnapshotRequestTimeMs ?? 0;
+      if (state.awaitingSnapshot && state.lastSnapshotRequestTimeMs !== null) {
+        const lastReason = state.debugLastSnapshotRequestReason === 'mismatch' ? 'mismatch' : 'lag';
+        const retryCooldownMs = lastReason === 'mismatch'
+          ? this.deps.constants.snapshotMismatchCooldownMs
+          : this.deps.constants.snapshotCooldownMs;
+        if ((nowMs - lastRequest) >= retryCooldownMs) {
+          const retryFrame = Number.isFinite(state.debugLastSnapshotRequestFrame)
+            ? Math.floor(state.debugLastSnapshotRequestFrame)
+            : Math.max(0, Math.floor(state.lastReceivedHostFrame ?? 0));
+          this.deps.requestSnapshot(lastReason, retryFrame, true);
+          lastRequest = state.lastSnapshotRequestTimeMs ?? lastRequest;
+        }
+      }
+      const canRequestLag = state.lastSnapshotRequestTimeMs === null
         || (nowMs - lastRequest) >= this.deps.constants.snapshotCooldownMs;
-      if (hostAge !== null && hostAge >= this.deps.constants.hostStallMs && canRequest) {
+      if (hostAge !== null && hostAge >= this.deps.constants.hostStallMs && canRequestLag) {
         this.deps.requestSnapshot('lag', state.lastReceivedHostFrame, true);
       }
       if (drift > this.deps.constants.lagFuseFrames) {
@@ -524,7 +538,7 @@ export class NetplayRuntimeController {
           state.lagBehindSinceMs = nowMs;
         }
         const timeBehind = nowMs - state.lagBehindSinceMs;
-        if (timeBehind >= this.deps.constants.lagFuseMs && canRequest) {
+        if (timeBehind >= this.deps.constants.lagFuseMs && canRequestLag) {
           this.deps.requestSnapshot('lag', state.lastReceivedHostFrame, true);
         }
       } else {
@@ -625,6 +639,17 @@ export class NetplayRuntimeController {
     const snapReason = state.debugLastSnapshotRequestReason ?? '-';
     const snapFrame = Number.isFinite(state.debugLastSnapshotRequestFrame) ? state.debugLastSnapshotRequestFrame : '-';
     lines.push(`snapReq m=${snapMismatch} l=${snapLag} last=${snapReason}@${snapFrame}`);
+    const snapRx = state.debugSnapshotsReceived ?? 0;
+    const snapApplied = state.debugSnapshotsApplied ?? 0;
+    const snapDroppedSeq = state.debugSnapshotsDroppedStageSeq ?? 0;
+    const snapDeferredStage = state.debugSnapshotsDeferredStageId ?? 0;
+    const snapLastRx = Number.isFinite(state.debugLastSnapshotReceivedFrame) ? state.debugLastSnapshotReceivedFrame : '-';
+    const snapLastApplied = Number.isFinite(state.debugLastSnapshotAppliedFrame) ? state.debugLastSnapshotAppliedFrame : '-';
+    const snapApplyResult = state.debugLastSnapshotApplyResult ?? '-';
+    lines.push(
+      `snapRx=${snapRx} apply=${snapApplied} dropSeq=${snapDroppedSeq} deferStage=${snapDeferredStage}`
+      + ` lastRx=${snapLastRx} lastApply=${snapLastApplied} result=${snapApplyResult}`,
+    );
     if (Number.isFinite(state.debugLastMismatchFrame)) {
       lines.push(
         `mismatch#${state.debugHashMismatchCount ?? 0}`
