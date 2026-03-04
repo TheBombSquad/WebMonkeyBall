@@ -55,6 +55,10 @@ import { bindLobbyEventHandlers } from './app/netplay/lobby_bindings.js';
 import { createPresenceUiHelpers } from './app/netplay/presence_ui.js';
 import { ProfileUiController } from './app/netplay/profile_ui.js';
 import { BallPreviewController } from './app/netplay/ball_preview.js';
+import {
+  formatLobbyDisconnectStatus,
+  type LobbyDisconnectReason,
+} from './app/netplay/disconnect_reasons.js';
 import type { LobbyStateController } from './app/netplay/lobby_state.js';
 import {
   RoomMetaController,
@@ -1590,7 +1594,7 @@ export function runMainApp() {
     menuFlow.setActiveMenu('main');
   }
   
-  async function handleHostDisconnect() {
+  async function handleHostDisconnect(reason: LobbyDisconnectReason = { code: 'host_peer_disconnect' }) {
     if (performance.now() < suppressHostDisconnectUntil) {
       suppressHostDisconnectUntil = 0;
       return;
@@ -1599,7 +1603,7 @@ export function runMainApp() {
       return;
     }
     if (lobbyStatus) {
-      lobbyStatus.textContent = 'Lobby: disconnected';
+      lobbyStatus.textContent = formatLobbyDisconnectStatus(reason);
     }
     if (running) {
       if (netplayState) {
@@ -1722,7 +1726,11 @@ export function runMainApp() {
     } catch (err) {
       console.error(err);
     }
-    hostRelay?.sendTo(playerId, { type: 'kick', reason: 'Removed by host' });
+    hostRelay?.sendTo(playerId, {
+      type: 'kick',
+      reasonCode: 'kick_removed_by_host',
+      reason: 'Removed by host',
+    });
     window.setTimeout(() => {
       hostRelay?.disconnect(playerId);
       lobbyHeartbeat?.broadcastRoomUpdate();

@@ -1,6 +1,6 @@
 import type { Game } from '../../game.js';
 import type { QuantizedInput } from '../../determinism.js';
-import type { FrameBundleMessage } from '../../netcode_protocol.js';
+import type { FrameBundleMessage, KickReasonCode } from '../../netcode_protocol.js';
 
 type RuntimeConstants = {
   maxFrameDelta: number;
@@ -50,7 +50,7 @@ type RuntimeDeps = {
   requestSnapshot: (reason: 'mismatch' | 'lag', frame?: number, force?: boolean) => void;
   hostApplyPendingRollback: () => void;
   sendSnapshotToClient: (playerId: number, frame?: number) => void;
-  rejectHostConnection: (playerId: number, reason?: string) => void;
+  rejectHostConnection: (playerId: number, reasonCode?: KickReasonCode, reason?: string) => void;
   maybeResendStageReady: (nowMs: number) => void;
   maybeForceStageSync: (nowMs: number) => void;
   getAuthoritativeHashFrame: (state: any) => number | null;
@@ -332,7 +332,11 @@ export class NetplayRuntimeController {
         continue;
       }
       clientState.timeoutKickSentMs = nowMs;
-      this.deps.rejectHostConnection(playerId, `Disconnected: timed out (${Math.round(timeoutMs / 1000)}s no messages)`);
+      this.deps.rejectHostConnection(
+        playerId,
+        'kick_client_inactivity_timeout',
+        `Disconnected: timed out (${Math.round(timeoutMs / 1000)}s no messages)`,
+      );
     }
   }
 

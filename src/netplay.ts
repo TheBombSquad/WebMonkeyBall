@@ -16,6 +16,13 @@ export type SignalMessage = {
   payload: any;
 };
 
+export type SignalCloseInfo = {
+  code: number;
+  reason: string;
+  wasClean: boolean;
+  byClient: boolean;
+};
+
 export type RoomJoinResult = {
   room: RoomInfo;
   playerId: number;
@@ -585,13 +592,14 @@ export class LobbyClient {
     playerId: number,
     token: string,
     onMessage: (msg: SignalMessage) => void,
-    onClose: () => void,
+    onClose: (info: SignalCloseInfo) => void,
   ) {
     const ws = new WebSocket(
       `${this.baseUrl.replace('http', 'ws')}/room/${roomId}?playerId=${playerId}`,
       [SIGNAL_PROTOCOL, `${SIGNAL_AUTH_PROTOCOL_PREFIX}${token}`],
     );
     const pending: SignalMessage[] = [];
+    let closedByClient = false;
     ws.addEventListener('open', () => {
       while (pending.length > 0) {
         const msg = pending.shift();
@@ -625,7 +633,14 @@ export class LobbyClient {
         // Ignore malformed.
       }
     });
-    ws.addEventListener('close', () => onClose());
+    ws.addEventListener('close', (event) => {
+      onClose({
+        code: event.code,
+        reason: event.reason ?? '',
+        wasClean: event.wasClean,
+        byClient: closedByClient,
+      });
+    });
     return {
       send: (msg: SignalMessage) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -634,7 +649,10 @@ export class LobbyClient {
           pending.push(msg);
         }
       },
-      close: () => ws.close(),
+      close: () => {
+        closedByClient = true;
+        ws.close(1000, 'ClientClosed');
+      },
     };
   }
 

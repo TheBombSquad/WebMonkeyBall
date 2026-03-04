@@ -617,6 +617,9 @@ lobbyHeartbeat = new LobbyHeartbeatController({
   },
   heartbeatFallbackMs: LOBBY_HEARTBEAT_FALLBACK_MS,
   buildRoomMeta: () => roomMeta.buildRoomMeta(),
+  onHeartbeatDisconnect: (reason) => {
+    void handleHostDisconnect(reason);
+  },
 });
 
 lobbyUiController = new LobbyUiController({
@@ -767,8 +770,8 @@ netplayMessageFlow = new NetplayMessageFlowController({
     snapshotFlow?.sendSnapshotToClient(playerId, frame);
   },
   hostRelay: () => state.hostRelay,
-  rejectHostConnection: (playerId, reason) => {
-    peerSession.rejectHostConnection(playerId, reason);
+  rejectHostConnection: (playerId, reasonCode, reason) => {
+    peerSession.rejectHostConnection(playerId, reasonCode, reason);
   },
   shouldJoinAsSpectator: () => netplayConnectionState?.shouldJoinAsSpectator() ?? false,
   sendStageSyncToClient: (playerId) => {
@@ -817,8 +820,8 @@ netplayRuntime = new NetplayRuntimeController({
   sendSnapshotToClient: (playerId, frame) => {
     snapshotFlow?.sendSnapshotToClient(playerId, frame);
   },
-  rejectHostConnection: (playerId, reason) => {
-    peerSession.rejectHostConnection(playerId, reason);
+  rejectHostConnection: (playerId, reasonCode, reason) => {
+    peerSession.rejectHostConnection(playerId, reasonCode, reason);
   },
   maybeResendStageReady: (nowMs) => {
     netplaySync?.maybeResendStageReady(nowMs);

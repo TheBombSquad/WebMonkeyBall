@@ -55,6 +55,48 @@ type LobbyState = {
   codes: Record<string, string>;
 };
 
+type SignalRevokeReasonCode =
+  | "host_close"
+  | "host_left"
+  | "host_disconnect"
+  | "room_expired"
+  | "room_empty"
+  | "host_missing"
+  | "host_inactive"
+  | "player_kicked"
+  | "player_left"
+  | "player_stale"
+  | "player_join_timeout"
+  | "room_cleanup";
+
+const SIGNAL_REVOKE_REASON_CODES = new Set<SignalRevokeReasonCode>([
+  "host_close",
+  "host_left",
+  "host_disconnect",
+  "room_expired",
+  "room_empty",
+  "host_missing",
+  "host_inactive",
+  "player_kicked",
+  "player_left",
+  "player_stale",
+  "player_join_timeout",
+  "room_cleanup",
+]);
+
+function parseSignalRevokeReason(value: unknown): SignalRevokeReasonCode {
+  if (typeof value === "string" && SIGNAL_REVOKE_REASON_CODES.has(value as SignalRevokeReasonCode)) {
+    return value as SignalRevokeReasonCode;
+  }
+  return "room_cleanup";
+}
+
+const SIGNAL_CLOSE_REASON_PREFIX = "wmb:";
+
+function encodeSignalCloseReason(reason: SignalRevokeReasonCode): string {
+  return `${SIGNAL_CLOSE_REASON_PREFIX}${reason}`;
+}
+
 const ROOM_TTL_MS = 1000 * 60 * 5;
 const PLAYER_JOIN_GRACE_MS = 1000 * 20;
 const PLAYER_CONNECTED_STALE_MS = 1000 * 35;
@@ -531,17 +573,16 @@ export class Lobby implements DurableObject {
 
   private cleanupExpired(): {
     dirty: boolean;
-    revocations: Array<{ roomId: string; players: PlayerRecord[] }>;
+    revocations: Array<{ roomId: string; players: PlayerRecord[]; reason: SignalRevokeReasonCode }>;
   } {
     const now = nowMs();
     let dirty = false;
-    const revocations: Array<{ roomId: string; players: PlayerRecord[] }> = [];
+    const revocations: Array<{ roomId: string; players: PlayerRecord[]; reason: SignalRevokeReasonCode }> = [];
     for (const roomId of Object.keys(this.data.rooms)) {
       const room = this.data.rooms[roomId];
       if (!room) {
         continue;
       }
-      const playersForRevocation = Object.values(room.players ?? {});
       let roomDirty = false;
       for (const [playerKey, player] of Object.entries(room.players ?? {})) {
         const neverConnected = !player.connected && player.lastActiveAt <= player.joinedAt;
@@ -549,6 +590,14 @@ export class Lobby implements DurableObject {
         const staleWindow = player.connected ? PLAYER_CONNECTED_STALE_MS : PLAYER_JOIN_GRACE_MS;
         const staleActive = now - player.lastActiveAt > staleWindow;
         if (staleJoin || staleActive) {
+          const staleReason: SignalRevokeReasonCode = player.playerId === room.hostId
+            ? "host_inactive"
+            : (staleJoin ? "player_join_timeout" : "player_stale");
+          revocations.push({
+            roomId,
+            players: [player],
+            reason: staleReason,
+          });
           delete room.players[playerKey];
           roomDirty = true;
         }
@@ -557,6 +606,7 @@ export class Lobby implements DurableObject {
         this.data.rooms[roomId] = room;
         dirty = true;
       }
+      const playersForRevocation = Object.values(room.players ?? {});
       const hostPlayer = room.players?.[playerKey(room.hostId)];
       const hostMissing = !hostPlayer;
       const hostInactive = !!hostPlayer
@@ -567,7 +617,11 @@ export class Lobby implements DurableObject {
         if (room.roomCode) {
           delete this.data.codes[room.roomCode];
         }
-        revocations.push({ roomId, players: playersForRevocation });
+        revocations.push({
+          roomId,
+          players: playersForRevocation,
+          reason: hostMissing ? "host_missing" : "host_inactive",
+        });
         dirty = true;
         continue;
       }
@@ -576,7 +630,7 @@ export class Lobby implements DurableObject {
         if (room.roomCode) {
           delete this.data.codes[room.roomCode];
         }
-        revocations.push({ roomId, players: playersForRevocation });
+        revocations.push({ roomId, players: playersForRevocation, reason: "room_empty" });
         dirty = true;
         continue;
       }
@@ -585,7 +639,7 @@ export class Lobby implements DurableObject {
         if (room.roomCode) {
           delete this.data.codes[room.roomCode];
         }
-        revocations.push({ roomId, players: playersForRevocation });
+        revocations.push({ roomId, players: playersForRevocation, reason: "room_expired" });
         dirty = true;
       }
     }
@@ -607,7 +661,11 @@ export class Lobby implements DurableObject {
     return false;
   }
 
-  private async revokeRoomPlayerSignal(roomId: string, player: PlayerRecord): Promise<void> {
+  private async revokeRoomPlayerSignal(
+    roomId: string,
+    player: PlayerRecord,
+    reason: SignalRevokeReasonCode = "room_cleanup",
+  ): Promise<void> {
     if (!roomId || !player?.playerId || !player?.token) {
       return;
     }
@@ -617,14 +675,16 @@ export class Lobby implements DurableObject {
       await stub.fetch("https://room.internal/revoke", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ playerId: player.playerId, token: player.token }),
+        body: JSON.stringify({ playerId: player.playerId, token: player.token, reason }),
       });
     } catch {
       // Ignore revocation failures; lobby state remains authoritative.
     }
   }
 
-  private async revokeRoomSignals(revocations: Array<{ roomId: string; players: PlayerRecord[] }>): Promise<void> {
+  private async revokeRoomSignals(
+    revocations: Array<{ roomId: string; players: PlayerRecord[]; reason: SignalRevokeReasonCode }>,
+  ): Promise<void> {
     const tasks: Promise<void>[] = [];
     for (const revocation of revocations) {
       const roomId = revocation.roomId;
@@ -632,7 +692,7 @@ export class Lobby implements DurableObject {
         continue;
       }
       for (const player of revocation.players) {
-        tasks.push(this.revokeRoomPlayerSignal(roomId, player));
+        tasks.push(this.revokeRoomPlayerSignal(roomId, player, revocation.reason));
       }
     }
     if (tasks.length === 0) {
@@ -881,7 +941,7 @@ export class Lobby implements DurableObject {
         delete this.data.codes[room.roomCode];
       }
       await this.save();
-      await this.revokeRoomSignals([{ roomId, players: playersForRevocation }]);
+      await this.revokeRoomSignals([{ roomId, players: playersForRevocation, reason: "host_close" }]);
       return jsonResponse({ ok: true }, 200, origin);
     }
 
@@ -943,7 +1003,7 @@ export class Lobby implements DurableObject {
       room.lastActiveAt = nowMs();
       this.data.rooms[roomId] = room;
       await this.save();
-      await this.revokeRoomPlayerSignal(roomId, kickedPlayer);
+      await this.revokeRoomPlayerSignal(roomId, kickedPlayer, "player_kicked");
       return jsonResponse({ ok: true }, 200, origin);
     }
 
@@ -979,9 +1039,13 @@ export class Lobby implements DurableObject {
       }
       await this.save();
       if (deletedRoom) {
-        await this.revokeRoomSignals([{ roomId, players: playersForRevocation }]);
+        await this.revokeRoomSignals([{
+          roomId,
+          players: playersForRevocation,
+          reason: leavingHost ? "host_left" : "room_empty",
+        }]);
       } else {
-        await this.revokeRoomPlayerSignal(roomId, player);
+        await this.revokeRoomPlayerSignal(roomId, player, "player_left");
       }
       return jsonResponse({ ok: true }, 200, origin);
     }
@@ -1024,7 +1088,7 @@ export class Lobby implements DurableObject {
           delete this.data.codes[room.roomCode];
         }
         await this.save();
-        await this.revokeRoomSignals([{ roomId, players: playersForRevocation }]);
+        await this.revokeRoomSignals([{ roomId, players: playersForRevocation, reason: "host_disconnect" }]);
         return jsonResponse({ ok: true }, 200, origin);
       }
       const now = nowMs();
@@ -1147,12 +1211,13 @@ export class Room implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "POST" && url.pathname === "/revoke") {
-      const body = await parseJson<{ playerId?: number; token?: string }>(request, SMALL_JSON_BODY_MAX_BYTES);
+      const body = await parseJson<{ playerId?: number; token?: string; reason?: string }>(request, SMALL_JSON_BODY_MAX_BYTES);
       if (!body) {
         return jsonResponse({ ok: false, error: "bad_request" }, 400, null);
       }
       const playerId = Number(body.playerId ?? 0);
       const token = typeof body.token === "string" ? body.token : "";
+      const reason = parseSignalRevokeReason(body.reason);
       if (!Number.isFinite(playerId) || playerId <= 0 || !token) {
         return jsonResponse({ ok: false, error: "bad_request" }, 400, null);
       }
@@ -1162,7 +1227,7 @@ export class Room implements DurableObject {
         }
         this.connections.delete(connId);
         try {
-          conn.socket.close(4001, "Revoked");
+          conn.socket.close(4001, encodeSignalCloseReason(reason));
         } catch {
           // Ignore.
         }

@@ -151,11 +151,11 @@ export class NetplayConnectionStateController {
   }
 
   resetNetplayConnections({ preserveLobby = false }: { preserveLobby?: boolean } = {}) {
-    this.deps.getLobbySignal()?.close();
-    this.deps.setLobbySignal(null);
     this.deps.setLobbySignalShouldReconnect(false);
     this.deps.setLobbySignalReconnectFn(null);
     this.clearLobbySignalRetry();
+    this.deps.getLobbySignal()?.close();
+    this.deps.setLobbySignal(null);
     this.deps.getHostRelay()?.closeAll();
     this.deps.setHostRelay(null);
     this.deps.getClientPeer()?.close();

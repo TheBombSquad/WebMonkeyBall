@@ -3,10 +3,15 @@ import type { GameSource } from '../../shared/constants/index.js';
 import type {
   ClientToHostMessage,
   HostToClientMessage,
+  KickReasonCode,
   PlayerProfile,
   RoomGameModeOptions,
   RoomInfo,
 } from '../../netcode_protocol.js';
+import {
+  formatLobbyDisconnectStatus,
+  resolveKickDisconnectReason,
+} from './disconnect_reasons.js';
 
 type MessageFlowDeps = {
   game: Game;
@@ -49,7 +54,7 @@ type MessageFlowDeps = {
   startStage: (course: any) => Promise<void>;
   sendSnapshotToClient: (playerId: number, frame?: number) => void;
   hostRelay: () => any | null;
-  rejectHostConnection: (playerId: number, reason?: string) => void;
+  rejectHostConnection: (playerId: number, reasonCode?: KickReasonCode, reason?: string) => void;
   shouldJoinAsSpectator: () => boolean;
   sendStageSyncToClient: (playerId: number) => void;
   maybeSendStageSync: () => void;
@@ -257,7 +262,9 @@ export class NetplayMessageFlowController {
       this.deps.game.pause();
       this.deps.setActiveMenu('multiplayer');
       if (this.deps.lobbyStatus) {
-        this.deps.lobbyStatus.textContent = msg.reason ? `Lobby: ${msg.reason}` : 'Lobby: removed by host';
+        this.deps.lobbyStatus.textContent = formatLobbyDisconnectStatus(
+          resolveKickDisconnectReason(msg.reasonCode, msg.reason),
+        );
       }
       return;
     }
@@ -543,7 +550,7 @@ export class NetplayMessageFlowController {
     if (!this.deps.game.players.some((player) => player.id === playerId)) {
       if (this.deps.game.players.length >= this.deps.game.maxPlayers) {
         state.clientStates.delete(playerId);
-        this.deps.rejectHostConnection(playerId, 'Room is full');
+        this.deps.rejectHostConnection(playerId, 'kick_room_full', 'Room is full');
         return;
       }
       const joinAsSpectator = this.deps.shouldJoinAsSpectator();

@@ -1,6 +1,10 @@
 import type { LobbyClient } from '../../netplay.js';
 import type { MultiplayerGameMode } from '../../game.js';
 import type { RoomInfo } from '../../netcode_protocol.js';
+import {
+  formatLobbyDisconnectStatus,
+  resolveLeaveApiErrorDisconnectReason,
+} from './disconnect_reasons.js';
 
 export type LobbyRoom = RoomInfo;
 
@@ -63,6 +67,22 @@ export class LobbyBrowserController {
     } else {
       lobbyStatus.textContent = 'Lobby: join failed';
     }
+  }
+
+  private setConnectionFailureStatus(lobbyStatus: HTMLElement, err: unknown) {
+    const errorCode = this.getErrorCode(err);
+    if (errorCode === 'connect_timeout') {
+      lobbyStatus.textContent = formatLobbyDisconnectStatus({ code: 'connect_timeout' });
+      return;
+    }
+    if (errorCode === 'connect_failed') {
+      lobbyStatus.textContent = formatLobbyDisconnectStatus({ code: 'connect_failed' });
+      return;
+    }
+    lobbyStatus.textContent = formatLobbyDisconnectStatus({
+      code: 'unknown',
+      detail: errorCode || 'client_start_error',
+    });
   }
 
   private async cleanupFailedClientJoin(roomId: string, playerId: number, playerToken: string) {
@@ -205,7 +225,7 @@ export class LobbyBrowserController {
     } catch (err) {
       console.error(err);
       await this.cleanupFailedClientJoin(result.room.roomId, result.playerId, result.playerToken);
-      lobbyStatus.textContent = 'Lobby: connection failed';
+      this.setConnectionFailureStatus(lobbyStatus, err);
     }
   }
 
@@ -249,7 +269,7 @@ export class LobbyBrowserController {
     } catch (err) {
       console.error(err);
       await this.cleanupFailedClientJoin(result.room.roomId, result.playerId, result.playerToken);
-      lobbyStatus.textContent = 'Lobby: connection failed';
+      this.setConnectionFailureStatus(lobbyStatus, err);
     }
   }
 
@@ -257,6 +277,9 @@ export class LobbyBrowserController {
     const { lobbyClient, lobbyStatus } = this.deps;
     if (!lobbyClient) {
       this.deps.resetNetplayConnections();
+      if (lobbyStatus) {
+        lobbyStatus.textContent = formatLobbyDisconnectStatus({ code: 'manual_leave' });
+      }
       return;
     }
     const lobbyRoom = this.deps.getLobbyRoom();
@@ -274,11 +297,18 @@ export class LobbyBrowserController {
       }
     }
     const isHostClose = !!roomId && wasHost && !!hostToken;
+    let leaveDisconnectReason = wasHost
+      ? { code: 'manual_close_host' as const }
+      : { code: 'manual_leave' as const };
     if (roomId && wasHost && hostToken) {
       try {
         await lobbyClient.closeRoom(roomId, hostToken);
       } catch (err) {
         const errorCode = this.getErrorCode(err);
+        const mapped = resolveLeaveApiErrorDisconnectReason(errorCode, true);
+        if (mapped) {
+          leaveDisconnectReason = mapped;
+        }
         if (!this.shouldTeardownAfterLeaveError(errorCode)) {
           console.error(err);
           if (lobbyStatus) {
@@ -292,6 +322,10 @@ export class LobbyBrowserController {
         await lobbyClient.leaveRoom(roomId, playerId, playerToken);
       } catch (err) {
         const errorCode = this.getErrorCode(err);
+        const mapped = resolveLeaveApiErrorDisconnectReason(errorCode, false);
+        if (mapped) {
+          leaveDisconnectReason = mapped;
+        }
         if (!this.shouldTeardownAfterLeaveError(errorCode)) {
           console.error(err);
           if (lobbyStatus) {
@@ -307,7 +341,7 @@ export class LobbyBrowserController {
     this.deps.resetNetplayConnections();
 
     if (lobbyStatus) {
-      lobbyStatus.textContent = 'Lobby: idle';
+      lobbyStatus.textContent = formatLobbyDisconnectStatus(leaveDisconnectReason);
     }
   }
 }

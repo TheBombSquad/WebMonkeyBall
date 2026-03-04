@@ -1,5 +1,9 @@
 import type { Game } from '../../game.js';
 import type { RoomInfo, RoomMeta } from '../../netcode_protocol.js';
+import {
+  resolveHeartbeatDisconnectReason,
+  type LobbyDisconnectReason,
+} from './disconnect_reasons.js';
 
 type HeartbeatDeps = {
   game: Game;
@@ -17,6 +21,7 @@ type HeartbeatDeps = {
   setLastRoomPlayerCount: (value: number | null) => void;
   heartbeatFallbackMs: number;
   buildRoomMeta: () => RoomMeta | null;
+  onHeartbeatDisconnect?: (reason: LobbyDisconnectReason) => void;
 };
 
 export class LobbyHeartbeatController {
@@ -73,7 +78,12 @@ export class LobbyHeartbeatController {
         }
       }
     }
-    void lobbyClient.heartbeat(roomId, playerId, token, meta, settings).catch(() => {
+    void lobbyClient.heartbeat(roomId, playerId, token, meta, settings).catch((err: unknown) => {
+      const errorCode = err instanceof Error ? err.message : '';
+      const reason = resolveHeartbeatDisconnectReason(errorCode);
+      if (reason) {
+        this.deps.onHeartbeatDisconnect?.(reason);
+      }
       // Keep heartbeat fire-and-forget, but avoid unhandled rejection noise.
     });
   }

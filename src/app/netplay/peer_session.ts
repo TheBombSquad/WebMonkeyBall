@@ -6,8 +6,14 @@ import type {
   PlayerProfile,
   ClientToHostMessage,
   HostToClientMessage,
+  KickReasonCode,
 } from '../../netcode_protocol.js';
 import type { GameSource } from '../../shared/constants/index.js';
+import {
+  formatLobbyDisconnectStatus,
+  resolveSignalCloseDisconnectReason,
+  type LobbyDisconnectReason,
+} from './disconnect_reasons.js';
 
 type NetplayState = {
   role: 'host' | 'client';
@@ -70,7 +76,7 @@ type PeerSessionDeps = {
   broadcastLocalProfile: () => void;
   handleClientMessage: (playerId: number, msg: ClientToHostMessage) => void;
   handleHostMessage: (msg: HostToClientMessage) => void;
-  handleHostDisconnect: () => Promise<void>;
+  handleHostDisconnect: (reason?: LobbyDisconnectReason) => Promise<void>;
   getHostRelay: () => HostRelay | null;
   setHostRelay: (relay: HostRelay | null) => void;
   getClientPeer: () => ClientPeer | null;
@@ -89,8 +95,24 @@ export class PeerSessionController {
     return Math.max(1, Math.min(requestedMaxPlayers, cap));
   }
 
-  rejectHostConnection(playerId: number, reason = 'Room is full') {
-    this.deps.getHostRelay()?.sendTo(playerId, { type: 'kick', reason });
+  private setDisconnectStatus(reason: LobbyDisconnectReason) {
+    if (!this.deps.lobbyStatus) {
+      return;
+    }
+    this.deps.lobbyStatus.textContent = formatLobbyDisconnectStatus(reason);
+  }
+
+  rejectHostConnection(playerId: number, reasonCode: KickReasonCode = 'kick_room_full', reason?: string) {
+    const reasonText = reason ?? (
+      reasonCode === 'kick_host_unavailable'
+        ? 'Host unavailable'
+        : reasonCode === 'kick_client_inactivity_timeout'
+          ? 'Disconnected: timed out (no client messages)'
+          : reasonCode === 'kick_removed_by_host'
+            ? 'Removed by host'
+            : 'Room is full'
+    );
+    this.deps.getHostRelay()?.sendTo(playerId, { type: 'kick', reasonCode, reason: reasonText });
     window.setTimeout(() => {
       this.deps.getHostRelay()?.disconnect(playerId);
     }, 80);
@@ -138,11 +160,11 @@ export class PeerSessionController {
     hostRelay.onConnect = (playerId) => {
       const liveState = this.deps.getNetplayState();
       if (!liveState) {
-        this.rejectHostConnection(playerId, 'Host unavailable');
+        this.rejectHostConnection(playerId, 'kick_host_unavailable', 'Host unavailable');
         return;
       }
       if (this.deps.game.players.length >= this.deps.game.maxPlayers) {
-        this.rejectHostConnection(playerId, 'Room is full');
+        this.rejectHostConnection(playerId, 'kick_room_full', 'Room is full');
         return;
       }
       if (!liveState.clientStates.has(playerId)) {
@@ -245,13 +267,11 @@ export class PeerSessionController {
           return;
         }
         await applyHostSignal(hostRelay, senderId, msg.payload);
-      }, () => {
+      }, (closeInfo) => {
         if (!this.deps.getLobbySignalShouldReconnect()) {
           return;
         }
-        if (this.deps.lobbyStatus) {
-          this.deps.lobbyStatus.textContent = 'Lobby: signal lost';
-        }
+        this.setDisconnectStatus(resolveSignalCloseDisconnectReason(closeInfo));
         this.deps.scheduleLobbySignalReconnect();
       });
       this.deps.setLobbySignal(signal);
@@ -334,13 +354,10 @@ export class PeerSessionController {
     };
     clientPeer.onDisconnect = () => {
       if (!connectionEstablished) {
-        settleConnection(new Error('connection_failed'));
+        settleConnection(new Error('connect_failed'));
         return;
       }
-      if (this.deps.lobbyStatus) {
-        this.deps.lobbyStatus.textContent = 'Lobby: disconnected';
-      }
-      void this.deps.handleHostDisconnect();
+      void this.deps.handleHostDisconnect({ code: 'host_peer_disconnect' });
     };
     await clientPeer.createConnection();
 
@@ -356,13 +373,11 @@ export class PeerSessionController {
           return;
         }
         await clientPeer.handleSignal(msg.payload);
-      }, () => {
+      }, (closeInfo) => {
         if (!this.deps.getLobbySignalShouldReconnect()) {
           return;
         }
-        if (this.deps.lobbyStatus) {
-          this.deps.lobbyStatus.textContent = 'Lobby: signal lost';
-        }
+        this.setDisconnectStatus(resolveSignalCloseDisconnectReason(closeInfo));
         this.deps.scheduleLobbySignalReconnect();
       });
       this.deps.setLobbySignal(signal);
@@ -371,7 +386,7 @@ export class PeerSessionController {
     this.deps.getLobbySignalReconnectFn()?.();
     clientPeer.onSignal = (signal) => this.deps.getLobbySignal()?.send(signal);
     connectionTimeout = window.setTimeout(() => {
-      settleConnection(new Error('connection_failed'));
+      settleConnection(new Error('connect_timeout'));
     }, CLIENT_CONNECT_TIMEOUT_MS);
     this.deps.getLobbySignal()?.send({ type: 'signal', from: playerId, to: room.hostId, payload: { join: true } });
     await connectedPromise;

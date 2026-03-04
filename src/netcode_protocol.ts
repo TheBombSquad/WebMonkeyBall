@@ -149,8 +149,15 @@ export type ChatMessage = {
   text: string;
 };
 
+export type KickReasonCode =
+  | 'kick_removed_by_host'
+  | 'kick_room_full'
+  | 'kick_host_unavailable'
+  | 'kick_client_inactivity_timeout';
+
 export type KickMessage = {
   type: 'kick';
+  reasonCode?: KickReasonCode;
   reason?: string;
 };
 
