@@ -68,7 +68,7 @@ export class MatchFlowController {
     }
   }
 
-  private hostReturnAllPlayersToLobby() {
+  private hostReturnAllPlayersToLobby(reason?: string) {
     if (this.deps.getLobbyRoom()) {
       const meta = this.deps.buildRoomMeta();
       if (meta) {
@@ -77,7 +77,7 @@ export class MatchFlowController {
       this.deps.broadcastRoomUpdate();
       this.deps.sendLobbyHeartbeat(performance.now(), true);
     }
-    this.deps.hostBroadcast({ type: 'match_end' });
+    this.deps.hostBroadcast({ type: 'match_end', reason });
   }
 
   destroySingleplayerForNetplay() {
@@ -127,7 +127,7 @@ export class MatchFlowController {
       return;
     }
     this.endMatchToLobby();
-    this.hostReturnAllPlayersToLobby();
+    this.hostReturnAllPlayersToLobby('host_return_to_lobby');
   }
 
   async leaveMatchToLobbyList() {
@@ -198,7 +198,7 @@ export class MatchFlowController {
         return;
       }
       this.endMatchToLobby();
-      this.hostReturnAllPlayersToLobby();
+      this.hostReturnAllPlayersToLobby('course_complete');
       return;
     }
     this.endMatchToMenu();

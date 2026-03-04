@@ -37,6 +37,9 @@ export type LobbyDisconnectReasonCode =
   | 'leave_unauthorized'
   | 'close_room_not_found'
   | 'close_unauthorized'
+  | 'match_end_received'
+  | 'match_end_course_complete'
+  | 'match_end_host_return_to_lobby'
   | 'unknown';
 
 export type LobbyDisconnectReason = {
@@ -82,6 +85,9 @@ const REASON_LABELS: Record<LobbyDisconnectReasonCode, string> = {
   leave_unauthorized: 'leave failed: unauthorized token',
   close_room_not_found: 'close failed: room not found',
   close_unauthorized: 'close failed: unauthorized token',
+  match_end_received: 'match ended by host',
+  match_end_course_complete: 'match ended: host course complete',
+  match_end_host_return_to_lobby: 'match ended: host returned to lobby',
   unknown: 'disconnected (unknown path)',
 };
 
@@ -198,4 +204,18 @@ export function resolveLeaveApiErrorDisconnectReason(errorCode: string, wasHost:
     return { code: wasHost ? 'close_unauthorized' : 'leave_unauthorized' };
   }
   return null;
+}
+
+export function resolveMatchEndReason(reason?: string): LobbyDisconnectReason {
+  const detail = reason?.trim() || undefined;
+  if (!detail) {
+    return { code: 'match_end_received' };
+  }
+  if (detail === 'course_complete') {
+    return { code: 'match_end_course_complete', detail };
+  }
+  if (detail === 'host_return_to_lobby') {
+    return { code: 'match_end_host_return_to_lobby', detail };
+  }
+  return { code: 'match_end_received', detail };
 }

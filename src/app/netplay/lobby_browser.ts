@@ -85,6 +85,10 @@ export class LobbyBrowserController {
     });
   }
 
+  private hasStructuredReasonStatus(lobbyStatus: HTMLElement) {
+    return /\[[a-z0-9_]+\]/i.test(lobbyStatus.textContent ?? '');
+  }
+
   private async cleanupFailedClientJoin(roomId: string, playerId: number, playerToken: string) {
     this.deps.setLobbySignalShouldReconnect(false);
     this.deps.clearLobbySignalRetry();
@@ -105,7 +109,9 @@ export class LobbyBrowserController {
     if (!lobbyClient || !lobbyList || !lobbyStatus) {
       return;
     }
-    lobbyStatus.textContent = 'Lobby: loading...';
+    if (!this.hasStructuredReasonStatus(lobbyStatus)) {
+      lobbyStatus.textContent = 'Lobby: loading...';
+    }
     try {
       const rooms = await lobbyClient.listRooms();
       lobbyList.innerHTML = '';
@@ -150,10 +156,14 @@ export class LobbyBrowserController {
         item.append(info, join);
         lobbyList.appendChild(item);
       }
-      lobbyStatus.textContent = `Lobby: ${rooms.length} room(s)`;
+      if (!this.hasStructuredReasonStatus(lobbyStatus)) {
+        lobbyStatus.textContent = `Lobby: ${rooms.length} room(s)`;
+      }
     } catch (err) {
       console.error(err);
-      lobbyStatus.textContent = 'Lobby: failed';
+      if (!this.hasStructuredReasonStatus(lobbyStatus)) {
+        lobbyStatus.textContent = 'Lobby: failed';
+      }
       if (multiplayerOnlineCount) {
         multiplayerOnlineCount.textContent = '0 players online';
       }

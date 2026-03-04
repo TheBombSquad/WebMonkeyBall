@@ -11,6 +11,7 @@ import type {
 import {
   formatLobbyDisconnectStatus,
   resolveKickDisconnectReason,
+  resolveMatchEndReason,
 } from './disconnect_reasons.js';
 
 type MessageFlowDeps = {
@@ -447,7 +448,11 @@ export class NetplayMessageFlowController {
       return;
     }
     if (msg.type === 'match_end') {
+      const reason = resolveMatchEndReason(msg.reason);
       this.deps.endMatchToLobby();
+      if (this.deps.lobbyStatus) {
+        this.deps.lobbyStatus.textContent = formatLobbyDisconnectStatus(reason);
+      }
       return;
     }
     if (msg.type === 'room_update') {
