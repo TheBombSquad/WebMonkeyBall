@@ -1030,6 +1030,17 @@ export class ClientPeer {
     );
   }
 
+  private getPeerStateSummary() {
+    const pcState = this.pc?.connectionState ?? 'none';
+    const iceState = this.pc?.iceConnectionState ?? 'none';
+    const signalingState = this.pc?.signalingState ?? 'none';
+    return `pc=${pcState} ice=${iceState} sig=${signalingState} ${this.getChannelState()}`;
+  }
+
+  private buildDisconnectDetail(source: string) {
+    return `source=${source} ${this.getPeerStateSummary()}`;
+  }
+
   private attachChannel(channel: RTCDataChannel) {
     const role = getChannelRole(channel.label);
     if (role === 'ctrl') {
@@ -1106,7 +1117,7 @@ export class ClientPeer {
         return;
       }
       if (role === 'ctrl') {
-        this.onDisconnect?.();
+        this.onDisconnect?.(this.buildDisconnectDetail('ctrl_channel_close'));
       }
     });
   }
@@ -1249,7 +1260,7 @@ export class ClientPeer {
   playerId = 0;
   hostId = 0;
   onSignal?: (msg: SignalMessage) => void;
-  onDisconnect?: () => void;
+  onDisconnect?: (detail?: string) => void;
   onConnect?: () => void;
 }
 

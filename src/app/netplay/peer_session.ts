@@ -352,12 +352,12 @@ export class PeerSessionController {
       this.deps.broadcastLocalProfile();
       settleConnection(null);
     };
-    clientPeer.onDisconnect = () => {
+    clientPeer.onDisconnect = (detail) => {
       if (!connectionEstablished) {
         settleConnection(new Error('connect_failed'));
         return;
       }
-      void this.deps.handleHostDisconnect({ code: 'host_peer_disconnect' });
+      void this.deps.handleHostDisconnect({ code: 'host_peer_disconnect', detail });
     };
     await clientPeer.createConnection();
 
