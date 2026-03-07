@@ -53,7 +53,7 @@ import type {
 } from "./Render.js";
 import * as SD from "./Stagedef.js";
 import { BgInfos, StageId, StageInfo } from "./StageInfo.js";
-import { MkbTime } from "./Utils.js";
+import {getMat4RotY, MkbTime} from "./Utils.js";
 import { AnimGroup } from "./AnimGroup.js";
 import { Lighting, LightingGroups } from "./Lighting.js";
 import { CommonModelID } from "./ModelInfo.js";
@@ -240,6 +240,7 @@ const scratchRevolutionAgFromWorld = mat4.create();
 const scratchRevolutionCameraWorld = vec3.create();
 const scratchRevolutionCameraLocal = vec3.create();
 const scratchRevolutionBallLocal = vec3.create();
+const BALL_PLAYER_CHAR_BILLBOARD_MODEL = "gb_grad"; // This model is offset by 0,1,1 in common.gma!
 
 function coligridLookupStagedef(animGroup: SD.AnimGroup, x: number, z: number): number[] | null {
     const stepX = animGroup.gridStepX;
@@ -870,6 +871,7 @@ class BallInst {
     private hemi2Color: [number, number, number] = [1, 1, 1];
     private hemi1Texture?: string;
     private hemi2Texture?: string;
+    private playerBillboardTexture: ModelInst | null = null;
 
     constructor(
         modelCache: ModelCache,
@@ -908,6 +910,7 @@ class BallInst {
         }
         writeRgbFromHex(this.hemi1Color, this.hemi1ColorHex);
         writeRgbFromHex(this.hemi2Color, this.hemi2ColorHex);
+        this.playerBillboardTexture = modelCache.getModel(BALL_PLAYER_CHAR_BILLBOARD_MODEL, GmaSrc.Common);
     }
 
     private computeSlotColorGains(model: ModelInst): [number, number, number] {
@@ -1019,6 +1022,41 @@ class BallInst {
             rp.textureOverride = textureOverride;
             rp.textureOverrideForceTex0 = textureOverride !== null;
             slot.model.prepareToRender(ctx, rp);
+        }
+
+        // Player texture billboard
+        if (this.playerBillboardTexture && this.visible) {
+            const renderParams = scratchRenderParams;
+            renderParams.reset();
+            renderParams.lighting = state.lighting;
+
+            const viewFromWorld = ctx.viewFromWorld ?? ctx.viewerInput.camera.viewMatrix;
+
+            mat4.copy(renderParams.viewFromModel, viewFromWorld);
+            mat4.translate(renderParams.viewFromModel, renderParams.viewFromModel, this.pos);
+
+            // Billboard
+            const cameraRotY = getMat4RotY(ctx.viewerInput.camera.worldMatrix);
+            mat4.rotateY(renderParams.viewFromModel, renderParams.viewFromModel, cameraRotY);
+
+            // Adjust since our model isn't centered in the ball.
+            // Y value may need to be tweaked depending on height
+            mat4.translate(renderParams.viewFromModel, renderParams.viewFromModel, vec3.fromValues(0, -0.25, 0.5));
+
+            // Scale may need to be tweaked depending on height
+            const scale = 0.333;
+            mat4.scale(renderParams.viewFromModel, renderParams.viewFromModel, [scale, scale, -scale]);
+            
+            // Apply hemi1 texture - placeholder
+            const customTexture = this.resolveTextureMapping(this.hemi1Texture);
+            if (customTexture && customTexture.gfxTexture && customTexture.gfxSampler) {
+                renderParams.textureOverride = customTexture;
+                renderParams.textureOverrideForceTex0 = true;
+            }
+            
+            renderParams.disableSpecular = true;
+            
+            this.playerBillboardTexture.prepareToRender(ctx, renderParams);
         }
     }
 }
