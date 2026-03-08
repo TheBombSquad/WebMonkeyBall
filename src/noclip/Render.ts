@@ -86,6 +86,7 @@ export type BallRenderState = {
   radius: number;
   visible: boolean;
   appearance?: BallAppearanceProfile;
+  apeYaw: number;
 };
 
 export type BananaRenderState = {

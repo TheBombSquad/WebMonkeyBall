@@ -57,7 +57,7 @@ import {getMat4RotY, MkbTime} from "./Utils.js";
 import { AnimGroup } from "./AnimGroup.js";
 import { Lighting, LightingGroups } from "./Lighting.js";
 import { CommonModelID } from "./ModelInfo.js";
-import { GAME_SOURCES } from "../../shared/constants/index.js";
+import {GAME_SOURCES, S16_TO_RAD} from "../../shared/constants/index.js";
 import {
     BALL_HEMI1_DEFAULT_COLOR,
     BALL_HEMI2_DEFAULT_COLOR,
@@ -121,6 +121,7 @@ export type BallRenderState = {
         hemi1Texture?: string;
         hemi2Texture?: string;
     };
+    apeYaw: number;
 };
 
 export type GoalTimerDigits = {
@@ -872,6 +873,9 @@ class BallInst {
     private hemi1Texture?: string;
     private hemi2Texture?: string;
     private playerBillboardTexture: ModelInst | null = null;
+    private spritesheetFrameCountX = 2;
+    private spritesheetFrameCountY = 2;
+    private lastApeYaw = 0;
 
     constructor(
         modelCache: ModelCache,
@@ -977,6 +981,7 @@ class BallInst {
         quat.set(this.rotation, state.orientation.x, state.orientation.y, state.orientation.z, state.orientation.w);
         const scale = state.radius / BALL_BASE_RADIUS;
         vec3.set(this.scale, scale, scale, scale);
+        this.lastApeYaw = state.apeYaw;
         this.updateAppearance(state);
     }
 
@@ -1047,11 +1052,55 @@ class BallInst {
             const scale = 0.333;
             mat4.scale(renderParams.viewFromModel, renderParams.viewFromModel, [scale, scale, -scale]);
             
-            // Apply hemi1 texture - placeholder
+            // Apply hemi1 texture
             const customTexture = this.resolveTextureMapping(this.hemi1Texture);
             if (customTexture && customTexture.gfxTexture && customTexture.gfxSampler) {
                 renderParams.textureOverride = customTexture;
                 renderParams.textureOverrideForceTex0 = true;
+                
+                if (customTexture.width > 0 && customTexture.height > 0 &&
+                    (this.spritesheetFrameCountX > 1 || this.spritesheetFrameCountY > 1)) {
+
+                    const apeYawRad = this.lastApeYaw * S16_TO_RAD;
+                    const apeRelativeToCamRad = apeYawRad - cameraRotY;
+                    const apeRelativeToCamDeg = apeRelativeToCamRad * (180 / Math.PI);
+                    //console.log(`Ape yaw: ${apeRelativeToCamDeg} deg`);
+
+                    let frameIndex: number;
+                    const forwardThreshold = 10.0;
+                    const backThreshold = 50.0;
+
+                    // Forward
+                    if (apeRelativeToCamDeg >= -forwardThreshold && apeRelativeToCamDeg <= forwardThreshold) {
+                        frameIndex = 0;
+                    }
+                    // Back
+                    else if (apeRelativeToCamDeg > backThreshold || apeRelativeToCamDeg < -backThreshold) {
+                        frameIndex = 1;
+                    }
+                    // Left
+                    else if (apeRelativeToCamDeg > forwardThreshold && apeRelativeToCamDeg <= backThreshold) {
+                        frameIndex = 2;
+                    }
+                    // Right
+                    else {
+                        frameIndex = 3;
+                    }
+
+                    const frameU = frameIndex % this.spritesheetFrameCountX;
+                    const frameV = Math.floor(frameIndex / this.spritesheetFrameCountX);
+                    
+                    const uOffset = frameU / this.spritesheetFrameCountX;
+                    const vOffset = frameV / this.spritesheetFrameCountY;
+                    const uSize = 1.0 / this.spritesheetFrameCountX;
+                    const vSize = 1.0 / this.spritesheetFrameCountY;
+                    
+                    mat4.translate(renderParams.texMtx2, renderParams.texMtx2, [uOffset, vOffset, 0.0]);
+                    mat4.scale(renderParams.texMtx2, renderParams.texMtx2, [uSize, vSize, 1.0]);
+                }
+                else {
+                    mat4.identity(renderParams.texMtx);
+                }
             }
             
             renderParams.disableSpecular = true;

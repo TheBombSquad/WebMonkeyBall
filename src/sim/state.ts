@@ -65,6 +65,7 @@ export type BallRenderState = {
   radius: number;
   visible: boolean;
   appearance?: BallAppearanceProfile;
+  apeYaw: number;
 };
 
 export type CameraPose = { eye: Vec3; lookAt: Vec3; rotX: number; rotY: number; rotZ: number };
