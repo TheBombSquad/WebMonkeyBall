@@ -87,6 +87,7 @@ export type BallRenderState = {
   visible: boolean;
   appearance?: BallAppearanceProfile;
   apeYaw: number;
+  speed: number;
 };
 
 export type BananaRenderState = {

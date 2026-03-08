@@ -122,6 +122,7 @@ export type BallRenderState = {
         hemi2Texture?: string;
     };
     apeYaw: number;
+    speed: number;
 };
 
 export type GoalTimerDigits = {
@@ -873,9 +874,12 @@ class BallInst {
     private hemi1Texture?: string;
     private hemi2Texture?: string;
     private playerBillboardTexture: ModelInst | null = null;
-    private spritesheetFrameCountX = 2;
-    private spritesheetFrameCountY = 2;
+    private spritesheetFrameCountX = 4;
+    private spritesheetFrameCountY = 3;
     private lastApeYaw = 0;
+    private lastSpeed = 0;
+    private animTimer = 0;
+    private currentAnimFrame = 0;
 
     constructor(
         modelCache: ModelCache,
@@ -982,6 +986,7 @@ class BallInst {
         const scale = state.radius / BALL_BASE_RADIUS;
         vec3.set(this.scale, scale, scale, scale);
         this.lastApeYaw = state.apeYaw;
+        this.lastSpeed = state.speed;
         this.updateAppearance(state);
     }
 
@@ -1046,7 +1051,7 @@ class BallInst {
 
             // Adjust since our model isn't centered in the ball.
             // Y value may need to be tweaked depending on height
-            mat4.translate(renderParams.viewFromModel, renderParams.viewFromModel, vec3.fromValues(0, -0.25, 0.5));
+            mat4.translate(renderParams.viewFromModel, renderParams.viewFromModel, vec3.fromValues(0, -0.4, 0.33));
 
             // Scale may need to be tweaked depending on height
             const scale = 0.333;
@@ -1057,7 +1062,7 @@ class BallInst {
             if (customTexture && customTexture.gfxTexture && customTexture.gfxSampler) {
                 renderParams.textureOverride = customTexture;
                 renderParams.textureOverrideForceTex0 = true;
-                
+
                 if (customTexture.width > 0 && customTexture.height > 0 &&
                     (this.spritesheetFrameCountX > 1 || this.spritesheetFrameCountY > 1)) {
 
@@ -1066,35 +1071,66 @@ class BallInst {
                     const apeRelativeToCamDeg = apeRelativeToCamRad * (180 / Math.PI);
                     //console.log(`Ape yaw: ${apeRelativeToCamDeg} deg`);
 
-                    let frameIndex: number;
-                    const forwardThreshold = 10.0;
-                    const backThreshold = 50.0;
+                    const forwardThreshold = 8.0; // +- angle to determine whether or not we're going forward
+                    const backThreshold = 50.0; // +- angle to determine whether or not we're going backward
+
+                    const speedThreshold = 0.05;
+                    const maxSpeed = 0.5; // Full speed is considered to be 0.5
+
+                    // 4x3 grid has the following layout (I = idle, M = moving, B = backwards, F = forwards, R = right)
+                    // IB, MB1, MB2, IF
+                    // MF1, MF2, IR, MR1
+                    // MR2, -, -, -
+                    // this layout was taken from taronuke's mawaru gold marble rolling minigame because I don't know how to sprite sheet!
+
+                    let baseFrame: number;
+                    let isMirrored = false;
 
                     // Forward
                     if (apeRelativeToCamDeg >= -forwardThreshold && apeRelativeToCamDeg <= forwardThreshold) {
-                        frameIndex = 0;
+                        baseFrame = 3;
                     }
-                    // Back
+                    // Backwards
                     else if (apeRelativeToCamDeg > backThreshold || apeRelativeToCamDeg < -backThreshold) {
-                        frameIndex = 1;
+                        baseFrame = 0;
                     }
                     // Left
                     else if (apeRelativeToCamDeg > forwardThreshold && apeRelativeToCamDeg <= backThreshold) {
-                        frameIndex = 2;
+                        baseFrame = 6;
+                        isMirrored = true;
                     }
                     // Right
                     else {
-                        frameIndex = 3;
+                        baseFrame = 6;
                     }
 
-                    const frameU = frameIndex % this.spritesheetFrameCountX;
-                    const frameV = Math.floor(frameIndex / this.spritesheetFrameCountX);
-                    
-                    const uOffset = frameU / this.spritesheetFrameCountX;
-                    const vOffset = frameV / this.spritesheetFrameCountY;
-                    const uSize = 1.0 / this.spritesheetFrameCountX;
+                    const speedRatio = this.lastSpeed / maxSpeed;
+                    const framesPerSwitch = Math.max(15, Math.round(60.0 * (1.0 - speedRatio)));
+
+                    this.animTimer += 1;
+                    if (this.animTimer >= framesPerSwitch) {
+                        this.animTimer = 0;
+                        this.currentAnimFrame = this.currentAnimFrame === 0 ? 1 : 0;
+                    }
+
+                    const animFrameOffset = this.lastSpeed > speedThreshold ? 1 + this.currentAnimFrame : 0;
+                    const frameIndexWithAnim = baseFrame + animFrameOffset;
+                    //console.log(`I: ${frameIndexWithAnim} S: ${this.lastSpeed}, FPS: ${framesPerSwitch}, AF: ${this.currentAnimFrame}, AT: ${this.animTimer}`);
+
+                    const frameU = frameIndexWithAnim % this.spritesheetFrameCountX;
+                    const frameV = Math.floor(frameIndexWithAnim / this.spritesheetFrameCountX);
+
+                    let uOffset = frameU / this.spritesheetFrameCountX;
+                    let vOffset = frameV / this.spritesheetFrameCountY;
+                    let uSize = 1.0 / this.spritesheetFrameCountX;
                     const vSize = 1.0 / this.spritesheetFrameCountY;
-                    
+
+                    if (isMirrored) {
+                        uOffset = 1.0 - uOffset;
+                        vOffset = 1.0 - vOffset;
+                        uSize = -uSize;
+                    }
+
                     mat4.translate(renderParams.texMtx2, renderParams.texMtx2, [uOffset, vOffset, 0.0]);
                     mat4.scale(renderParams.texMtx2, renderParams.texMtx2, [uSize, vSize, 1.0]);
                 }
