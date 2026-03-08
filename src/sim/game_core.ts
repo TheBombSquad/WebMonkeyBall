@@ -2528,6 +2528,7 @@ export class GameCore {
         visible: (this.ball.flags & BALL_FLAGS.INVISIBLE) === 0,
         apeYaw: 0,
         speed: 0,
+        goaled: false,
       };
     }
     const renderState = this.renderBallState;
@@ -2550,6 +2551,7 @@ export class GameCore {
     renderState.visible = (this.ball.flags & BALL_FLAGS.INVISIBLE) === 0;
     renderState.apeYaw = this.ball.apeYaw;
     renderState.speed = this.ball.speed;
+    renderState.goaled = (this.ball.flags & BALL_FLAGS.GOAL) === BALL_FLAGS.GOAL;
 
     return this.renderBallState;
   }
@@ -2577,6 +2579,7 @@ export class GameCore {
           visible: (ball.flags & BALL_FLAGS.INVISIBLE) === 0,
           apeYaw: 0,
           speed: 0,
+          goaled: false,
         };
       }
     }
@@ -2605,6 +2608,7 @@ export class GameCore {
         && (ball.flags & BALL_FLAGS.INVISIBLE) === 0;
       renderState.apeYaw = ball.apeYaw;
       renderState.speed = ball.speed;
+      renderState.goaled = (ball.flags & BALL_FLAGS.GOAL) === BALL_FLAGS.GOAL;
     }
     return this.renderBallStates;
   }

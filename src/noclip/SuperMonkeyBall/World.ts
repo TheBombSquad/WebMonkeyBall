@@ -57,7 +57,7 @@ import {getMat4RotY, MkbTime} from "./Utils.js";
 import { AnimGroup } from "./AnimGroup.js";
 import { Lighting, LightingGroups } from "./Lighting.js";
 import { CommonModelID } from "./ModelInfo.js";
-import {GAME_SOURCES, S16_TO_RAD} from "../../shared/constants/index.js";
+import {BALL_STATES, GAME_SOURCES, S16_TO_RAD} from "../../shared/constants/index.js";
 import {
     BALL_HEMI1_DEFAULT_COLOR,
     BALL_HEMI2_DEFAULT_COLOR,
@@ -68,6 +68,7 @@ import { S16_TO_RADIANS } from "./Utils.js";
 import { Vec3Zero, transformVec3Mat4w0, transformVec3Mat4w1 } from "../MathHelpers.js";
 import { TevLayerInst } from "./TevLayer.js";
 import { BONUS_WAVE_MODEL_NAME, BONUS_WAVE_VERTEX_GLOBAL, createBonusWaveMaterialHacks } from "./BonusWave.js";
+import {raycastStageDown} from "../../collision";
 
 // Immutable parsed stage definition
 export type StageData = {
@@ -124,6 +125,7 @@ export type BallRenderState = {
     };
     apeYaw: number;
     speed: number;
+    goaled: boolean;
 };
 
 export type GoalTimerDigits = {
@@ -880,6 +882,7 @@ class BallInst {
     private spritesheetFrameCountY = 3;
     private lastApeYaw = 0;
     private lastSpeed = 0;
+    private hasGoaled = false;
     private animTimer = 0;
     private currentAnimFrame = 0;
 
@@ -990,6 +993,7 @@ class BallInst {
         vec3.set(this.scale, scale, scale, scale);
         this.lastApeYaw = state.apeYaw;
         this.lastSpeed = state.speed;
+        this.hasGoaled = state.goaled;
         this.updateAppearance(state);
     }
 
@@ -1080,17 +1084,21 @@ class BallInst {
                     const speedThreshold = 0.05;
                     const maxSpeed = 0.5; // Full speed is considered to be 0.5
 
-                    // 4x3 grid has the following layout (I = idle, M = moving, B = backwards, F = forwards, R = right)
+                    // 4x3 grid has the following layout (I = idle, M = moving, B = backwards, F = forwards, R = right) (X = falling, G = goaled)
                     // IB, MB1, MB2, IF
                     // MF1, MF2, IR, MR1
-                    // MR2, -, -, -
+                    // MR2, X1, X2, G
                     // this layout was taken from taronuke's mawaru gold marble rolling minigame because I don't know how to sprite sheet!
 
                     let baseFrame: number;
                     let isMirrored = false;
 
+                    // Has goaled (OVERRIDES EVERYTHING ELSE - INCLUDING ANIMATION
+                    if (this.hasGoaled) {
+                        baseFrame = 11;
+                    }
                     // Forward
-                    if (apeRelativeToCamDeg >= -forwardThreshold && apeRelativeToCamDeg <= forwardThreshold) {
+                    else if (apeRelativeToCamDeg >= -forwardThreshold && apeRelativeToCamDeg <= forwardThreshold) {
                         baseFrame = 3;
                     }
                     // Backwards
@@ -1117,8 +1125,13 @@ class BallInst {
                     }
 
                     const animFrameOffset = this.lastSpeed > speedThreshold ? 1 + this.currentAnimFrame : 0;
-                    const frameIndexWithAnim = baseFrame + animFrameOffset;
+                    let frameIndexWithAnim = baseFrame + animFrameOffset;
                     //console.log(`I: ${frameIndexWithAnim} S: ${this.lastSpeed}, FPS: ${framesPerSwitch}, AF: ${this.currentAnimFrame}, AT: ${this.animTimer}`);
+
+                    // Goaled state ignores animation
+                    if (this.hasGoaled) {
+                        frameIndexWithAnim = baseFrame;
+                    }
 
                     const frameU = frameIndexWithAnim % this.spritesheetFrameCountX;
                     const frameV = Math.floor(frameIndexWithAnim / this.spritesheetFrameCountX);
