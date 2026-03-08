@@ -3,6 +3,7 @@ export type BallAppearanceProfile = {
   hemi2Color?: string;
   hemi1Texture?: string;
   hemi2Texture?: string;
+  playerBillboardTexture?: string;
 };
 
 export type BallAppearanceResolved = {
@@ -10,6 +11,7 @@ export type BallAppearanceResolved = {
   hemi2Color: string;
   hemi1Texture?: string;
   hemi2Texture?: string;
+  playerBillboardTexture?: string;
 };
 
 const BALL_COLOR_HEX_RE = /^#[0-9a-f]{6}$/i;
@@ -45,7 +47,8 @@ export function ballAppearanceProfilesEqual(
   return (a?.hemi1Color ?? '') === (b?.hemi1Color ?? '')
     && (a?.hemi2Color ?? '') === (b?.hemi2Color ?? '')
     && (a?.hemi1Texture ?? '') === (b?.hemi1Texture ?? '')
-    && (a?.hemi2Texture ?? '') === (b?.hemi2Texture ?? '');
+    && (a?.hemi2Texture ?? '') === (b?.hemi2Texture ?? '')
+    && (a?.playerBillboardTexture ?? '') === (b?.playerBillboardTexture ?? '');
 }
 
 export function writeRgbFromHex(out: [number, number, number], hex: string): void {

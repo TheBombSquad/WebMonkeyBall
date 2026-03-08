@@ -88,6 +88,7 @@ import {
   savePrivacySettings,
   validateAvatarFile,
   validateBallTextureFile,
+  validatePlayerBillboardTextureFile,
 } from './app/netplay/profile_utils.js';
 import { PackLoader } from './app/packs/pack_loader.js';
 import { PackSelectionController } from './app/packs/pack_selection.js';
@@ -293,10 +294,13 @@ export function runMainApp() {
     profileBallHemi2ColorInput,
     profileBallHemi1TextureInput,
     profileBallHemi2TextureInput,
+    profilePlayerBillboardTextureInput,
     profileBallHemi1TextureClearButton,
     profileBallHemi2TextureClearButton,
+    profilePlayerBillboardTextureClearButton,
     profileBallPreviewCanvas,
     profileBallTextureError,
+    profilePlayerBillboardTextureError,
     hidePlayerNamesToggle,
     hideLobbyNamesToggle,
     hideRemoteBallTexturesToggle,
@@ -354,6 +358,9 @@ export function runMainApp() {
     profileBallHemi2ColorInput,
     profileBallHemi1TextureClearButton,
     profileBallHemi2TextureClearButton,
+    profilePlayerBillboardTextureInput,
+    profilePlayerBillboardTextureClearButton,
+    profilePlayerBillboardTextureError,
     hidePlayerNamesToggle,
     hideLobbyNamesToggle,
     hideRemoteBallTexturesToggle,
@@ -2071,8 +2078,10 @@ export function runMainApp() {
     profileBallHemi2ColorInput,
     profileBallHemi1TextureInput,
     profileBallHemi2TextureInput,
+    profilePlayerBillboardTextureInput,
     profileBallHemi1TextureClearButton,
     profileBallHemi2TextureClearButton,
+    profilePlayerBillboardTextureClearButton,
     hidePlayerNamesToggle,
     hideLobbyNamesToggle,
     hideRemoteBallTexturesToggle,
@@ -2194,6 +2203,32 @@ export function runMainApp() {
       }
       profileUi.setBallTextureError();
       applyLocalBallAppearancePatch({ hemi2Texture: undefined });
+    },
+    onProfilePlayerBillboardTextureChange: async (file) => {
+      if (!file) {
+        return;
+      }
+      const dataUrl = await validatePlayerBillboardTextureFile(file, (message) => {
+        profileUi.setPlayerBillboardTextureError(message);
+      });
+      if (!dataUrl) {
+        return;
+      }
+      profileUi.setPlayerBillboardTextureError();
+      localProfile = { ...localProfile, playerBillboardTexture: dataUrl };
+      saveLocalProfile(localProfile);
+      profileUi.updateProfileUi(localProfile);
+      lobbyState.scheduleProfileBroadcast();
+    },
+    onProfilePlayerBillboardTextureClear: () => {
+      if (!localProfile.playerBillboardTexture) {
+        return;
+      }
+      profileUi.setPlayerBillboardTextureError();
+      localProfile = { ...localProfile, playerBillboardTexture: undefined };
+      saveLocalProfile(localProfile);
+      profileUi.updateProfileUi(localProfile);
+      lobbyState.scheduleProfileBroadcast();
     },
     onHidePlayerNamesChange: (checked) => {
       privacySettings = { ...privacySettings, hidePlayerNames: checked };

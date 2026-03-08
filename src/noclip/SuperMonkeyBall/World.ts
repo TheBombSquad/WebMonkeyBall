@@ -120,6 +120,7 @@ export type BallRenderState = {
         hemi2Color?: string;
         hemi1Texture?: string;
         hemi2Texture?: string;
+        playerBillboardTexture?: string;
     };
     apeYaw: number;
     speed: number;
@@ -144,7 +145,7 @@ const SHADOW_FADE_SCALE = 0.2;
 const SHADOW_PARAMS_WORDS = 40;
 const SHADOW_UBO_INDEX = 1;
 const STREAK_VERTEX_SIZE = 24;
-const BALL_TEXTURE_MAX_DIM = 512;
+const BALL_TEXTURE_MAX_DIM = 1024;
 const BALL_HEMI_Y_ROT_180 = mat4.fromYRotation(mat4.create(), Math.PI);
 const BALL_COLOR_GAIN_EPSILON = 0.001;
 const BALL_COLOR_GAIN_MAX = 20.0;
@@ -873,7 +874,8 @@ class BallInst {
     private hemi2Color: [number, number, number] = [1, 1, 1];
     private hemi1Texture?: string;
     private hemi2Texture?: string;
-    private playerBillboardTexture: ModelInst | null = null;
+    private playerBillboardTexture?: string;
+    private playerBillboardModel: ModelInst;
     private spritesheetFrameCountX = 4;
     private spritesheetFrameCountY = 3;
     private lastApeYaw = 0;
@@ -918,7 +920,7 @@ class BallInst {
         }
         writeRgbFromHex(this.hemi1Color, this.hemi1ColorHex);
         writeRgbFromHex(this.hemi2Color, this.hemi2ColorHex);
-        this.playerBillboardTexture = modelCache.getModel(BALL_PLAYER_CHAR_BILLBOARD_MODEL, GmaSrc.Common);
+        this.playerBillboardModel = modelCache.getModel(BALL_PLAYER_CHAR_BILLBOARD_MODEL, GmaSrc.Common);
     }
 
     private computeSlotColorGains(model: ModelInst): [number, number, number] {
@@ -973,6 +975,7 @@ class BallInst {
         }
         this.hemi1Texture = typeof appearance?.hemi1Texture === "string" ? appearance.hemi1Texture : undefined;
         this.hemi2Texture = typeof appearance?.hemi2Texture === "string" ? appearance.hemi2Texture : undefined;
+        this.playerBillboardTexture = typeof appearance?.playerBillboardTexture === "string" ? appearance.playerBillboardTexture : undefined;
     }
 
     public setState(state: BallRenderState | null): void {
@@ -1057,8 +1060,8 @@ class BallInst {
             const scale = 0.333;
             mat4.scale(renderParams.viewFromModel, renderParams.viewFromModel, [scale, scale, -scale]);
             
-            // Apply hemi1 texture
-            const customTexture = this.resolveTextureMapping(this.hemi1Texture);
+            // Apply player billboard texture
+            const customTexture = this.resolveTextureMapping(this.playerBillboardTexture);
             if (customTexture && customTexture.gfxTexture && customTexture.gfxSampler) {
                 renderParams.textureOverride = customTexture;
                 renderParams.textureOverrideForceTex0 = true;
@@ -1141,7 +1144,7 @@ class BallInst {
             
             renderParams.disableSpecular = true;
             
-            this.playerBillboardTexture.prepareToRender(ctx, renderParams);
+            this.playerBillboardModel.prepareToRender(ctx, renderParams);
         }
     }
 }
