@@ -392,7 +392,10 @@ export function runMainApp() {
   const ballPreview = new BallPreviewController({
     canvas: profileBallPreviewCanvas,
     loadPreviewStageData: (stageId) => stageLoader.loadSmb1(stageId),
-    getBallAppearance: () => localProfile.ball,
+    getBallAppearance: () => ({
+      ...localProfile.ball,
+      playerBillboardTexture: localProfile.playerBillboardTexture,
+    }),
   });
   
   let currentSmb2LikeMode: 'story' | 'challenge' | null = null;

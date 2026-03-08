@@ -134,6 +134,7 @@ export function sanitizeBallAppearanceProfile(appearance?: Partial<BallAppearanc
   const hemi2Color = sanitizeBallColorHex(appearance.hemi2Color);
   const hemi1Texture = sanitizeBallTextureDataUrl(appearance.hemi1Texture);
   const hemi2Texture = sanitizeBallTextureDataUrl(appearance.hemi2Texture);
+  const billboardTexture = sanitizeBallTextureDataUrl(appearance.playerBillboardTexture);
   const compact: BallAppearanceProfile = {};
   if (hemi1Color && hemi1Color !== BALL_HEMI1_DEFAULT_COLOR) {
     compact.hemi1Color = hemi1Color;
@@ -146,6 +147,9 @@ export function sanitizeBallAppearanceProfile(appearance?: Partial<BallAppearanc
   }
   if (hemi2Texture) {
     compact.hemi2Texture = hemi2Texture;
+  }
+  if (billboardTexture) {
+    compact.playerBillboardTexture = billboardTexture;
   }
   return Object.keys(compact).length > 0 ? compact : undefined;
 }

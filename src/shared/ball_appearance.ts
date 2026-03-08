@@ -37,6 +37,7 @@ export function resolveBallAppearance(appearance?: BallAppearanceProfile | null)
     hemi2Color: normalizeBallColorHex(appearance?.hemi2Color, BALL_HEMI2_DEFAULT_COLOR),
     hemi1Texture: typeof appearance?.hemi1Texture === 'string' ? appearance.hemi1Texture : undefined,
     hemi2Texture: typeof appearance?.hemi2Texture === 'string' ? appearance.hemi2Texture : undefined,
+    playerBillboardTexture: typeof appearance?.playerBillboardTexture === 'string' ? appearance.playerBillboardTexture : undefined,
   };
 }
 
