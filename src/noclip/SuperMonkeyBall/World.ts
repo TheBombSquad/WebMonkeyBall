@@ -991,8 +991,8 @@ class BallInst {
         quat.set(this.rotation, state.orientation.x, state.orientation.y, state.orientation.z, state.orientation.w);
         const scale = state.radius / BALL_BASE_RADIUS;
         vec3.set(this.scale, scale, scale, scale);
-        this.lastApeYaw = state.apeYaw;
         this.lastSpeed = state.speed;
+        this.lastApeYaw = state.apeYaw;
         this.hasGoaled = state.goaled;
         this.updateAppearance(state);
     }
@@ -1074,15 +1074,16 @@ class BallInst {
                     (this.spritesheetFrameCountX > 1 || this.spritesheetFrameCountY > 1)) {
 
                     const apeYawRad = this.lastApeYaw * S16_TO_RAD;
-                    const apeRelativeToCamRad = apeYawRad - cameraRotY;
+                    //console.log(`Ape yaw: ${apeYawRad*(180/Math.PI)}, camera angle: ${cameraRotY*(180/Math.PI)} speed: ${this.lastSpeed}`);
+                    const apeRelativeToCamRad = (apeYawRad - cameraRotY);
                     const apeRelativeToCamDeg = apeRelativeToCamRad * (180 / Math.PI);
                     //console.log(`Ape yaw: ${apeRelativeToCamDeg} deg`);
 
-                    const forwardThreshold = 8.0; // +- angle to determine whether or not we're going forward
+                    const forwardThreshold = 7.5; // +- angle to determine whether or not we're going forward
                     const backThreshold = 50.0; // +- angle to determine whether or not we're going backward
 
-                    const speedThreshold = 0.05;
-                    const maxSpeed = 0.5; // Full speed is considered to be 0.5
+                    const minimumSpeed = 0.02; // minimum speed ~2mph
+                    const maxSpeed = 0.4; // Full animation speed at 0.5m/frame - ~53mph
 
                     // 4x3 grid has the following layout (I = idle, M = moving, B = backwards, F = forwards, R = right) (X = falling, G = goaled)
                     // IB, MB1, MB2, IF
@@ -1092,13 +1093,20 @@ class BallInst {
 
                     let baseFrame: number;
                     let isMirrored = false;
+                    let isFalling = false;
 
                     // Has goaled (OVERRIDES EVERYTHING ELSE - INCLUDING ANIMATION
                     if (this.hasGoaled) {
                         baseFrame = 11;
                     }
-                    // Forward
-                    else if (apeRelativeToCamDeg >= -forwardThreshold && apeRelativeToCamDeg <= forwardThreshold) {
+                    // Are we falling, or going way too fast (>200mph)?
+                    else if (this.lastSpeed > 1.5 || !state.raycastStageDown(this.pos)) {
+                        baseFrame = 9;
+                        isFalling = true;
+                    }
+                    // Forward - also if we're going too fast, just assume that we're going forwards
+                    // This is because apeyaw is unreliable above the max speed. TODO: a better way?
+                    else if ( (apeRelativeToCamDeg >= -forwardThreshold && apeRelativeToCamDeg <= forwardThreshold) || this.lastSpeed >= maxSpeed) {
                         baseFrame = 3;
                     }
                     // Backwards
@@ -1115,7 +1123,7 @@ class BallInst {
                         baseFrame = 6;
                     }
 
-                    const speedRatio = this.lastSpeed / maxSpeed;
+                    const speedRatio = Math.min(this.lastSpeed, maxSpeed) / maxSpeed;
                     const framesPerSwitch = Math.max(15, Math.round(60.0 * (1.0 - speedRatio)));
 
                     this.animTimer += 1;
@@ -1124,27 +1132,44 @@ class BallInst {
                         this.currentAnimFrame = this.currentAnimFrame === 0 ? 1 : 0;
                     }
 
-                    const animFrameOffset = this.lastSpeed > speedThreshold ? 1 + this.currentAnimFrame : 0;
-                    let frameIndexWithAnim = baseFrame + animFrameOffset;
-                    //console.log(`I: ${frameIndexWithAnim} S: ${this.lastSpeed}, FPS: ${framesPerSwitch}, AF: ${this.currentAnimFrame}, AT: ${this.animTimer}`);
+                    let animFrameOffset = 0;
 
-                    // Goaled state ignores animation
-                    if (this.hasGoaled) {
-                        frameIndexWithAnim = baseFrame;
+                    // Idle or goaled - ignore animation
+                    if (this.lastSpeed < minimumSpeed || this.hasGoaled || isFalling) {
+                        animFrameOffset = baseFrame;
+                    }
+                    // Falling animation doesn't have an idle frame
+                    else if (isFalling) {
+                        animFrameOffset = baseFrame + this.currentAnimFrame;
+                    }
+                    else {
+                        animFrameOffset = baseFrame + this.currentAnimFrame+1;
                     }
 
-                    const frameU = frameIndexWithAnim % this.spritesheetFrameCountX;
-                    const frameV = Math.floor(frameIndexWithAnim / this.spritesheetFrameCountX);
+                    //console.log(`I: ${frameIndexWithAnim} S: ${this.lastSpeed}, FPS: ${framesPerSwitch}, AF: ${this.currentAnimFrame}, AT: ${this.animTimer}`);
 
-                    let uOffset = frameU / this.spritesheetFrameCountX;
-                    let vOffset = frameV / this.spritesheetFrameCountY;
-                    let uSize = 1.0 / this.spritesheetFrameCountX;
-                    const vSize = 1.0 / this.spritesheetFrameCountY;
+                    let frameU: number;
+                    let frameV: number;
+                    let uOffset: number;
+                    let vOffset: number;
+                    let uSize: number;
+                    let vSize: number;
 
                     if (isMirrored) {
-                        uOffset = 1.0 - uOffset;
-                        vOffset = 1.0 - vOffset;
-                        uSize = -uSize;
+                        frameU = animFrameOffset % this.spritesheetFrameCountX;
+                        frameV = Math.floor(animFrameOffset / this.spritesheetFrameCountX);
+                        uOffset = (frameU + 1) / this.spritesheetFrameCountX;
+                        vOffset = (frameV) / this.spritesheetFrameCountY;
+                        uSize = -1.0 / this.spritesheetFrameCountX;
+                        vSize = 1.0 / this.spritesheetFrameCountY;
+                    }
+                    else {
+                        frameU = animFrameOffset % this.spritesheetFrameCountX;
+                        frameV = Math.floor(animFrameOffset / this.spritesheetFrameCountX);
+                        uOffset = frameU / this.spritesheetFrameCountX;
+                        vOffset = frameV / this.spritesheetFrameCountY;
+                        uSize = 1.0 / this.spritesheetFrameCountX;
+                        vSize = 1.0 / this.spritesheetFrameCountY;
                     }
 
                     mat4.translate(renderParams.texMtx2, renderParams.texMtx2, [uOffset, vOffset, 0.0]);
