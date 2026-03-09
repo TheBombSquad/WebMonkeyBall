@@ -1135,7 +1135,7 @@ class BallInst {
                     let animFrameOffset = 0;
 
                     // Idle or goaled - ignore animation
-                    if (this.lastSpeed < minimumSpeed || this.hasGoaled || isFalling) {
+                    if (!isFalling && (this.lastSpeed < minimumSpeed || this.hasGoaled)) {
                         animFrameOffset = baseFrame;
                     }
                     // Falling animation doesn't have an idle frame
