@@ -1075,7 +1075,8 @@ class BallInst {
 
                     const apeYawRad = this.lastApeYaw * S16_TO_RAD;
                     //console.log(`Ape yaw: ${apeYawRad*(180/Math.PI)}, camera angle: ${cameraRotY*(180/Math.PI)} speed: ${this.lastSpeed}`);
-                    const apeRelativeToCamRad = (apeYawRad - cameraRotY);
+                    let apeRelativeToCamRad = apeYawRad - cameraRotY;
+                    apeRelativeToCamRad = Math.atan2(Math.sin(apeRelativeToCamRad), Math.cos(apeRelativeToCamRad));
                     const apeRelativeToCamDeg = apeRelativeToCamRad * (180 / Math.PI);
                     //console.log(`Ape yaw: ${apeRelativeToCamDeg} deg`);
 
@@ -1083,7 +1084,7 @@ class BallInst {
                     const backThreshold = 50.0; // +- angle to determine whether or not we're going backward
 
                     const minimumSpeed = 0.02; // minimum speed ~2mph
-                    const maxSpeed = 0.4; // Full animation speed at 0.5m/frame - ~53mph
+                    const maxSpeed = 0.35; // Full animation speed at 0.5m/frame - ~53mph
 
                     // 4x3 grid has the following layout (I = idle, M = moving, B = backwards, F = forwards, R = right) (X = falling, G = goaled)
                     // IB, MB1, MB2, IF
